@@ -1,0 +1,723 @@
+@import '../../shared/therum-tokens.css';
+
+* { box-sizing: border-box; }
+body { margin: 0; font-family: var(--th-font-body); color: var(--th-ink); background: var(--th-bg); }
+a { color: inherit; text-decoration: none; }
+h1, h2, h3 { font-family: var(--th-font-display); font-weight: 700; }
+h1 { font-size: var(--th-fs-xl); margin: 0 0 var(--th-space-16); letter-spacing: -0.01em; }
+
+/* ── Shell — real 1.9.44 structure: #th-sb is fixed, #th-main is offset by
+   its width via margin-left (not a CSS grid — matches the source exactly,
+   which matters for the sidebar's own internal position:fixed rules). ── */
+/* Explicit background here, not just inherited from <body> — `data-color-
+   mode`/`data-density`/etc. all live on this element (see app/(app)/
+   layout.tsx), not on <html>/<body> (root layout.tsx is shared with /login,
+   which deliberately keeps its own independent branding untouched by these
+   overrides — see the color-mode block's own comment below). --th-bg
+   resolves correctly here since this element is IN scope for the
+   [data-color-mode='dark'] override; <body>'s own background: var(--th-bg)
+   is not (body is an ancestor of this element, not a descendant), so it
+   silently stayed light-mode-colored regardless of the toggle. Confirmed
+   live: before this line, #th-main/#th-content have no background of their
+   own, so dark mode's entire main content area showed light gray through. */
+#th-shell { position: relative; min-height: 100vh; background: var(--th-bg) var(--th-app-bg-image); }
+
+/* Sidebar is a dark rail (confirmed against a live 1.9.44 install) — every
+   rule below intentionally uses the dark-scoped --th-sidebar-* tokens, not
+   the generic --th-ink/--th-line ones the light main canvas uses. */
+#th-sb {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--th-sidebar-w);
+  background: var(--th-sidebar-bg);
+  border-right: 1px solid var(--th-sidebar-line);
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+}
+
+.th-sb-header { display: flex; align-items: center; gap: var(--th-space-10); padding: var(--th-space-16); border-bottom: 1px solid var(--th-sidebar-line); }
+.th-logo { width: var(--th-space-32); height: var(--th-space-32); border-radius: 7px; background: var(--th-accent); color: var(--th-text-inverse); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+.th-site-info { min-width: 0; }
+.th-site-name { font-family: var(--th-font-display); font-size: 13px; font-weight: 600; color: var(--th-sidebar-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.th-site-host { font-size: 11px; color: var(--th-sidebar-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Pixel-exact copy of therum-shell.css's .th-sb-search* rules (padding,
+   gap, border-radius, box-shadow structure, transitions all matched) —
+   only the colors are adapted, swapping the source's light --th-ink/-surface/
+   -line tokens for the dark --th-sidebar-* ones since this sidebar is a dark
+   rail. */
+.th-sb-search { padding: var(--th-space-14) var(--th-space-14) var(--th-space-12); }
+.th-sb-search-box {
+  display: flex;
+  align-items: center;
+  gap: var(--th-space-10);
+  padding: var(--th-space-10) var(--th-space-12) var(--th-space-10) var(--th-space-14);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--th-sidebar-line);
+  border-radius: var(--th-r-pill);
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.25s ease;
+  cursor: text;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  overflow: hidden;
+}
+.th-sb-search-box:hover { border-color: var(--th-sidebar-ink-2); background: rgba(255, 255, 255, 0.09); }
+.th-sb-search-box:focus-within {
+  border-color: var(--th-accent);
+  background: rgba(255, 255, 255, 0.09);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 0 3px rgba(232, 59, 59, 0.16), 0 4px 14px rgba(232, 59, 59, 0.12);
+}
+.th-sb-search-box svg { color: var(--th-sidebar-ink-3); flex-shrink: 0; width: var(--th-space-14); height: var(--th-space-14); transition: color 0.2s ease, transform 0.25s ease; }
+.th-sb-search-box:focus-within svg { color: var(--th-accent); transform: scale(1.05); }
+.th-sb-search-box input {
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--th-font-body);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--th-sidebar-ink);
+  flex: 1;
+  min-width: 0;
+  letter-spacing: -0.005em;
+  line-height: 1.2;
+}
+.th-sb-search-box input::placeholder { color: var(--th-sidebar-ink-3); font-weight: 400; }
+.th-sb-search-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: var(--th-space-4) var(--th-space-8);
+  background: #e8e8ea;
+  color: #1a1a1a;
+  border: 1px solid var(--th-sidebar-line);
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--th-font-body);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+.th-sb-search-box:focus-within .th-sb-search-kbd { opacity: 0; transform: scale(0.9); }
+
+.th-sb-nav { flex: 1; min-height: 0; overflow-y: auto; padding: var(--th-space-8); display: flex; flex-direction: column; }
+.th-sb-item {
+  display: flex;
+  align-items: center;
+  gap: var(--th-space-10);
+  padding: var(--th-space-10) var(--th-space-20);
+  border-radius: var(--th-r);
+  font-size: 14px;
+  color: var(--th-sidebar-ink-2);
+}
+.th-sb-item svg { flex-shrink: 0; color: var(--th-sidebar-ink-3); }
+.th-sb-item:hover { background: rgba(255, 255, 255, 0.05); color: var(--th-sidebar-ink); }
+.th-sb-item.active { background: var(--th-sidebar-active-bg); color: var(--th-sidebar-ink); font-weight: 600; }
+.th-sb-item.active svg { color: var(--th-sidebar-ink); }
+.th-sb-section { margin-top: var(--th-space-16); display: flex; flex-direction: column; gap: var(--th-space-2); }
+.th-sb-section-label { display: flex; align-items: center; padding: 0 var(--th-space-20); margin-bottom: var(--th-space-4); }
+.th-sb-section-name { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--th-sidebar-ink-3); }
+.th-sb-section-items { display: flex; flex-direction: column; }
+.th-sb-itemwrap { display: flex; align-items: center; gap: var(--th-space-2); }
+.th-sb-itemwrap .th-sb-item { flex: 1; min-width: 0; }
+
+/* Edit-sidebar mode — real functionality (reorder/rename/delete/add-section),
+   toggled by #th-edit-sb-btn in Sidebar.tsx via client-side React state
+   rather than the dashboard's checkbox-hack, since Sidebar.tsx is already a
+   client component (no Server Component constraint to work around here). */
+.th-sb-section-toggle { display: flex; align-items: center; gap: var(--th-space-6); cursor: pointer; flex: 1; min-width: 0; }
+.th-sb-section-label .chev { display: flex; color: var(--th-sidebar-ink-3); transition: transform 0.15s ease; flex-shrink: 0; }
+.th-sb-section-label .chev.collapsed { transform: rotate(-90deg); }
+.th-sb-arrows { display: flex; gap: var(--th-space-2); margin-right: var(--th-space-4); flex-shrink: 0; }
+.th-sb-arrow { width: var(--th-space-20); height: var(--th-space-20); display: flex; align-items: center; justify-content: center; border: 1px solid var(--th-sidebar-line); background: rgba(255, 255, 255, 0.06); border-radius: 4px; color: var(--th-sidebar-ink-2); font-size: 10px; line-height: 1; cursor: pointer; flex-shrink: 0; padding: 0; }
+.th-sb-arrow:disabled { opacity: 0.35; cursor: default; }
+.th-sb-arrow:not(:disabled):hover { color: var(--th-sidebar-ink); border-color: var(--th-sidebar-ink-2); }
+.th-sb-section-rename, .th-sb-section-x { width: var(--th-space-20); height: var(--th-space-20); display: flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--th-sidebar-ink-3); flex-shrink: 0; cursor: pointer; margin-left: var(--th-space-2); padding: 0; }
+.th-sb-section-rename:hover { color: var(--th-sidebar-ink); }
+.th-sb-section-x:hover { color: var(--th-danger-text); }
+.th-sb-section-rename-input { flex: 1; min-width: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--th-accent); border-radius: 4px; padding: var(--th-space-2) var(--th-space-6); color: var(--th-sidebar-ink); font-family: inherit; }
+
+.th-add-section { display: flex; align-items: center; gap: var(--th-space-8); margin: var(--th-space-8) var(--th-space-8) 0; padding: var(--th-space-10) var(--th-space-20); border-radius: var(--th-r); border: 1px dashed var(--th-sidebar-line); background: transparent; color: var(--th-sidebar-ink-3); font-size: 13px; cursor: pointer; }
+.th-add-section:hover { color: var(--th-sidebar-ink); border-color: var(--th-sidebar-ink-2); }
+
+.th-sb-edit-toggle { display: flex; align-items: center; gap: var(--th-space-4); padding: var(--th-space-8) var(--th-space-14); border-top: 1px solid var(--th-sidebar-line); }
+.th-sb-edit-btn { display: flex; align-items: center; gap: var(--th-space-6); padding: var(--th-space-6) var(--th-space-8); border-radius: var(--th-r-sm); border: 1px solid var(--th-sidebar-line); background: rgba(255, 255, 255, 0.06); color: var(--th-sidebar-ink-2); font-size: 12px; cursor: pointer; flex: 1; min-width: 0; }
+.th-sb-edit-btn:hover { background: rgba(255, 255, 255, 0.12); color: var(--th-sidebar-ink); }
+.th-sb-view-site { justify-content: flex-end; flex: 0 0 auto; }
+.th-sb-edit-bar { display: flex; align-items: center; gap: var(--th-space-8); padding: var(--th-space-8) var(--th-space-14); border-top: 1px solid var(--th-sidebar-line); background: rgba(255, 255, 255, 0.04); }
+.th-sb-reset, .th-sb-done { flex: 1; display: flex; align-items: center; justify-content: center; gap: var(--th-space-6); padding: var(--th-space-8) var(--th-space-10); border-radius: var(--th-r-sm); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.th-sb-reset { background: rgba(255, 255, 255, 0.06); border: 1px solid var(--th-sidebar-line); color: var(--th-sidebar-ink-2); }
+.th-sb-reset:hover { border-color: var(--th-sidebar-ink-2); color: var(--th-sidebar-ink); }
+.th-sb-done { background: var(--th-accent-btn); border: 1px solid var(--th-accent-btn); color: var(--th-text-inverse); }
+.th-sb-done:hover { filter: brightness(1.08); }
+.th-sb-reset:disabled, .th-sb-done:disabled { opacity: 0.6; cursor: default; }
+
+.th-sb-footer { display: flex; align-items: center; gap: var(--th-space-6); padding: var(--th-space-10) var(--th-space-14); font-size: 11px; color: var(--th-sidebar-ink-3); border-top: 1px solid var(--th-sidebar-line); }
+.th-sb-footer .ok-dot { width: var(--th-space-6); height: var(--th-space-6); border-radius: 999px; background: var(--th-success-text); flex-shrink: 0; }
+.th-sb-footer .spacer { flex: 1; }
+
+/* ── Main column + topbar ── */
+#th-main { margin-left: var(--th-sidebar-w); display: flex; flex-direction: column; min-height: 100vh; min-width: 0; }
+
+#th-top {
+  height: var(--th-topbar-h);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--th-space-12);
+  background: var(--th-surface);
+  border-bottom: 1px solid var(--th-line);
+  padding: 0 var(--th-space-20);
+}
+@media (max-width: 900px) {
+  #th-top { padding: 0 var(--th-space-16); }
+}
+/* Opt-in "sticky" topbar — the inset, rounded, floats-and-sticks-on-scroll
+   look this used to be unconditionally. Not wired to a real setting yet
+   (no customization-settings system exists to host that toggle) — same
+   deliberate stop-point as this file's high-contrast mode: the CSS capability
+   exists now, a real Appearance-page control to flip [data-topbar-style] is
+   later work, not built here. */
+[data-topbar-style='sticky'] #th-top {
+  border-radius: var(--th-r-lg);
+  margin: var(--th-space-12) var(--th-space-48) 0;
+  position: sticky;
+  top: 0;
+  z-index: 90;
+}
+@media (max-width: 900px) {
+  [data-topbar-style='sticky'] #th-top { margin: var(--th-space-8) var(--th-space-16) 0; }
+}
+.th-top-title { font-size: 14px; font-weight: 600; color: var(--th-ink); }
+.th-top-actions { display: flex; align-items: center; gap: var(--th-space-8); margin-left: auto; }
+.th-top-btn { width: var(--th-space-32); height: var(--th-space-32); flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: transparent; border: 1px solid var(--th-line); border-radius: var(--th-r-sm); color: var(--th-ink-2); cursor: pointer; }
+.th-top-btn svg { width: var(--th-space-16); height: var(--th-space-16); flex-shrink: 0; }
+.th-top-btn:hover { color: var(--th-ink); border-color: var(--th-ink-2); }
+.th-top-avatar { width: var(--th-space-32); height: var(--th-space-32); border-radius: var(--th-r-pill); background: var(--th-accent); color: var(--th-text-inverse); border: none; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; cursor: pointer; }
+.th-top-menu { position: absolute; top: calc(100% + 6px); right: 0; background: var(--th-surface); border: 1px solid var(--th-line); border-radius: var(--th-r); box-shadow: var(--th-shadow-md); min-width: 160px; padding: var(--th-space-6); z-index: 20; display: flex; flex-direction: column; gap: var(--th-space-2); }
+.th-top-menu a, .th-top-menu button { display: flex; align-items: center; gap: var(--th-space-8); padding: var(--th-space-8) var(--th-space-10); border-radius: 6px; font-size: 13px; color: var(--th-ink); background: transparent; border: none; text-align: left; cursor: pointer; width: 100%; }
+.th-top-menu a:hover, .th-top-menu button:hover { background: var(--th-bg); }
+
+/* The one place page padding lives: every route gets the dashboard's
+   32/64/80 rhythm without needing its own wrapper (pages were rendering
+   flush against the sidebar; .th-dash used to carry this padding alone). */
+#th-content { flex: 1; min-width: 0; max-width: var(--th-content-max-width); margin: 0 auto; width: 100%; padding: var(--th-space-32) var(--th-space-64) var(--th-space-80); box-sizing: border-box; }
+[data-page-transitions='on'] #th-content { animation: th-content-fade-in 0.2s ease; }
+
+/* Sidebar style variants (Appearance setting) — 'default' is the existing
+   baseline above; these two are real structural differences, not a re-skin
+   of the same layout. */
+[data-sidebar-style='pills'] .th-sb-item { border-radius: var(--th-r-pill); padding-left: var(--th-space-16); padding-right: var(--th-space-16); }
+[data-sidebar-style='minimal'] .th-sb-item { background: transparent; }
+[data-sidebar-style='minimal'] .th-sb-item:hover { background: transparent; color: var(--th-ink); }
+[data-sidebar-style='minimal'] .th-sb-item.active { background: transparent; color: var(--th-accent); border-left: 2px solid var(--th-accent); padding-left: var(--th-space-8); }
+
+table { width: 100%; border-collapse: collapse; background: var(--th-card-bg); border-radius: var(--th-r-lg); overflow: hidden; box-shadow: var(--th-card-shadow); border: var(--th-card-border); backdrop-filter: var(--th-card-backdrop); }
+th, td { text-align: left; padding: var(--th-density-table-pad); font-size: var(--th-fs-sm); border-bottom: 1px solid var(--th-bg); }
+th { background: #f8fafc; font-size: var(--th-fs-2xs); text-transform: uppercase; letter-spacing: 0.4px; color: var(--th-muted); }
+td .sub { color: var(--th-muted); font-size: var(--th-fs-2xs); }
+.muted { color: var(--th-muted); }
+
+.pill { display: inline-block; padding: var(--th-space-2) var(--th-space-8); border-radius: 999px; font-size: var(--th-fs-2xs); font-weight: 600; background: var(--th-bg); color: var(--th-ink-2); }
+.pill-active, .pill-paid, .pill-processing, .pill-delivered, .pill-ok { background: var(--th-success-bg); color: var(--th-success-text); }
+.pill-pending { background: var(--th-warning-bg); color: var(--th-warning-text); }
+.pill-failed, .pill-cancelled, .pill-archived, .pill-unhealthy { background: var(--th-danger-bg); color: var(--th-danger-text); }
+
+.row-form { display: flex; gap: var(--th-space-8); margin-bottom: var(--th-space-16); }
+.row-form input { padding: var(--th-space-8) var(--th-space-10); border: 1px solid var(--th-line); border-radius: var(--th-r); font-size: var(--th-fs-sm); }
+button { padding: var(--th-space-8) var(--th-space-14); border: var(--th-border-width) solid var(--th-accent-btn); background: var(--th-accent-btn); color: var(--th-text-inverse); border-radius: var(--th-r); font-size: var(--th-fs-xs); font-weight: 600; cursor: pointer; }
+button:hover { background: var(--th-accent-btn-hover); border-color: var(--th-accent-btn-hover); }
+/* Every other disabled control in this file (.chip, .th-sb-reset/-done, the
+   switch) uses an opacity dip — this is the default, unclassed button (the
+   one a plain <button> gets with no .ghost/.th-btn/etc class, which several
+   Settings pages' inline actions actually are) and had none at all, relying
+   entirely on inconsistent browser default disabled rendering. */
+button:disabled { opacity: 0.5; cursor: default; }
+
+/* Bare form controls inside the content area match the internal chrome —
+   pages were shipping native UA inputs/selects wherever nobody added a
+   settings-* class (Milieus/Cluster editors, filters, etc). Scoped to
+   #th-content (the sidebar/topbar style their own controls) and wrapped in
+   :where() so this contributes ZERO specificity — any component class
+   (.settings-select, .th-search, …) still wins without !important. The bare
+   selector version of this rule shipped first and silently repainted the
+   sidebar search white: :not([attr]) chains carry the attribute selectors'
+   specificity and beat every single-class rule in the file. */
+#th-content :where(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='submit']):not([type='button']), select, textarea) {
+  padding: var(--th-space-8) var(--th-space-10);
+  border: var(--th-border-width) solid var(--th-line);
+  border-radius: var(--th-r);
+  font-size: var(--th-fs-sm);
+  font-family: var(--th-font-body);
+  background: var(--th-surface);
+  color: var(--th-ink);
+  box-sizing: border-box;
+}
+#th-content :where(textarea) { resize: vertical; min-height: 80px; }
+button.ghost { background: var(--th-surface); color: var(--th-ink-2); border-color: var(--th-line); }
+button.ghost:hover { background: #f8fafc; border-color: #cbd5e1; }
+.notice { background: var(--th-warning-bg); color: var(--th-warning-text); padding: var(--th-space-12) var(--th-space-14); border-radius: var(--th-r); font-size: var(--th-fs-sm); margin-bottom: var(--th-space-14); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: var(--th-space-14); margin-bottom: var(--th-space-8); }
+.card { background: var(--th-card-bg); border-radius: var(--th-r-lg); padding: var(--th-density-card-pad); box-shadow: var(--th-card-shadow); border: var(--th-card-border); backdrop-filter: var(--th-card-backdrop); }
+.card .n { font-size: 28px; font-weight: 700; }
+.card .l { color: var(--th-muted); font-size: var(--th-fs-xs); text-transform: uppercase; letter-spacing: 0.4px; }
+.actions { display: flex; gap: var(--th-space-6); }
+.actions form { display: inline; }
+
+/* ── Dashboard — real 1.9.44 classes (.th-dash / .th-bento / .th-card),
+   not the generic .card used by other pages (Products/Orders etc keep using
+   that one; the dashboard's cards are visually distinct — bigger, bento-
+   scaled). A 12-column grid where xs/sm/md/lg cards span 3/6/9/12 columns
+   (25/50/75/100%), with the stat number, padding, and label all scaling up
+   per size tier — that dramatic per-size scaling is what makes it read as
+   "bento" rather than a flat grid of same-size tiles. ── */
+/* Padding moved to #th-content (shared by every page) — keeping it here too
+   would double it on the dashboard. */
+.th-dash { max-width: none; margin: 0; padding: 0; width: 100%; min-width: 0; box-sizing: border-box; }
+
+/* Bento corner-resize grip (replaces the xs/sm/md/lg chip row). Sits in the
+   card's bottom-right corner; drag snaps the card to the nearest size tier. */
+.dash-card { position: relative; }
+.dash-card-resize {
+  position: absolute;
+  right: var(--th-space-4);
+  bottom: var(--th-space-4);
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-right: 2px solid var(--th-line);
+  border-bottom: 2px solid var(--th-line);
+  border-radius: 0 0 var(--th-r-sm, 4px) 0;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity var(--th-transition);
+}
+.dash-card:hover .dash-card-resize,
+.dash-card-resize:focus-visible { opacity: 1; }
+.dash-card-resize:hover { border-color: var(--th-accent); background: transparent; }
+/* Below 900px the bento grid collapses to fixed spans (span 4 !important),
+   so drag-resize can't work there — hide the grip instead of offering a
+   dead control on touch layouts. */
+@media (max-width: 900px) {
+  .dash-card-resize { display: none; }
+}
+.th-dash-greet { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--th-muted); margin-bottom: var(--th-space-6); }
+.th-dash-title { font-size: 30px; font-weight: 700; color: var(--th-ink); letter-spacing: -0.5px; margin: 0 0 var(--th-space-6); }
+.th-dash-sub { font-size: 14px; color: var(--th-ink-2); margin: 0 0 var(--th-space-24); }
+
+.th-dash-actions { display: flex; align-items: center; gap: var(--th-space-8); flex-wrap: wrap; margin-bottom: var(--th-space-32); }
+.th-dash-actions-spacer { flex: 1; }
+
+/* .th-btn was referenced by page.tsx's action links from the start but never
+   actually defined — they were rendering as bare `a{color:inherit}` text
+   with zero button chrome. Values copied verbatim from therum-shell.css. */
+.th-btn { display: inline-flex; align-items: center; gap: var(--th-space-6); padding: var(--th-space-8) var(--th-space-14); background: var(--th-surface); border: 1px solid var(--th-line); border-radius: 8px; font-family: var(--th-font-body); font-size: 13px; font-weight: 500; color: var(--th-ink); text-decoration: none; cursor: pointer; transition: all var(--th-transition); }
+.th-btn:hover { border-color: var(--th-ink-2); }
+.th-btn-primary { background: var(--th-accent-btn); border-color: var(--th-accent-btn); color: var(--th-text-inverse); }
+.th-btn-primary:hover { color: var(--th-text-inverse); opacity: 0.9; }
+
+/* Real 1.9.44 toggles this via a `body.th-edit-layout` class (JS-driven drag
+   editor, which 2.0 doesn't have — reorder/resize here is arrows + chips
+   instead). #th-edit-toggle is a hidden checkbox standing in for that class
+   so the "Edit layout" affordance still requires no client JS bundle. */
+#th-edit-toggle { display: none; }
+.th-edit-bar { display: none; align-items: center; gap: var(--th-space-10); padding: var(--th-space-10) var(--th-space-16); margin-bottom: var(--th-space-16); background: rgba(37, 99, 235, 0.08); border: 1px solid var(--th-accent); border-radius: var(--th-r); color: var(--th-ink-2); font-size: 13px; position: sticky; top: var(--th-topbar-h); z-index: 50; }
+#th-edit-toggle:checked ~ .th-edit-bar { display: flex; }
+.th-edit-bar-text strong { color: var(--th-ink); }
+.th-edit-bar-actions { display: flex; gap: var(--th-space-8); margin-left: auto; }
+
+.th-bento { display: grid; grid-template-columns: repeat(12, 1fr); grid-auto-rows: minmax(120px, auto); grid-auto-flow: dense; gap: var(--th-card-grid-gap); }
+.th-card.dash-card { min-width: 0; border-radius: var(--th-r-lg); background: var(--th-surface); border: var(--th-border-width) solid var(--th-line); box-shadow: var(--th-shadow-sm); position: relative; overflow: hidden; }
+/* Uniform per-tier padding, one clean value each — a +4px step per size
+   (20/24/28/32), not the original 18/20, 22/24, 26/28, 30/34 pairs. Both
+   halves of each pair were within 1-2px of each other and of a real scale
+   step; picking the rounding that lands every tier on a single value reads
+   as a deliberate progression instead of four near-misses. */
+.th-card.dash-card[data-size='xs'] { padding: var(--th-space-20); }
+.th-card.dash-card[data-size='sm'] { padding: var(--th-space-24); }
+.th-card.dash-card[data-size='md'] { padding: var(--th-space-28); }
+.th-card.dash-card[data-size='lg'] { padding: var(--th-space-32); }
+.th-card-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: var(--th-space-10); gap: var(--th-space-4) var(--th-space-8); min-width: 0; }
+.th-card-label { margin: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--th-muted); white-space: nowrap; }
+.th-card-link { font-size: 12px; color: var(--th-accent); white-space: nowrap; }
+.th-card-link:hover { text-decoration: underline; }
+.dash-card-controls { display: flex; gap: var(--th-space-4); opacity: 0.35; transition: opacity var(--th-transition); }
+#th-edit-toggle:checked ~ .th-bento .dash-card-controls,
+.th-card.dash-card:hover .dash-card-controls { opacity: 1; }
+.chip { padding: var(--th-space-2) var(--th-space-6); font-size: 10px; font-weight: 600; text-transform: uppercase; border: 1px solid var(--th-line); background: var(--th-surface); color: var(--th-muted); border-radius: 5px; line-height: 1.6; }
+.chip:hover:not(:disabled) { background: var(--th-bg); color: var(--th-ink-2); }
+.chip:disabled { opacity: 0.3; cursor: not-allowed; }
+.chip-active { background: var(--th-accent); border-color: var(--th-accent); color: var(--th-text-inverse); }
+.dash-breakdown { display: flex; gap: var(--th-space-6); flex-wrap: wrap; margin-top: var(--th-space-8); }
+.dash-list { list-style: none; margin: var(--th-space-10) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--th-space-6); font-size: var(--th-fs-sm); }
+.dash-list li { display: flex; justify-content: space-between; gap: var(--th-space-10); }
+.dash-list li .muted { flex-shrink: 0; }
+
+/* Stat number scales dramatically with card size, matching 1.9.44's
+   .th-card[data-size="…"] .th-stat-val rules exactly. */
+.th-card.dash-card[data-size='xs'] .th-stat-val { font-size: 32px; }
+.th-card.dash-card[data-size='sm'] .th-stat-val { font-size: 44px; }
+.th-card.dash-card[data-size='md'] .th-stat-val { font-size: 56px; }
+.th-card.dash-card[data-size='lg'] .th-stat-val { font-size: 72px; letter-spacing: -2px; }
+.th-stat-val { font-weight: 700; color: var(--th-ink); }
+.th-stat-sub { color: var(--th-muted); font-size: var(--th-fs-2xs); }
+
+@media (max-width: 900px) {
+  .th-bento { grid-template-columns: repeat(4, 1fr); }
+  .th-card.dash-card[data-size='sm'], .th-card.dash-card[data-size='md'], .th-card.dash-card[data-size='lg'] { grid-column: span 4 !important; }
+}
+.row-between { display: flex; justify-content: space-between; align-items: center; }
+.field-label { font-size: var(--th-fs-xs); color: var(--th-muted); margin-bottom: var(--th-space-6); }
+
+/* Settings hub — left rail of registered sections + content pane. Real
+   1.9.44 shows a "SEARCH SETTINGS…" filter over the rail once there are
+   enough sections to need it (16 of them) — that point is now. */
+.settings-shell { display: grid; grid-template-columns: 260px 1fr; gap: var(--th-space-24); align-items: start; }
+.settings-search { display: flex; align-items: center; gap: var(--th-space-8); padding: var(--th-space-8) var(--th-space-10); margin-bottom: var(--th-space-10); background: var(--th-bg); border: 1px solid var(--th-line); border-radius: var(--th-r); color: var(--th-muted); }
+/* The input's own outline:none had no replacement — a keyboard user tabbing
+   here got no focus indicator at all. Same fix as .th-sb-search-box's own
+   :focus-within treatment elsewhere in this file: ring the wrapper, since
+   ringing the bare input directly would look visually disconnected from its
+   icon/pill chrome. */
+.settings-search:focus-within { border-color: var(--th-accent); }
+.settings-search svg { flex-shrink: 0; }
+/* padding: 0 for the same reason as .th-lp-search-input — wrapper pads. */
+.settings-search input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font-size: var(--th-fs-xs); color: var(--th-ink); text-transform: uppercase; letter-spacing: 0.04em; padding: 0; }
+.settings-search input::placeholder { color: var(--th-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.settings-rail { display: flex; flex-direction: column; gap: var(--th-space-2); }
+.settings-rail-item { padding: var(--th-space-10) var(--th-space-10); border-radius: var(--th-r); display: flex; align-items: flex-start; gap: var(--th-space-10); }
+.settings-rail-item svg { flex-shrink: 0; margin-top: 1px; color: var(--th-muted); }
+.settings-rail-item.active svg { color: var(--th-accent); }
+.settings-rail-item:hover { background: var(--th-bg); }
+.settings-rail-item.active { background: var(--th-accent-tint); }
+.settings-rail-text { display: flex; flex-direction: column; gap: var(--th-space-2); min-width: 0; }
+.settings-rail-label { font-size: var(--th-fs-sm); font-weight: 600; }
+.settings-rail-item.active .settings-rail-label { color: var(--th-accent); }
+.settings-rail-desc { font-size: var(--th-fs-2xs); color: var(--th-muted); }
+.settings-rail-empty { padding: var(--th-space-10); font-size: var(--th-fs-xs); color: var(--th-muted); }
+.settings-content { background: var(--th-card-bg); border-radius: var(--th-r-lg); padding: var(--th-space-24) var(--th-space-24); box-shadow: var(--th-card-shadow); border: var(--th-card-border); }
+.settings-form { display: flex; flex-direction: column; gap: var(--th-space-16); margin-top: var(--th-space-6); }
+.settings-field { max-width: 480px; }
+.settings-radio-group { display: flex; gap: var(--th-space-8); flex-wrap: wrap; }
+.settings-radio { display: flex; align-items: center; gap: var(--th-space-6); padding: var(--th-space-8) var(--th-space-12); border: 1px solid var(--th-line); border-radius: var(--th-r); font-size: var(--th-fs-sm); cursor: pointer; }
+.settings-radio:has(input:checked) { border-color: var(--th-accent); background: var(--th-accent-tint); color: var(--th-accent); font-weight: 600; }
+.field-help { font-size: var(--th-fs-2xs); color: var(--th-muted); margin: var(--th-space-6) 0 0; line-height: 1.5; }
+.settings-select { padding: var(--th-space-8) var(--th-space-10); border: var(--th-border-width) solid var(--th-line); border-radius: var(--th-r); font-size: var(--th-fs-sm); background: var(--th-surface); color: var(--th-ink); min-width: 220px; }
+.settings-text-input { padding: var(--th-space-8) var(--th-space-10); border: var(--th-border-width) solid var(--th-line); border-radius: var(--th-r); font-size: var(--th-fs-sm); background: var(--th-surface); color: var(--th-ink); width: 100%; max-width: 360px; }
+.settings-text-input-narrow { max-width: 90px; }
+input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: var(--th-space-32); padding: var(--th-space-4); cursor: pointer; }
+
+/* Toggle switch — 1.9.44's boolean settings fields. Track/thumb dimensions
+   deliberately left as literals, not the sizing scale below — 38x22 track,
+   16px thumb at inset 3/3, translateX(16) when checked is exact interlocking
+   geometry (22 - 3 - 3 = 16; 3 + 16(inset) + 16(translate) + 3 = 38), not a
+   free "pick a size" choice like the icon/dot/avatar sizes elsewhere in this
+   file. Rounding any one of these numbers desyncs the other three. */
+.th-switch { position: relative; display: inline-block; width: 38px; height: 22px; flex-shrink: 0; }
+.th-switch input { opacity: 0; width: 0; height: 0; }
+.th-switch-track { position: absolute; inset: 0; background: var(--th-line); border-radius: 999px; transition: background var(--th-transition); cursor: pointer; }
+/* --th-text-inverse, not --th-surface — the thumb needs to read against its
+   OWN track (a mid-tone off, or accent-btn blue on), not against the page.
+   --th-surface correctly flips dark in dark mode (right for an actual
+   surface); on this thumb that flip meant a dark-navy circle on a track
+   that's also dark-ish, 2.61:1 contrast, confirmed live. --th-text-inverse
+   is #fff in every mode, which is also #fff is what --th-surface already
+   equalled in light mode — so this changes nothing there, only dark mode. */
+.th-switch-track::before { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: var(--th-text-inverse); border-radius: 50%; transition: transform var(--th-transition); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); }
+.th-switch input:checked + .th-switch-track { background: var(--th-accent-btn); }
+.th-switch input:checked + .th-switch-track::before { transform: translateX(16px); }
+.th-switch input:disabled + .th-switch-track { opacity: 0.6; cursor: default; }
+.settings-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: var(--th-space-16); padding: var(--th-space-10) 0; border-bottom: 1px solid var(--th-line); max-width: 560px; }
+.settings-toggle-row:last-child { border-bottom: none; }
+.settings-toggle-row-text { display: flex; flex-direction: column; gap: var(--th-space-2); }
+.settings-toggle-row-label { font-size: var(--th-fs-sm); font-weight: 600; }
+.settings-toggle-row-desc { font-size: var(--th-fs-2xs); color: var(--th-muted); }
+.settings-group { margin-bottom: var(--th-space-28); }
+.settings-group:last-child { margin-bottom: 0; }
+.settings-group-title { font-size: var(--th-fs-md); font-weight: 700; margin: 0 0 var(--th-space-4); }
+.settings-group-desc { font-size: var(--th-fs-xs); color: var(--th-muted); margin: 0 0 var(--th-space-14); max-width: 640px; line-height: 1.5; }
+.settings-empty-state { padding: var(--th-space-24); text-align: center; color: var(--th-muted); font-size: var(--th-fs-sm); border: 1px dashed var(--th-line); border-radius: var(--th-r); }
+
+/* Onboarding wizard — step progress dots (admin/app/(app)/onboarding). */
+.onboarding-steps { display: flex; gap: var(--th-space-20); }
+.onboarding-step { display: flex; align-items: center; gap: var(--th-space-6); font-size: var(--th-fs-xs); color: var(--th-muted); }
+.onboarding-step-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--th-line); }
+.onboarding-step.active { color: var(--th-ink); font-weight: 600; }
+.onboarding-step.active .onboarding-step-dot { background: var(--th-accent); }
+.onboarding-step.done { color: var(--th-ink-2); }
+.onboarding-step.done .onboarding-step-dot { background: var(--th-success-text); }
+
+/* List page — the generic Pages/Posts/Media shell, ported from 1.9.44's
+   Therum_List_Page::render() (therum-list-page.php): header with a meta
+   pill + title + action buttons, a toolbar (filter pills, search, sort,
+   style, view toggle), then a card grid or table. */
+.th-lp-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--th-space-16); margin-bottom: var(--th-space-20); }
+.th-lp-meta { display: flex; align-items: center; gap: var(--th-space-6); font-size: var(--th-fs-2xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--th-muted); font-weight: 600; margin-bottom: var(--th-space-8); }
+.th-lp-meta-dot { width: var(--th-space-6); height: var(--th-space-6); border-radius: 999px; background: var(--th-accent); }
+.th-lp-title { font-size: 28px; font-weight: 700; margin: 0 0 var(--th-space-4); letter-spacing: -0.01em; }
+.th-lp-sub { font-size: var(--th-fs-sm); color: var(--th-ink-2); margin: 0; }
+.th-lp-actions { display: flex; gap: var(--th-space-8); flex-shrink: 0; }
+
+.th-lp-toolbar { display: flex; align-items: center; gap: var(--th-space-10); flex-wrap: wrap; margin-bottom: var(--th-space-16); }
+.th-lp-pills { display: flex; gap: var(--th-space-6); flex-wrap: wrap; }
+.th-lp-pill { display: inline-flex; align-items: center; gap: var(--th-space-6); padding: var(--th-space-6) var(--th-space-12); border-radius: 999px; border: 1px solid var(--th-line); background: var(--th-surface); color: var(--th-ink-2); font-size: 13px; font-weight: 500; cursor: pointer; }
+.th-lp-pill:hover { border-color: var(--th-ink-2); }
+.th-lp-pill.active { background: var(--th-emphasis-bg); color: var(--th-text-inverse); border-color: var(--th-emphasis-bg); }
+.th-lp-pill-count { font-size: 11px; opacity: 0.7; }
+.th-lp-search { display: flex; align-items: center; gap: var(--th-space-8); padding: var(--th-space-8) var(--th-space-12); border: 1px solid var(--th-line); border-radius: var(--th-r); background: var(--th-surface); color: var(--th-muted); min-width: 160px; }
+/* Same outline:none-with-no-replacement gap as .settings-search above. */
+.th-lp-search:focus-within { border-color: var(--th-accent); }
+/* padding: 0 — the wrapper carries the padding; without this the global
+   #th-content :where(input) rule pads the inner input a second time. */
+.th-lp-search-input { border: none; outline: none; background: transparent; font-size: 13px; color: var(--th-ink); flex: 1; min-width: 0; padding: 0; }
+.th-lp-sort { position: relative; display: flex; align-items: center; gap: var(--th-space-6); padding: var(--th-space-8) var(--th-space-12); border: 1px solid var(--th-line); border-radius: var(--th-r); background: var(--th-surface); color: var(--th-ink-2); font-size: 13px; cursor: pointer; }
+.th-lp-sort:hover { border-color: var(--th-ink-2); }
+.th-lp-style-btn, .th-lp-view-btn { display: flex; align-items: center; gap: var(--th-space-6); padding: var(--th-space-8) var(--th-space-10); border: 1px solid var(--th-line); border-radius: var(--th-r); background: var(--th-surface); color: var(--th-ink-2); cursor: pointer; }
+.th-lp-style-btn:hover, .th-lp-view-btn:hover:not(.active) { border-color: var(--th-ink-2); }
+.th-lp-views { display: flex; gap: var(--th-space-4); }
+.th-lp-view-btn.active { background: var(--th-emphasis-bg); color: var(--th-text-inverse); border-color: var(--th-emphasis-bg); }
+
+.th-lp-view-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--th-space-16); }
+.th-lp-card { position: relative; background: var(--th-card-bg); border-radius: 14px; box-shadow: var(--th-card-shadow); overflow: hidden; display: flex; flex-direction: column; }
+.th-lp-card-thumb { position: relative; aspect-ratio: 4 / 3; background-size: cover; background-position: center; }
+.th-lp-card-kebab-wrap { position: absolute; top: 10px; right: 10px; z-index: 2; }
+.th-lp-kebab-btn { width: var(--th-space-28); height: var(--th-space-28); border-radius: 999px; background: rgba(255, 255, 255, 0.92); border: none; color: var(--th-ink-2); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.th-lp-card-meta { padding: var(--th-card-meta-pad) var(--th-card-meta-pad); display: flex; flex-direction: column; gap: var(--th-space-8); flex: 1; }
+.th-lp-card-title { font-size: 17px; font-weight: 700; margin: 0; }
+.th-lp-card-excerpt { font-size: 13px; color: var(--th-ink-2); margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.th-lp-card-pills { display: flex; gap: var(--th-space-6); flex-wrap: wrap; }
+.th-lp-card-pill { display: inline-flex; align-items: center; gap: var(--th-space-4); padding: var(--th-space-4) var(--th-space-10); border-radius: 999px; background: var(--th-bg); border: 1px solid var(--th-line); font-size: 11px; color: var(--th-ink-2); }
+.th-lp-card-pill-dot { width: var(--th-space-6); height: var(--th-space-6); border-radius: 999px; background: var(--th-success-text); }
+.th-lp-card-pill-dot.is-published { background: var(--th-success-text); }
+.th-lp-card-pill-dot.is-draft { background: var(--th-warning-text); }
+.th-lp-card-pill-dot.is-archived { background: var(--th-muted); }
+.th-lp-card-actions { display: flex; gap: var(--th-space-8); margin-top: auto; padding-top: var(--th-space-4); }
+.th-lp-card-actions a { flex: 1; text-align: center; padding: var(--th-space-8) 0; border-radius: var(--th-r); font-size: 13px; font-weight: 600; }
+.th-lp-card-actions a.th-lp-view-live { border: 1px solid var(--th-line); color: var(--th-ink); }
+.th-lp-card-actions a.th-lp-edit { background: var(--th-emphasis-bg); color: var(--th-text-inverse); }
+
+.th-lp-kebab-btn:hover { background: var(--th-surface); }
+.th-lp-kebab-menu { position: absolute; top: 32px; right: 0; min-width: 150px; background: var(--th-card-bg); border: 1px solid var(--th-line); border-radius: var(--th-r); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18); overflow: hidden; z-index: 3; display: flex; flex-direction: column; padding: var(--th-space-4); }
+.th-lp-kebab-item { display: flex; align-items: center; width: 100%; padding: var(--th-space-8) var(--th-space-10); border-radius: calc(var(--th-r) - 4px); background: none; border: none; text-align: left; font-size: 13px; font-weight: 500; color: var(--th-ink); cursor: pointer; text-decoration: none; }
+.th-lp-kebab-item:hover { background: var(--th-bg); }
+.th-lp-kebab-item.danger { color: var(--th-danger-text); }
+.th-lp-kebab-item:disabled { opacity: 0.5; cursor: default; }
+
+.th-lp-empty { text-align: center; padding: var(--th-space-64) var(--th-space-20); color: var(--th-muted); }
+.th-lp-empty-title { font-weight: 600; color: var(--th-ink); margin-top: var(--th-space-10); }
+.th-lp-empty-sub { font-size: 13px; margin-top: var(--th-space-4); }
+
+/* Media table view */
+.th-lp-table td, .th-lp-table th { vertical-align: middle; }
+.th-media-file-cell { display: flex; align-items: center; gap: var(--th-space-10); }
+.th-media-thumb { width: var(--th-space-40); height: var(--th-space-40); border-radius: 6px; background: var(--th-bg); border: 1px solid var(--th-line); object-fit: cover; flex-shrink: 0; }
+.th-media-alt-input { width: 100%; min-width: 160px; border: 1px solid transparent; background: none; padding: var(--th-space-6) var(--th-space-8); border-radius: 6px; font-size: 13px; color: var(--th-ink); }
+.th-media-alt-input:hover { border-color: var(--th-line); }
+.th-media-alt-input:focus { outline: none; border-color: var(--th-accent); background: var(--th-bg); }
+.th-media-kebab-wrap { position: relative; display: inline-flex; }
+
+/* Media grid/masonry cards + density slider + view switch — matches
+   1.9.44's therum-list-media-patch.css (density 3-7, column-count masonry)
+   with one deliberate change: masonry tile height comes from each asset's
+   real width/height (--th-aspect, set inline in MediaCard.tsx) instead of
+   1.9.44's nth-child(3n/5n/7n/11n) pseudo-random aspect pattern — 2.0 tracks
+   real image dimensions on upload (see the sharp pipeline), 1.9.44 never
+   captured them, so faking variety isn't necessary here. */
+.th-lp-card-thumb-square { aspect-ratio: 1; }
+.th-lp-card-sub { font-size: 12px; color: var(--th-ink-2); margin-top: var(--th-space-2); }
+
+.th-density-control { display: inline-flex; align-items: center; gap: var(--th-space-10); padding: var(--th-space-6) var(--th-space-12); background: var(--th-surface); border: 1px solid var(--th-line); border-radius: var(--th-r); transition: opacity 0.2s, filter 0.2s; }
+.th-density-control[data-view="masonry"], .th-density-control[data-view="metro"], .th-density-control[data-view="table"] { opacity: 0.4; pointer-events: none; filter: grayscale(0.5); }
+.th-density-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--th-muted); }
+.th-density-slider { width: 90px; height: var(--th-space-4); background: var(--th-line); border-radius: 2px; outline: none; -webkit-appearance: none; appearance: none; cursor: pointer; }
+.th-density-slider::-webkit-slider-thumb { -webkit-appearance: none; width: var(--th-space-14); height: var(--th-space-14); background: var(--th-accent); border-radius: 50%; cursor: pointer; border: 2px solid var(--th-card-bg); }
+.th-density-slider::-moz-range-thumb { width: var(--th-space-14); height: var(--th-space-14); background: var(--th-accent); border-radius: 50%; cursor: pointer; border: 2px solid var(--th-card-bg); }
+/* outline:none on a range input needs a replacement on the thumb specifically
+   — a keyboard-focused ring around the (invisible) track wouldn't be visible
+   against it anyway. Can't combine -webkit-/-moz- pseudo-elements in one
+   selector list (an unsupported one invalidates the whole rule in some
+   browsers), so these stay separate. */
+.th-density-slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--th-accent-tint); }
+.th-density-slider:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px var(--th-accent-tint); }
+.th-density-value { font-size: 11px; font-weight: 600; color: var(--th-ink-2); font-variant-numeric: tabular-nums; min-width: var(--th-space-14); }
+
+.th-lp-view { display: none; }
+.th-lp-view.active { display: block; }
+
+.th-lp-view-grid.active { display: grid; }
+.th-lp-view-grid[data-density="3"] { grid-template-columns: repeat(3, 1fr); }
+.th-lp-view-grid[data-density="4"] { grid-template-columns: repeat(4, 1fr); }
+.th-lp-view-grid[data-density="5"] { grid-template-columns: repeat(5, 1fr); }
+.th-lp-view-grid[data-density="6"] { grid-template-columns: repeat(6, 1fr); }
+.th-lp-view-grid[data-density="7"] { grid-template-columns: repeat(7, 1fr); }
+@media (max-width: 1100px) { .th-lp-view-grid[data-density="6"], .th-lp-view-grid[data-density="7"] { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 800px) { .th-lp-view-grid[data-density] { grid-template-columns: repeat(3, 1fr); } }
+
+.th-lp-view-masonry.active { display: block; column-count: 4; column-gap: var(--th-space-14); }
+@media (max-width: 1400px) { .th-lp-view-masonry.active { column-count: 3; } }
+@media (max-width: 900px) { .th-lp-view-masonry.active { column-count: 2; } }
+.th-lp-view-masonry .th-lp-card { display: inline-block; width: 100%; margin-bottom: var(--th-space-14); break-inside: avoid; }
+.th-lp-view-masonry .th-lp-card-thumb { height: auto; aspect-ratio: var(--th-aspect, 1); }
+
+/* Metro — unlike masonry, kept as 1.9.44's exact positional pattern rather
+   than real-data sizing. The whole point of a metro/bento layout is a
+   curated tile rhythm, not content-driven variety, so there's nothing to
+   improve on here by reading actual dimensions — this is a straight port. */
+.th-lp-view-metro.active { display: grid; grid-template-columns: repeat(6, 1fr); grid-auto-rows: 110px; grid-auto-flow: dense; gap: var(--th-space-10); }
+@media (max-width: 1100px) { .th-lp-view-metro.active { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 800px) { .th-lp-view-metro.active { grid-template-columns: repeat(3, 1fr); } }
+.th-lp-view-metro .th-lp-card { margin: 0; }
+.th-lp-view-metro .th-lp-card:nth-child(7n+1) { grid-column: span 2; grid-row: span 2; }
+.th-lp-view-metro .th-lp-card:nth-child(7n+3) { grid-row: span 2; }
+.th-lp-view-metro .th-lp-card:nth-child(7n+5) { grid-column: span 2; }
+.th-lp-view-metro .th-lp-card-thumb { height: 100%; aspect-ratio: unset; }
+
+/* Bulk rename modal */
+.th-modal-backdrop { position: fixed; inset: 0; background: rgba(10, 10, 10, 0.45); display: flex; align-items: center; justify-content: center; z-index: 50; padding: var(--th-space-24); }
+.th-modal { width: 100%; max-width: 560px; max-height: 80vh; display: flex; flex-direction: column; background: var(--th-card-bg); border-radius: 14px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35); overflow: hidden; }
+.th-modal-header { display: flex; align-items: center; justify-content: space-between; padding: var(--th-space-16) var(--th-space-20); border-bottom: 1px solid var(--th-line); flex-shrink: 0; }
+.th-modal-header h2 { font-size: 16px; font-weight: 700; margin: 0; }
+.th-modal-close { width: var(--th-space-28); height: var(--th-space-28); border-radius: 999px; border: none; background: var(--th-bg); color: var(--th-ink-2); cursor: pointer; }
+.th-modal-close:hover { background: var(--th-line); color: var(--th-ink); }
+.th-modal-body { padding: var(--th-space-16) var(--th-space-20); overflow-y: auto; flex: 1; }
+.th-modal-footer { display: flex; align-items: center; justify-content: space-between; gap: var(--th-space-10); padding: var(--th-space-14) var(--th-space-20); border-top: 1px solid var(--th-line); flex-shrink: 0; }
+
+.th-bulk-list { display: flex; flex-direction: column; gap: var(--th-space-8); }
+.th-bulk-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) 16px minmax(0, 1fr) 20px; align-items: center; gap: var(--th-space-10); }
+.th-bulk-current { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.th-bulk-arrow { color: var(--th-muted); text-align: center; }
+.th-bulk-name-input { width: 100%; border: 1px solid var(--th-line); border-radius: 6px; padding: var(--th-space-6) var(--th-space-8); font-size: 13px; background: var(--th-bg); color: var(--th-ink); }
+.th-bulk-name-input:focus { outline: none; border-color: var(--th-accent); }
+.th-bulk-ok { color: var(--th-success-text); font-weight: 700; text-align: center; }
+.th-bulk-err { color: var(--th-danger-text); font-size: 11px; }
+
+/* Preview / View-live — reached via ?embed=1 (bare, no sidebar/topbar). */
+.th-preview-banner { display: flex; align-items: center; gap: var(--th-space-10); padding: var(--th-space-10) var(--th-space-20); background: var(--th-warning-bg); color: var(--th-warning-text); font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--th-line); }
+.th-preview-banner.is-live { background: var(--th-success-bg); color: var(--th-success-text); }
+.th-preview-title { font-weight: 400; opacity: 0.75; }
+.th-preview-frame { padding: var(--th-space-24); }
+
+/* ── Desktop Mode — built natively (see DesktopShell.tsx): draggable/
+   resizable windows + a left-edge dock, admin chrome yielding while active. */
+/* #232733 is a one-off gradient-start with no other semantic match; the
+   60%-stop is exactly --sb-bg's value (not a coincidence — this is the same
+   dark rail color), so that half is tokenized. */
+#th-desktop { display: flex; height: 100vh; width: 100vw; overflow: hidden; background: radial-gradient(ellipse at 20% 0%, #232733 0%, var(--th-sidebar-bg) 60%); }
+.th-desktop-canvas { flex: 1; position: relative; overflow: hidden; }
+.th-desktop-version { position: fixed; bottom: 10px; right: 84px; font-size: 11px; color: rgba(255, 255, 255, 0.35); pointer-events: none; }
+
+.th-window {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: var(--th-surface);
+  border-radius: 10px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  min-width: 360px;
+  min-height: 240px;
+}
+.th-window-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--th-space-40);
+  padding: 0 var(--th-space-10) 0 var(--th-space-14);
+  background: var(--th-surface-2);
+  border-bottom: 1px solid var(--th-line);
+  cursor: grab;
+  flex-shrink: 0;
+  user-select: none;
+}
+.th-window-titlebar:active { cursor: grabbing; }
+.th-window-title { font-size: 12px; font-weight: 600; color: var(--th-ink); }
+.th-window-controls { display: flex; align-items: center; gap: var(--th-space-4); }
+.th-window-controls button {
+  width: var(--th-space-24);
+  height: var(--th-space-24);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--th-ink-2);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.th-window-controls button:hover { background: var(--th-line); color: var(--th-ink); }
+.th-window-frame { flex: 1; border: none; width: 100%; background: var(--th-bg); }
+.th-window-resize { position: absolute; right: 0; bottom: 0; width: var(--th-space-16); height: var(--th-space-16); cursor: nwse-resize; }
+.th-window-resize::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: var(--th-space-8);
+  height: var(--th-space-8);
+  border-right: 2px solid var(--th-muted);
+  border-bottom: 2px solid var(--th-muted);
+  opacity: 0.6;
+}
+
+.th-dock {
+  width: 68px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--th-space-16) 0;
+  background: rgba(0, 0, 0, 0.35);
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+}
+.th-dock-items { display: flex; flex-direction: column; gap: var(--th-space-8); overflow-y: auto; }
+.th-dock-icon {
+  position: relative;
+  width: var(--th-space-48);
+  height: var(--th-space-48);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+.th-dock-icon:hover { background: rgba(255, 255, 255, 0.14); transform: translateY(var(--th-hover-lift)); color: var(--th-text-inverse); }
+.th-dock-icon.active { background: var(--th-accent); border-color: var(--th-accent); color: var(--th-text-inverse); }
+/* --th-text-inverse, not --th-surface — same reasoning as the switch thumb
+   above: this dot sits on the dock's own permanently-dark chrome (not the
+   page), so it needs a color that stays bright regardless of --th-surface's
+   light/dark flip, or it goes dark-on-dark in dark mode. */
+.th-dock-dot { position: absolute; bottom: -5px; width: var(--th-space-4); height: var(--th-space-4); border-radius: 999px; background: var(--th-text-inverse); }
+.th-dock-footer { display: flex; flex-direction: column; align-items: center; gap: var(--th-space-10); }
+.th-dock-user {
+  width: var(--th-space-32);
+  height: var(--th-space-32);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--th-accent);
+  color: var(--th-text-inverse);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* A page rendered inside a Desktop Mode window (?embed=1) — bare, no shell
+   chrome, since the window is already the frame. */
+#th-embed-root { min-height: 100vh; background: var(--th-bg); }
+.settings-radio input { margin: 0; }

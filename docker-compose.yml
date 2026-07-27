@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: therum-cms-pg
+    environment:
+      POSTGRES_USER: therum
+      POSTGRES_PASSWORD: therum
+      POSTGRES_DB: therum_cms
+    ports:
+      - "5433:5432"
+    volumes:
+      - therum_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U therum -d therum_cms"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: therum-cms-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - therum_redis:/data
+
+volumes:
+  therum_pg:
+  therum_redis:

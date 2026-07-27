@@ -1,0 +1,797 @@
+// Therum CMS 2.0 — data shape is the source of truth.
+// Money is stored as INTEGER MINOR UNITS (cents). Never floats for money.
+// External `sourceId` makes vendor imports idempotent (re-import never dupes).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums (state machines) ──────────────────────────────────────────────
+
+enum ProductStatus {
+  draft
+  active
+  archived
+}
+
+enum VendorPlatform {
+  shopify
+  woocommerce
+  stripe
+  square
+  custom
+}
+
+enum SyncStatus {
+  idle
+  syncing
+  error
+}
+
+enum OrderStatus {
+  pending
+  processing
+  shipped
+  delivered
+  failed
+  cancelled
+}
+
+enum PaymentStatus {
+  pending
+  authorized
+  paid
+  failed
+  refunded
+}
+
+// ─── Vendor: source of truth for multi-vendor ───────────────────────────
+
+model Vendor {
+  id            String         @id @default(cuid())
+  name          String
+  platform      VendorPlatform @default(custom)
+  apiKey        String?        @map("api_key")
+  webhookSecret String?        @map("webhook_secret")
+  syncStatus    SyncStatus     @default(idle) @map("sync_status")
+  lastSync      DateTime?      @map("last_sync")
+  productsCount Int            @default(0) @map("products_count")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  products      Product[]
+  sourceVariants ProductVariant[] @relation("VariantSourceVendor")
+
+  @@map("vendors")
+}
+
+// ─── Product: core merged-product type ──────────────────────────────────
+
+model Product {
+  id          String        @id @default(cuid())
+  name        String
+  slug        String        @unique
+  description String?
+  image       String?
+  // Gallery beyond the primary image: [{url, alt}] (catalog presentation).
+  images      Json          @default("[]")
+  status      ProductStatus @default(draft)
+  // Null vendorId = a merged product the engine owns (multi-vendor).
+  vendorId    String?       @map("vendor_id")
+  // External id from the source platform — idempotency key for imports.
+  sourceId    String?       @map("source_id")
+  meta        Json          @default("{}")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  vendor      Vendor?          @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  variants    ProductVariant[]
+  clusterMembership ClusterMembership?
+  categories  ProductCategory[]
+  tags        ProductTag[]
+
+  @@unique([vendorId, sourceId], name: "vendor_source")
+  @@index([status])
+  @@map("products")
+}
+
+// ─── Catalog taxonomy (Woo parity: hierarchical categories, flat tags) ──
+
+model ProductCategory {
+  id       String  @id @default(cuid())
+  name     String
+  slug     String  @unique
+  parentId String? @map("parent_id")
+
+  parent   ProductCategory?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children ProductCategory[] @relation("CategoryTree")
+  products Product[]
+
+  @@map("product_categories")
+}
+
+model ProductTag {
+  id   String @id @default(cuid())
+  name String
+  slug String @unique
+
+  products Product[]
+
+  @@map("product_tags")
+}
+
+// ─── ProductVariant: the sellable unit ──────────────────────────────────
+
+model ProductVariant {
+  id             String   @id @default(cuid())
+  productId      String   @map("product_id")
+  sku            String?
+  // Money in minor units (cents).
+  price          Int      @default(0)
+  cost           Int?
+  color          String?
+  size           String?
+  // For merged products, which vendor this specific variant came from.
+  sourceVendorId String?  @map("source_vendor_id")
+  sourceId       String?  @map("source_id")
+  inventory      Int      @default(0)
+  // Reserved (held) inventory; available = inventory - reserved.
+  reserved       Int      @default(0)
+  meta           Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  product        Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sourceVendor   Vendor?     @relation("VariantSourceVendor", fields: [sourceVendorId], references: [id], onDelete: SetNull)
+  orderItems     OrderItem[]
+
+  @@unique([sourceVendorId, sourceId], name: "variant_vendor_source")
+  @@index([productId])
+  @@map("product_variants")
+}
+
+// ─── Customer ────────────────────────────────────────────────────────────
+
+model Customer {
+  id        String    @id @default(cuid())
+  email     String    @unique
+  name      String?
+  meta      Json      @default("{}")
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  addresses   Address[]
+  orders      Order[]
+  memberships MilieuMembership[]
+
+  @@map("customers")
+}
+
+model Address {
+  id         String   @id @default(cuid())
+  customerId String   @map("customer_id")
+  line1      String
+  line2      String?
+  city       String
+  region     String?
+  postalCode String?  @map("postal_code")
+  country    String
+  isDefault  Boolean  @default(false) @map("is_default")
+
+  customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@map("addresses")
+}
+
+// ─── Order: atomic state machine ─────────────────────────────────────────
+
+model Order {
+  id          String      @id @default(cuid())
+  // Human-facing order number, high-entropy + unique.
+  number      String      @unique
+  status      OrderStatus @default(pending)
+  customerId  String?     @map("customer_id")
+  // Total in minor units (cents) — after any membership discount.
+  total       Int         @default(0)
+  // Milieus member discount applied at creation (Milieus M2): percent, the
+  // deducted amount in cents, and the receipt label ("VIP discount (10%)").
+  // Zero/null = no discount applied.
+  discountPct    Float    @default(0) @map("discount_pct")
+  discountAmount Int      @default(0) @map("discount_amount")
+  discountLabel  String?  @map("discount_label")
+  currency    String      @default("USD")
+  // Idempotency key for create (prevents double-submit dupes).
+  idempotencyKey String?  @unique @map("idempotency_key")
+  // Guest receipt access (Counter C1, 1.x provisions rule): 32-hex token
+  // minted at creation, accepted by /order-received via constant-time
+  // compare — a guest's receipt link works without an account.
+  accessToken String?     @unique @map("access_token")
+  // Sum of succeeded refunds in minor units; refundable = total - this.
+  refundedTotal Int       @default(0) @map("refunded_total")
+  // Guest contact email (Counter C2) — a storefront order's billing email,
+  // stored independent of any customer ACCOUNT (Woo's billing_email model).
+  // An unverified checkout email must NOT bind the order to a pre-existing
+  // customer or inherit its membership (audit H-1); it's a receipt address
+  // only. Customer-account association + member discounts wait for real
+  // storefront customer auth.
+  guestEmail  String?     @map("guest_email")
+  createdAt   DateTime    @default(now()) @map("created_at")
+  updatedAt   DateTime    @updatedAt @map("updated_at")
+
+  customer    Customer?   @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items       OrderItem[]
+  payment     Payment?
+  refunds     Refund[]
+  couponRedemptions CouponRedemption[]
+
+  @@index([status])
+  @@index([customerId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id           String         @id @default(cuid())
+  orderId      String         @map("order_id")
+  variantId    String         @map("variant_id")
+  quantity     Int
+  // Snapshot of the price at time of order (minor units) — never recompute.
+  priceAtTime  Int            @map("price_at_time")
+
+  order        Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant      ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@map("order_items")
+}
+
+// ── Counter coupons (C3) ───────────────────────────────────────────
+// Ported from 1.x Counter's coupons/coupon_redemptions (see
+// docs/superpowers/specs/2026-07-24-counter-c3-coupons-design.md). v1 is
+// percent|fixed, cart-scope, single-coupon-per-cart; the redemption ledger
+// tracks per-user limits by guest email (no customer accounts yet) and
+// releases on refund so a refunded order doesn't burn a usage slot.
+
+enum CouponType {
+  percent
+  fixed
+}
+
+model Coupon {
+  id                String     @id @default(cuid())
+  code              String     @unique
+  type              CouponType
+  // percent: 1..100. fixed: minor units off the subtotal.
+  amount            Int
+  minimumAmount     Int?       @map("minimum_amount")
+  maximumAmount     Int?       @map("maximum_amount")
+  usageLimit        Int?       @map("usage_limit")
+  usageLimitPerUser Int?       @map("usage_limit_per_user")
+  usageCount        Int        @default(0) @map("usage_count")
+  individualUse     Boolean    @default(true) @map("individual_use")
+  startsAt          DateTime?  @map("starts_at")
+  expiresAt         DateTime?  @map("expires_at")
+  status            String     @default("active") // active | inactive
+  description       String?
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+
+  redemptions CouponRedemption[]
+
+  @@index([status])
+  @@map("coupons")
+}
+
+model CouponRedemption {
+  id         String    @id @default(cuid())
+  couponId   String    @map("coupon_id")
+  orderId    String    @map("order_id")
+  // Per-user limit tracks by guest email until customer accounts exist.
+  email      String?
+  amount     Int
+  appliedAt  DateTime  @default(now()) @map("applied_at")
+  // Set on refund → frees the per-user slot (1.x releaseRedemptionsForOrder).
+  releasedAt DateTime? @map("released_at")
+
+  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([couponId, orderId], name: "coupon_order")
+  @@index([couponId, email])
+  @@map("coupon_redemptions")
+}
+
+// ── Counter payments (C1) ──────────────────────────────────────────
+// Canonical PSP webhook ledger — every provider event lands here exactly
+// once (1.x rule: replay deduped on UNIQUE(provider, provider_event_id);
+// timestamp-less providers fall back to sha256 of the raw signed body).
+model PaymentEvent {
+  id              String   @id @default(cuid())
+  provider        String
+  providerEventId String   @map("provider_event_id")
+  // payment.succeeded|failed|refunded, refund.succeeded|failed,
+  // dispute.opened|lost|won — receivers ignore unknown kinds.
+  kind            String
+  paymentIntentId String?  @map("payment_intent_id")
+  refundId        String?  @map("refund_id")
+  payload         Json     @default("{}")
+  // Audit C-1: an event is acknowledged to the provider ONLY once applied.
+  // A ledgered-but-unapplied row (apply threw) is re-applied on the
+  // provider's retry instead of being swallowed as a replay.
+  applied         Boolean  @default(false)
+  receivedAt      DateTime @default(now()) @map("received_at")
+
+  @@unique([provider, providerEventId], name: "provider_event")
+  @@index([paymentIntentId])
+  @@map("payment_events")
+}
+
+// A refund against an order — partial or full. amount in minor units.
+model Refund {
+  id             String   @id @default(cuid())
+  orderId        String   @map("order_id")
+  amount         Int
+  reason         String?
+  provider       String
+  // Provider's own refund id (from gateway.refund()); idempotency key
+  // dedupes retries at the provider.
+  providerRefundId String? @map("provider_refund_id")
+  idempotencyKey String   @unique @map("idempotency_key")
+  status         String   @default("pending") // pending | succeeded | failed
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("refunds")
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  orderId     String        @unique @map("order_id")
+  status      PaymentStatus @default(pending)
+  method      String?
+  txnId       String?       @map("txn_id")
+  amount      Int           @default(0)
+  pspResponse Json          @default("{}") @map("psp_response")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  order       Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+// ─── Extension: sandboxed plugin manifest + state ────────────────────────
+
+model Extension {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  version   String
+  // { hooks: string[], ui_entry: string, permissions: string[] }
+  manifest  Json     @default("{}")
+  enabled   Boolean  @default(false)
+  config    Json     @default("{}")
+  // health: ok | unhealthy — set when an extension throws.
+  health    String   @default("ok")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("extensions")
+}
+
+// ─── Admin accounts ───────────────────────────────────────────────────────
+// A real account, not a shared secret — first one is created via the one-time
+// setup gate (see auth.service.ts: needsSetup/setup), matching how 1.9.44
+// always had an actual WordPress admin user.
+model AdminUser {
+  id              String   @id @default(cuid())
+  username        String   @unique
+  passwordHash    String   @map("password_hash")
+  // Per-user dashboard card order/size: [{ id, size }] — 'up'/'down' reorder
+  // + a size-tier picker, not full drag-and-drop (see admin/lib/dashboard.ts).
+  dashboardLayout Json?    @map("dashboard_layout")
+  // Per-user sidebar section/item order + custom sections: { v, sections:
+  // [{id,label}], items: {sectionId:[itemId,...]} } — mirrors 1.9.44's
+  // therum_sidebar_layout user meta shape exactly (see sidebar.ts for the
+  // ported therum_apply_sidebar_layout() merge algorithm).
+  sidebarLayout   Json?    @map("sidebar_layout")
+  // Desktop Mode — 1.9.44's version depends on a third-party WordPress
+  // plugin (Automattic's desktop-mode/desktop-mode.php); built natively
+  // here instead, since the actual feature (draggable windows + a dock,
+  // chrome yielding while active) has nothing WordPress-specific about it.
+  // Per-user, matching 1.9.44's own per-account activation.
+  desktopModeEnabled Boolean @default(false) @map("desktop_mode_enabled")
+  // Media library view state — 1.9.44's therum_pref_media_view_mode /
+  // therum_pref_media_density user meta (its density slider is 3-7 cols,
+  // matched exactly below). Per-user, same reasoning as the fields above.
+  mediaViewMode   String?  @default("grid") @map("media_view_mode")
+  mediaDensity    Int?     @default(5) @map("media_density")
+  // Quick Controls' per-user Behavior tab — real, working preferences
+  // (distinct from the flagged fixture-only "Login-screen customization"/
+  // "list-page defaults" panels in the source doc, which never had a working
+  // save handler and weren't ported). loginLandingPage is a path like
+  // "/dashboard" or "/pages"; sidebarFolded is its own boolean, not derived
+  // from sidebarLayout above (that field stores section/item order, a
+  // different shape); listPageRowCount overrides the global
+  // Appearance.itemsPerPage default when set.
+  loginLandingPage String? @map("login_landing_page")
+  sidebarFolded     Boolean @default(false) @map("sidebar_folded")
+  listPageRowCount  Int?    @map("list_page_row_count")
+  // Quick Controls' per-user Advanced tab — sanitized at write time
+  // (see me.service.ts's sanitizeCustomCss), scoped to this user's own
+  // admin view only, matching the source's "one user's own admin view"
+  // framing exactly.
+  customCss         String? @map("custom_css")
+  // TOTP 2FA (RFC 6238) — secret is base32, generated on enroll, only
+  // committed live once a real code is verified (see twoFactor.service.ts).
+  // No QR delivery: manual secret entry only, matching 1.9.44's own
+  // secure-by-default choice (never send the raw secret to a 3rd-party
+  // QR-rendering endpoint) — and avoids adding a QR-generation dependency
+  // for a feature most authenticator apps support via manual entry anyway.
+  totpSecret      String?  @map("totp_secret")
+  totpEnabled     Boolean  @default(false) @map("totp_enabled")
+  // [{ hash, usedAt }] — 8 single-use recovery codes, hashed at rest (scrypt,
+  // same as the password), generated once at enrollment and never shown again.
+  backupCodes     Json?    @map("backup_codes")
+  // Anti-replay: last accepted 30s time-step index, rejects immediate code reuse.
+  totpLastStep    Int?     @map("totp_last_step")
+  createdAt       DateTime @default(now()) @map("created_at")
+  // Custom roles via capability bundles (section 06 of the feature
+  // inventory) — null is the ORIGINAL, unrestricted tier every account had
+  // before this feature existed (full admin, matching signJwt's historical
+  // hardcoded 'admin' role exactly, so no existing account's access changes
+  // by this column merely existing). Only a non-null roleId narrows access,
+  // via the Role's own bundles — see role.service.ts's resolveAccess().
+  roleId          String?  @map("role_id")
+
+  apiTokens ApiToken[]
+  role      Role?      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@map("admin_users")
+}
+
+// ─── Auth audit log ───────────────────────────────────────────────────────
+// 1.9.44 had NO auth-specific audit log at all (confirmed in the research
+// pass) — this is a clean-slate addition, not a port. Append-only; no user
+// deletion cascade concern since it outlives the account on purpose (an
+// audit trail that vanishes when the account is deleted defeats the point).
+model AuthEvent {
+  id        String   @id @default(cuid())
+  type      String   // login_success | login_failure | login_locked | setup | logout | 2fa_enabled | 2fa_disabled | 2fa_challenge_failed
+  username  String   // not a FK — must still record events for usernames that don't exist (failed logins)
+  ip        String?
+  detail    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([username, createdAt])
+  @@map("auth_events")
+}
+
+// ─── API tokens: scoped bearer tokens for non-browser callers ────────────
+// Directly modeled on 1.9.44's Phase-5.1 API Tokens system (the most
+// directly-reusable prior art the research pass found) — capability-scoped
+// bearer tokens as an alternative to sharing the admin password with
+// scripts/CI/external tools. Token value is shown once at creation; only
+// its hash is ever stored.
+model ApiToken {
+  id          String    @id @default(cuid())
+  userId      String    @map("user_id")
+  name        String
+  tokenHash   String    @unique @map("token_hash")
+  // First few chars of the real token, kept for display ("tro_ab12••••") so
+  // a user can tell tokens apart without the hash being reversible.
+  prefix      String
+  scope       String    @default("read") // 'read' | 'write'
+  createdAt   DateTime  @default(now()) @map("created_at")
+  expiresAt   DateTime? @map("expires_at")
+  lastUsedAt  DateTime? @map("last_used_at")
+  lastUsedIp  String?   @map("last_used_ip")
+  revokedAt   DateTime? @map("revoked_at")
+
+  user AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("api_tokens")
+}
+
+// ─── Custom roles: composable capability bundles ─────────────────────────
+// Ported concept from 1.9.44's Permissions page: named roles built from a
+// fixed set of composable bundles, rather than a fixed admin/editor/author
+// ladder. bundles is a subset of: read, write, publish, edit-broadly,
+// manage-settings, storefront-customer, storefront-manager (see
+// role.service.ts's BUNDLES for the canonical list + role.schema.ts for
+// the Zod-enforced enum). onDelete: Restrict on AdminUser.role means a
+// role in active use can't be deleted out from under its users — they must
+// be reassigned first, so nobody is ever silently promoted to full admin
+// (roleId: null) by a role's deletion.
+model Role {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  bundles   String[]
+  createdAt DateTime @default(now()) @map("created_at")
+
+  users AdminUser[]
+
+  @@map("roles")
+}
+
+// ─── Settings: generic key/value config store ────────────────────────────
+// The Node/Postgres analog of WP's wp_options table, minus the autoload-cache
+// baggage that only existed because WP loads every autoloaded option into one
+// PHP array on every request — Postgres just indexes on the key. Every
+// settings screen (Appearance, Login, Notifications, Backup, ...) is a typed
+// wrapper over this one table (see src/services/settings.service.ts).
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}
+
+// ─── Settings > Redirects — core rule CRUD (1.9.44's 404 monitor + JSON/CSV
+// import-export are a separate, larger follow-up, not built here yet). ─────
+model RedirectRule {
+  id        String   @id @default(cuid())
+  from      String
+  to        String
+  code      Int      @default(301)
+  isRegex   Boolean  @default(false) @map("is_regex")
+  enabled   Boolean  @default(true)
+  hits      Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([from])
+  @@map("redirect_rules")
+}
+
+// ─── 404 monitor ──────────────────────────────────────────────────────────
+// One row per distinct missed path (upserted, not appended) — a scanner
+// hammering the same dead URL shouldn't grow this table unbounded, just
+// increment count/lastSeenAt on the existing row.
+model NotFoundHit {
+  id          String   @id @default(cuid())
+  path        String   @unique
+  method      String
+  referer     String?
+  count       Int      @default(1)
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime @default(now()) @updatedAt @map("last_seen_at")
+
+  @@map("not_found_hits")
+}
+
+// ─── Folio: native Content engine ────────────────────────────────────────
+
+enum ContentType {
+  page
+  post
+  case_study
+}
+
+enum ContentStatus {
+  draft
+  published
+  archived
+}
+
+model Content {
+  id          String        @id @default(cuid())
+  type        ContentType   @default(page)
+  title       String
+  slug        String        @unique
+  status      ContentStatus @default(draft)
+  excerpt     String?
+  coverImage  String?       @map("cover_image")
+  // Body is a builder canvas tree, markdown, or html — bodyFormat says which.
+  body        Json          @default("{}")
+  bodyFormat  String        @default("canvas") @map("body_format")
+  // SEO block: { title, description, ogImage, canonical, noindex }.
+  seo         Json          @default("{}")
+  meta        Json          @default("{}")
+  publishedAt DateTime?     @map("published_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  @@index([type, status])
+  @@map("content")
+}
+
+model MediaAsset {
+  id        String   @id @default(cuid())
+  url       String
+  alt       String?
+  kind      String   @default("image") // image | video | file
+  width     Int?
+  height    Int?
+  size      Int?
+  meta      Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("media_assets")
+}
+
+// Nexus (the Connections hub Studio app) — one credential per provider,
+// encrypted at rest (AES-256-GCM, key derived from JWT_SECRET — see
+// connection.service.ts). Only maskedPreview ever round-trips to the
+// browser; credentialEncrypted never leaves this table.
+model Connection {
+  id                   String    @id @default(cuid())
+  provider             String    @unique
+  category             String
+  credentialEncrypted  String    @map("credential_encrypted")
+  maskedPreview        String    @map("masked_preview")
+  status               String    @default("connected") // connected | error
+  connectedAt          DateTime  @default(now()) @map("connected_at")
+  lastTestedAt         DateTime? @map("last_tested_at")
+  lastTestOk           Boolean?  @map("last_test_ok")
+  updatedAt            DateTime  @updatedAt @map("updated_at")
+
+  @@map("connections")
+}
+
+model ConnectionAuditLog {
+  id       String   @id @default(cuid())
+  provider String
+  action   String // connect | disconnect | test
+  actorId  String?  @map("actor_id")
+  detail   String?
+  at       DateTime @default(now())
+
+  @@index([provider, at])
+  @@map("connection_audit_log")
+}
+
+// Real, generic receiver (POST /api/webhooks/connections/:provider) so the
+// "inbound webhook URL" the Connections page advertises actually logs
+// something. `verified` is real for github/stripe/slack once a webhook
+// secret is configured (see WebhookSecret + src/lib/webhookSignatures.ts)
+// — null means no signature scheme wired for that provider yet, not "failed".
+model WebhookLog {
+  id             String   @id @default(cuid())
+  provider       String
+  event          String?
+  payloadSummary String?  @map("payload_summary") // truncated, not the full raw body indefinitely
+  verified       Boolean?
+  receivedAt     DateTime @default(now()) @map("received_at")
+
+  @@index([provider, receivedAt])
+  @@map("webhook_log")
+}
+
+// This install's own configured signing secret for a provider's webhooks
+// (what the provider's dashboard calls a "signing secret" / "webhook
+// secret") — separate from OAuthAppCredential (authorization, not inbound
+// verification) and from Connection (an outbound-call credential).
+model WebhookSecret {
+  id              String   @id @default(cuid())
+  provider        String   @unique
+  secretEncrypted String   @map("secret_encrypted")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("webhook_secrets")
+}
+
+// This Therum install's own registered OAuth app with a provider (its
+// client_id/client_secret) — separate from Connection, which stores a
+// per-connection credential (an API key, or an OAuth *access token* once
+// granted). Admin-configured once per provider before "Connect" can start a
+// real authorization-code flow for that provider.
+model OAuthAppCredential {
+  id                  String   @id @default(cuid())
+  provider            String   @unique
+  clientId            String   @map("client_id")
+  clientSecretEncrypted String @map("client_secret_encrypted")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@map("oauth_app_credentials")
+}
+
+// ── Milieus (memberships) ───────────────────────────────────────────
+// Named customer groups — the 2.0 native engine for the "memberships"
+// capability. Semantics ported from the 1.x WP plugin (see
+// docs/superpowers/specs/2026-07-21-milieus-native-design.md): members are
+// Customers here, not WP users, so the 1.x capability-bundle machinery
+// (WP roles) has no 2.0 equivalent and is deliberately absent.
+
+enum MembershipSource {
+  manual
+  link
+  csv
+  api
+}
+
+model Milieu {
+  id                 String    @id @default(cuid())
+  name               String
+  slug               String    @unique
+  color              String    @default("#2563eb")
+  // Percent off at checkout; 0 = no discount. Largest single milieu wins —
+  // no stacking (1.x wc-pricing.php rule, user-confirmed).
+  discountPct        Float     @default(0) @map("discount_pct")
+  // Group lifetime: the milieu itself auto-deletes at this time and its
+  // members drop out. Null = forever (1.x expires_at = 0).
+  expiresAt          DateTime? @map("expires_at")
+  // Default membership duration in days for each new member; 0 = permanent.
+  // (1.x stored {value, unit} — simplified to days-only by design.)
+  memberDurationDays Int       @default(0) @map("member_duration_days")
+  // Public registration link (M4) — 1.x reg.{enabled, slug, approval,
+  // max_signups, signup_count}; the branding fields (logo/bg/welcome) wait
+  // for a public site to render them on.
+  regEnabled         Boolean   @default(false) @map("reg_enabled")
+  regSlug            String?   @unique @map("reg_slug")
+  regRequiresApproval Boolean  @default(false) @map("reg_requires_approval")
+  // 0 = unlimited.
+  regMaxSignups      Int       @default(0) @map("reg_max_signups")
+  regSignupCount     Int       @default(0) @map("reg_signup_count")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
+
+  memberships MilieuMembership[]
+
+  @@map("milieus")
+}
+
+// ── Cluster (merged products) ───────────────────────────────────────
+// Symmetric product groups ported from the 1.x plugin (see
+// docs/superpowers/specs/2026-07-22-cluster-native-design.md). The primary
+// member is the customer-facing product; the merged variant view is resolved
+// at read time from live member variants — never copied, so no sync drift.
+
+model ClusterGroup {
+  id               String   @id @default(cuid())
+  name             String
+  // Explicit primary override; null = earliest-created member (2.0 analog of
+  // 1.x's lowest-ID rule). 1.x mirrors this value onto every member's row;
+  // storing it once here is the same semantics with one source of truth.
+  primaryProductId String?  @map("primary_product_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  members ClusterMembership[]
+
+  @@map("cluster_groups")
+}
+
+model ClusterMembership {
+  id        String   @id @default(cuid())
+  groupId   String   @map("group_id")
+  // 1.x invariant: a product belongs to at most one group.
+  productId String   @unique @map("product_id")
+  addedAt   DateTime @default(now()) @map("added_at")
+
+  group   ClusterGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  product Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+  @@map("cluster_memberships")
+}
+
+model MilieuMembership {
+  id         String           @id @default(cuid())
+  milieuId   String           @map("milieu_id")
+  customerId String           @map("customer_id")
+  assignedAt DateTime         @default(now()) @map("assigned_at")
+  // Null = permanent (1.x expires = 0).
+  expiresAt  DateTime?        @map("expires_at")
+  source     MembershipSource @default(manual)
+  // Expiring-soon reminder fires at most once per membership (1.x
+  // _milieus_reminder_sent_ flag).
+  reminderSentAt DateTime?    @map("reminder_sent_at")
+  // Set while awaiting admin approval (1.x approval gate); null = active.
+  // Pending memberships get no discount and are excluded from the sweep's
+  // benefits until approved.
+  pendingAt      DateTime?    @map("pending_at")
+
+  milieu   Milieu   @relation(fields: [milieuId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([milieuId, customerId], name: "milieu_customer")
+  @@index([customerId])
+  @@index([expiresAt])
+  @@map("milieu_memberships")
+}
