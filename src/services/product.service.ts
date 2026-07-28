@@ -3,6 +3,7 @@ import { db } from '../lib/db.js';
 import { hookBus } from '../lib/hooks.js';
 import { NotFoundError, ConflictError } from '../lib/errors.js';
 import type { CreateProductInput, UpdateProductInput, ListProductsQuery, VariantInput, UpdateVariantInput } from '../schemas/product.schema.js';
+import { orderByOf } from '../schemas/listing.js';
 
 function slugify(input: string): string {
   return input
@@ -28,18 +29,21 @@ export const productService = {
     if (query.q) where.name = { contains: query.q, mode: 'insensitive' };
 
     // Cursor pagination (not offset) — stable under inserts.
-    const rows = await db.product.findMany({
-      where,
-      include: productInclude,
-      take: query.limit + 1,
-      ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
-      orderBy: { createdAt: 'desc' },
-    });
+    const [rows, total] = await Promise.all([
+      db.product.findMany({
+        where,
+        include: productInclude,
+        take: query.limit + 1,
+        ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+        orderBy: orderByOf(query.sort, query.order),
+      }),
+      db.product.count({ where }),
+    ]);
 
     const hasMore = rows.length > query.limit;
     const items = hasMore ? rows.slice(0, query.limit) : rows;
     const nextCursor = hasMore ? items[items.length - 1]?.id ?? null : null;
-    return { items, nextCursor };
+    return { items, nextCursor, total };
   },
 
   async get(id: string) {

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { CreateMediaInput, ListMediaQuery, UpdateMediaInput, RenameMediaInput, BulkRenameInput } from '../../schemas/media.schema.js';
+import { CreateMediaInput, ListMediaQuery, UpdateMediaInput, RenameMediaInput, BulkRenameInput, TransformMediaInput } from '../../schemas/media.schema.js';
 import { mediaService } from '../../services/media.service.js';
 import { requireCapability } from '../../middleware/capability.js';
 import { ValidationError } from '../../lib/errors.js';
@@ -39,6 +39,15 @@ export async function mediaRoutes(app: FastifyInstance): Promise<void> {
   app.post('/media/:id/rename', { preHandler: app.authenticate }, async (req, reply) => {
     const input = RenameMediaInput.parse(req.body);
     reply.send(await mediaService.rename(idParam(req), input.basename));
+  });
+
+  app.post('/media/:id/transform', { preHandler: app.authenticate }, async (req, reply) => {
+    const input = TransformMediaInput.parse(req.body);
+    reply.send(await mediaService.transform(idParam(req), input));
+  });
+
+  app.post('/media/:id/revert', { preHandler: app.authenticate }, async (req, reply) => {
+    reply.send(await mediaService.revert(idParam(req)));
   });
 
   app.post('/media/:id/regenerate-thumbnail', { preHandler: app.authenticate }, async (req, reply) => {

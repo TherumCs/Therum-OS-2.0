@@ -13,13 +13,27 @@ export default async function ClustersPage() {
     loadError = true;
   }
 
+  const drifting = clusters.filter((c) => c.hasDrift).length;
+  const members = clusters.reduce((sum, c) => sum + c.memberCount, 0);
+
   return (
-    <div>
-      <h2 style={{ marginTop: 0, fontSize: 'var(--th-fs-lg)' }}>Cluster</h2>
-      <p className="muted" style={{ marginTop: -8 }}>
-        Merge products from multiple sources into one customer-facing product — every color/size combo routed to the source that owns it.
-      </p>
+    <section>
+      <div className="th-lp-header">
+        <div className="th-lp-header-left">
+          <div className="th-lp-meta">
+            <span className="th-lp-meta-dot" />
+            {clusters.length} {clusters.length === 1 ? 'CLUSTER' : 'CLUSTERS'} · {members} LINKED · {drifting} DRIFTING
+          </div>
+          <h1 className="th-lp-title">Cluster</h1>
+          <p className="th-lp-sub">
+            Sell one product that lives in several places at once. Merge listings from multiple sources into a
+            single customer-facing product, and every colour and size routes to whichever source actually owns
+            that variant — so stock and price stay true to their origin.
+          </p>
+        </div>
+      </div>
+
       <ClustersClient initial={clusters} loadError={loadError} />
-    </div>
+    </section>
   );
 }

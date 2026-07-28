@@ -5,7 +5,7 @@ import { z } from 'zod';
 // which is genuinely a personal preference.
 export const AppearanceInput = z.object({
   density: z.enum(['compact', 'comfortable', 'breathing']).optional(),
-  sidebarStyle: z.enum(['default', 'pills', 'minimal']).optional(),
+  sidebarStyle: z.enum(['default', 'pills', 'floating', 'solid', 'minimal', 'dividers']).optional(),
   cardStyle: z.enum(['flat', 'shadow', 'glass']).optional(),
   colorMode: z.enum(['light', 'dark', 'system']).optional(),
   contrast: z.enum(['normal', 'high']).optional(),
@@ -49,6 +49,32 @@ export const AppearanceInput = z.object({
 
   keyboardShortcuts: z.boolean().optional(),
   debugOverlays: z.boolean().optional(),
+
+  // ── Ported from 1.9.44's Therum_Themes::default_state() (2026-07-27) ────
+  // These existed in the 1.9.44 chrome but had no field here, so the Appearance
+  // page could not offer them. Option lists are 1.9.44's exact sets, not
+  // approximations — see therum-settings.php's own radio groups.
+
+  sidebarLayout: z.enum(['both', 'icons', 'text']).optional(),
+  sidebarFoldable: z.boolean().optional(),
+
+  glass: z.boolean().optional(),
+  // The MODE, distinct from `glassTint` above which stores the custom colour
+  // used when this is 'color'.
+  glassTintMode: z.enum(['auto', 'dark', 'light', 'color']).optional(),
+  surfaceEffect: z.enum(['none', 'glass-light', 'glass-dark', 'glass-colored', 'gradient', 'blurred']).optional(),
+  bgImage: z.enum(['none', 'mesh', 'grid', 'noise', 'dots']).optional(),
+
+  // 1.9.44's card TEMPLATE, a different axis from `cardLayout` (which is only
+  // density) and `cardStyle` (which is only surface treatment).
+  cardTemplate: z.enum(['hero', 'detailed', 'list-1', 'list-2', 'list-3']).optional(),
+  cardImage: z.enum(['gradient', 'featured', 'stock', 'wireframe', 'pattern']).optional(),
+
+  bentoGap: z.number().int().min(0).max(48).optional(),
+  autoSave: z.boolean().optional(),
+  showGrips: z.boolean().optional(),
+  desktopMode: z.boolean().optional(),
+  codeEditorTheme: z.enum(['therum', 'github', 'monokai', 'solarized', 'nord']).optional(),
 });
 export type AppearanceInput = z.infer<typeof AppearanceInput>;
 
@@ -85,7 +111,7 @@ export type SidebarLayoutInput = z.infer<typeof SidebarLayoutInput>;
 // here). Both optional: the view toggle saves immediately, the density
 // slider debounce-saves separately, so a single request rarely sends both.
 export const MediaViewInput = z.object({
-  viewMode: z.enum(['grid', 'masonry', 'metro', 'table']).optional(),
+  viewMode: z.enum(['grid', 'masonry', 'table']).optional(),
   density: z.number().int().min(3).max(7).optional(),
 });
 export type MediaViewInput = z.infer<typeof MediaViewInput>;

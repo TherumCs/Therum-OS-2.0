@@ -62,7 +62,11 @@ export const meService = {
       dashboardLayout: layout,
       sidebarLayout,
       desktopModeEnabled: user.desktopModeEnabled,
-      mediaViewMode: user.mediaViewMode ?? 'grid',
+      // null means "no personal preference yet" — the admin layer falls back to
+      // Appearance > Lists & cards > Default list view. Coalescing to 'grid'
+      // here made every user look like they had explicitly chosen grid, so the
+      // site-wide setting could never take effect.
+      mediaViewMode: user.mediaViewMode ?? '',
       mediaDensity: user.mediaDensity ?? 5,
       loginLandingPage: user.loginLandingPage,
       sidebarFolded: user.sidebarFolded,

@@ -122,13 +122,17 @@ export const bricksAddonService = {
       where: { name: { startsWith: PREFIX } },
       orderBy: { createdAt: 'asc' },
     });
+    // Manifest FIRST, then the stored columns — the manifest also carries a
+    // `slug`, and spreading it last silently overwrote the installed name with
+    // whatever the ZIP claimed. Every other route keys off `PREFIX + slug`
+    // from the stored name, so that is the one that has to win.
     return rows.map((r) => ({
+      ...(r.manifest as unknown as AddonManifest),
       id: r.id,
       slug: r.name.slice(PREFIX.length),
       version: r.version,
       enabled: r.enabled,
       health: r.health,
-      ...(r.manifest as unknown as AddonManifest),
     }));
   },
 
@@ -220,7 +224,8 @@ export const bricksAddonService = {
         health: 'ok',
       },
     });
-    return { id: row.id, slug, version, enabled: row.enabled, ...manifest };
+    // Same ordering rule as list(): the installed slug wins over the manifest's.
+    return { ...manifest, id: row.id, slug, version, enabled: row.enabled };
   },
 
   async setEnabled(slug: string, enabled: boolean) {

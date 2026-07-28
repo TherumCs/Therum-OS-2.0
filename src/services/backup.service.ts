@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createWriteStream } from 'node:fs';
-import { mkdir, readdir, stat, unlink, readFile } from 'node:fs/promises';
+import { mkdir, readdir, stat, unlink, readFile, writeFile} from 'node:fs/promises';
 import { join } from 'node:path';
 import { ZipArchive } from 'archiver';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
@@ -58,16 +58,46 @@ async function uploadToS3(filepath: string, filename: string): Promise<void> {
   await client.send(new PutObjectCommand({ Bucket: s.s3Bucket, Key: key, Body: body, ContentType: 'application/zip' }));
 }
 
-// Real pg_dump-based backup — not simulated. If pg_dump isn't installed in
-// this environment (confirmed absent on the dev machine this was built on;
-// Postgres runs in Docker here with no client tools on the host PATH), this
-// reports that honestly instead of claiming a backup succeeded.
+// Real pg_dump-based backup — not simulated.
+//
+// The host does not necessarily have PostgreSQL client tools: on the dev
+// machine this was built for, Postgres runs in Docker and the host PATH has no
+// pg_dump at all, which meant backups could never complete — manual OR
+// scheduled. So the container is tried as a second route before giving up:
+// the same pg_dump, reached through `docker exec`, dumping over the container's
+// own loopback rather than the host's.
+type DumpRunner = { label: string; run: (args: string[]) => Promise<unknown> };
+
+// Overridable for a differently-named container without a schema change.
+const PG_CONTAINER = process.env.BACKUP_PG_CONTAINER ?? 'therum-cms-pg';
+
+async function resolveDumpRunner(): Promise<DumpRunner | null> {
+  try {
+    await execFileAsync('pg_dump', ['--version']);
+    return { label: 'host pg_dump', run: (args) => execFileAsync('pg_dump', args) };
+  } catch {
+    // fall through to Docker
+  }
+  try {
+    await execFileAsync('docker', ['exec', PG_CONTAINER, 'pg_dump', '--version']);
+    return {
+      label: `docker exec ${PG_CONTAINER} pg_dump`,
+      // -f would write INSIDE the container; dump to stdout and capture it.
+      run: (args) => execFileAsync('docker', ['exec', PG_CONTAINER, 'pg_dump', ...args], { maxBuffer: 512 * 1024 * 1024 }),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export const backupService = {
   async runNow(): Promise<BackupFile> {
-    try {
-      await execFileAsync('pg_dump', ['--version']);
-    } catch {
-      throw new Error('pg_dump isn’t available in this environment — install the PostgreSQL client tools to enable real backups.');
+    const runner = await resolveDumpRunner();
+    if (!runner) {
+      throw new Error(
+        'pg_dump isn’t available — install the PostgreSQL client tools, or run Postgres in a Docker container named ' +
+          `"${PG_CONTAINER}" so backups can use the one inside it.`,
+      );
     }
 
     await mkdir(BACKUP_DIR, { recursive: true });
@@ -76,7 +106,17 @@ export const backupService = {
     const filename = `therum-cms-${stamp}.zip`;
     const zipPath = join(BACKUP_DIR, filename);
 
-    await execFileAsync('pg_dump', [env.DATABASE_URL, '-f', sqlPath]);
+    // DATABASE_URL is Prisma's, and carries Prisma-only query parameters
+    // (?schema=, ?connection_limit=…) that pg_dump rejects outright with
+    // "invalid URI query parameter". Strip the query before handing it over.
+    const bare = env.DATABASE_URL.split('?')[0]!;
+    // Inside the container the database is on its own loopback, not the host
+    // port the app connects through — rewrite the host so the dump resolves.
+    const dumpUrl = runner.label.startsWith('docker')
+      ? bare.replace(/@[^/:]+(:\d+)?/, '@127.0.0.1:5432')
+      : bare;
+    const out = await runner.run([dumpUrl]);
+    await writeFile(sqlPath, (out as { stdout: string }).stdout);
     const manifest: Manifest = { version: '2.0.0', createdAt: new Date().toISOString(), database: 'sql-dump', uploadsIncluded: true };
     await zipArchive(sqlPath, manifest, zipPath);
     await unlink(sqlPath).catch(() => {});

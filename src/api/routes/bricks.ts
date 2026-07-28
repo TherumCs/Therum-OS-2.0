@@ -4,6 +4,7 @@ import { parseBricksPayload, fromBricks, toBricks, type CanvasNode } from '../..
 import { contentService } from '../../services/content.service.js';
 import { studioAppService } from '../../services/studioApp.service.js';
 import { bricksMediaService } from '../../services/bricksMedia.service.js';
+import { settingsService } from '../../services/settings.service.js';
 import { bricksAddonService } from '../../services/bricksAddon.service.js';
 import { isCanvasNode } from '../../lib/render.js';
 import { ConflictError } from '../../lib/errors.js';
@@ -94,6 +95,18 @@ export async function bricksRoutes(app: FastifyInstance): Promise<void> {
       throw new ConflictError('Only .zip archives can be installed.', 'file');
     }
     const buffer = await file.toBuffer();
+    // The multipart ceiling is deliberately set above the largest value
+    // Settings > Uploads allows (see server.ts), so the per-route bound has to
+    // be explicit — otherwise a plugin ZIP could be buffered at the 2 GB
+    // transport ceiling. Plugin installs are not media, but the site's own
+    // declared upload limit is the right yardstick for "too big to accept".
+    const { maxUploadMb } = await settingsService.getUploads();
+    if (buffer.length > maxUploadMb * 1024 * 1024) {
+      throw new ConflictError(
+        `That archive is ${(buffer.length / 1024 / 1024).toFixed(1)} MB — this site accepts up to ${maxUploadMb} MB (Settings → Uploads).`,
+        'file',
+      );
+    }
     reply.send(await bricksAddonService.install(file.filename, buffer));
   });
 

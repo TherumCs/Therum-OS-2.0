@@ -38,6 +38,8 @@ export interface Extension {
 export interface Paged<T> {
   items: T[];
   nextCursor: string | null;
+  /** Rows matching the current filters, ignoring paging. */
+  total?: number;
 }
 
 export function money(cents: number): string {

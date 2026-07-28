@@ -1,5 +1,235 @@
 # Changelog
 
+## [2.0.0-beta.2] — Admin hardening, Media library rebuild, front-end dock (2026-07-28)
+
+Released after a full audit pass: every admin route, all 10 Appearance sections,
+all 15 Settings sections, the public site, the builder and the login flow were
+driven end to end and verified working. Highlights of this release:
+
+- **Appearance** rebuilt into the Settings shell (rail + content pane), 50
+  controls across 10 sections, saving per field on change. 14 fields ported from
+  1.9.44 that 2.0 had no schema for. Every control verified to change the rendered
+  chrome — 4 that saved into the void are now wired.
+- **Settings**: zero broken saves. Uploads' 11 settings are enforced for the first
+  time (the six `allow*` toggles previously enforced nothing).
+- **Media**: real-shape masonry, hover captions, a full lightbox with crop /
+  rotate / flip / rename / alt text, non-destructive with revert.
+- **Front-end admin dock**, ported from 1.9.44, with a safe hand-off to the
+  visual builder.
+- **Login was completely broken** by a CSP that blocked React hydration — the form
+  could not submit and the server logged no attempt. Fixed.
+
+### Added — scheduled backups
+
+- `Settings > Backup` had `enabled` and `frequency` saving into nothing: there was
+  no scheduler for them to configure. A BullMQ repeatable job now runs on the
+  chosen cadence (hourly `0 * * * *`, twice-daily `0 3,15 * * *`, daily `0 3 * * *`,
+  weekly `0 3 * * 0`), verified computing correct next-run times, and disabling
+  removes the schedule outright. The schedule re-arms on PATCH rather than waiting
+  for the next worker boot — changing the frequency and seeing nothing happen for
+  a day is indistinguishable from the setting being broken.
+- Scheduled runs go through the same `runNow()` as the manual button, so both
+  produce the same artifact, and now also fire `notifyBackupComplete` — the
+  unattended run is the one you are more likely to want told about.
+
+### Fixed — backups could never complete on a Docker-Postgres host
+
+- `runNow()` required `pg_dump` on the host PATH and threw otherwise. On a machine
+  where Postgres runs in Docker (this one) there is no host `pg_dump`, so **no
+  backup had ever succeeded** — manual or scheduled. It now falls back to the
+  `pg_dump` inside the Postgres container via `docker exec`, dumping to stdout
+  (`-f` would write inside the container) and rewriting the host to the
+  container's own loopback. Container name overridable via `BACKUP_PG_CONTAINER`.
+- `DATABASE_URL` is Prisma's and carries `?schema=public`, which `pg_dump` rejects
+  with "invalid URI query parameter". The query string is now stripped before the
+  dump. First successful backup on this machine: 89 MB, containing
+  `manifest.json`, a 638 KB `database.sql`, and the full uploads tree.
+
+### Added — ⌘K command palette
+
+- The sidebar advertised "⌘K" from the day the shell was built and **nothing ever
+  listened for it**; the search box beside it had no state or handler either, so
+  typing in it did nothing. Appearance > Workspace > "Keyboard shortcuts" was
+  equally hollow — it saved, with no handler to gate. All three are now real:
+  ⌘K / Ctrl-K opens a palette over nav, all 10 Appearance sections, all 15
+  Settings sections and a debounced content search; ↑↓ moves, ↵ opens, Esc
+  closes; the sidebar box opens the same palette rather than duplicating it; and
+  the setting genuinely disables it.
+
+### Fixed — Settings > Performance partly load-bearing
+
+- `lazyImages`, `minHtml` and `minCss` now apply to every public page as it is
+  served (verified: 0 → 6 lazy images on /contact). The page's own copy claimed
+  "2.0 has no public renderer yet" — stale, there is one — and now states exactly
+  which toggles are live and which are not.
+- HTML minification collapses whitespace between tags only; `<pre>`, `<textarea>`,
+  `<script>` and `<style>` are preserved byte-for-byte. Real but small on ported
+  pages (~200 bytes) because Bricks-exported markup arrives already single-line.
+- The remaining Performance toggles are labelled honestly rather than faked:
+  revisions/trash/autosave need a feature built (no revision table, no soft
+  delete, no builder autosave), and emoji/oEmbed/heartbeat strip WordPress-era
+  behaviour this stack never emits.
+
+### Fixed — addon install could be un-manageable
+
+- `bricksAddon.service.ts` built its return objects with an explicit `slug` and
+  then spread the manifest over it, so `manifest.slug` silently won. Every other
+  route keys off `PREFIX + slug` from the stored name, so a ZIP whose manifest
+  disagreed produced an addon that could not be enabled or removed. This was also
+  the pre-existing `tsc` error that had been blocking the production build.
+
+### Fixed — login and admin hydration
+
+- **Nothing in the admin was interactive, including the login form.** Helmet's
+  default `script-src 'self'` applied to `/tos-admin`, which blocks the inline
+  `self.__next_f.push(…)` tags Next ships its RSC payload in. React hydrated with
+  nothing: markup rendered, every control was dead HTML, and submitting the login
+  form made no request at all (the auth event log recorded zero failed attempts,
+  which is what identified it). Fixed with `@fastify/helmet`'s own per-route
+  opt-out — note it reads `helmet: false` at the TOP level of route options;
+  `config: { helmet: false }` is silently ignored. The public site and `/api` keep
+  helmet's strict defaults.
+- **Do not mutate responses in a Fastify `onSend` hook.** Two separate attempts at
+  the above (deleting headers via `reply.raw.removeHeader`, and later injecting the
+  dock by rewriting the body) each threw `ERR_HTTP_HEADERS_SENT` on the *next*
+  response and killed the process. Header deletion belongs in route config; body
+  injection belongs in the render context.
+
+### Added — front-end admin dock
+
+- Port of 1.9.44's `thd_*` block. Renders only for a valid session cookie —
+  logged-out HTML is byte-identical. Auto-hide on scroll, drawer + pull-tab, focus
+  mode, per-route breadcrumb, and Edit for real content rows. Drives the
+  `defaultMode` and `mobileStyle` settings, which until now saved and did nothing.
+- **Edit hands off without leaking the session token.** The dock renders into
+  public page HTML, so it cannot carry `builderEditUrl()`'s `?token=<jwt>`. It links
+  to `/tos-admin/edit/<id>`, which reads the httpOnly cookie server-side and
+  redirects.
+- **The builder was unreachable.** `NEXT_PUBLIC_BUILDER_URL` pointed at
+  `localhost:10004` — a port nothing has listened on since the API moved to 10009 —
+  so every Edit hand-off in the admin went to a dead host. The builder is now served
+  from the API at `/builder/`, keeping the whole product on one origin.
+
+### Fixed — Settings > Uploads enforced
+
+- **The six `allow*` toggles enforced nothing.** Turning off "allow code" did not
+  stop `.php` uploads; any file type was accepted. All 11 Uploads settings are now
+  applied in `lib/uploadPolicy.ts`, called from `mediaService.upload()` so every
+  caller is covered. `maxUploadMb` and `resizeMaxPx` had been hardcoded constants.
+- `autoWebp` wrote WebP bytes into a `.png` filename; `exifStripped` was hardcoded
+  `true` regardless of the setting. Both fixed.
+- The multipart ceiling moved from 50 MB to 2048 MB so `maxUploadMb` is the real
+  limit — which left the plugin-ZIP route unbounded, so it gained its own check.
+
+## [Unreleased] — earlier beta.1 shakedown work (2026-07-27)
+
+Sidemoney-beta shakedown pass. Everything below came out of driving the real admin
+at `localhost:10009/tos-admin` rather than reading code, so each item is a defect
+that was actually reproduced, or a behaviour Bam asked for by name.
+
+### Fixed — list pages
+
+- **Every admin list lost its filters, sort, and paging past 100 rows.** Filtering
+  and search ran client-side over an already-truncated fetch, so a pill count could
+  claim 368 while the filter only ever saw the first page; sorting did not exist at
+  all. Moved all four to the query string and the database: `src/schemas/listing.ts`
+  (shared `sort`/`order` + a real `total`), `admin/app/(app)/ListControls.tsx`
+  (URL-driven pills / debounced search / sort select / cursor pager). Applies to
+  pages, posts, media, case studies, products, orders, users.
+- **`kind=audio` returned 422 on media.** The uploader and the UI pill both produce
+  `audio`, but it was missing from the list-query enum.
+- **Cluster and Milieus had ad-hoc page headers.** Rebuilt on the standard
+  `th-lp-header` (live counts, title, plain-English description) so they match Pages
+  / Posts / Media / Bricks Bridge. Inner headings disambiguated: "Groups" →
+  "Merged products" / "Member groups".
+
+### Fixed — single-origin admin proxy (`src/api/adminProxy.ts`)
+
+- **Login POSTs arrived empty and Server Actions white-screened.** Fastify's own
+  JSON and multipart parsers consumed the request body before it could be forwarded.
+  A scoped catch-all parser is not enough — a specific parser registered on the ROOT
+  instance still wins over a child's `'*'` — so the plugin now calls
+  `removeAllContentTypeParsers()` first and forwards the raw bytes.
+- **Next rejected Server Actions as cross-origin.** The proxy now forwards the real
+  browser `Host` alongside `X-Forwarded-Host`, with `serverActions.allowedOrigins`
+  in `admin/next.config.mjs` covering the rest.
+- **Helmet's default CSP (`script-src 'self'`) applied to the admin.** Next ships its
+  RSC flight payload as inline `<script>` tags, so the whole admin would have been
+  served as un-hydratable static HTML. Helmet's headers are now stripped for the
+  `/tos-admin` prefix only — the public site and `/api` keep the strict defaults.
+  Note `@fastify/helmet` writes through `reply.raw.setHeader`, so removal has to go
+  through `reply.raw.removeHeader` too.
+
+### Added — media library
+
+- **Lightbox viewer** (`admin/app/(app)/media/MediaLightbox.tsx`). Full-bleed, with
+  the action bar floating over the image rather than beside it: one row, icon-over-
+  label buttons, grouped edit / copy / destructive with rules between the groups.
+  Rename, alt text, crop and adjust each open their own screen in that same bar,
+  replacing the `window.prompt()` calls. Arrow keys walk the loaded page; Escape
+  backs out of a screen before it closes the viewer.
+- **Non-destructive image editing.** `POST /api/media/:id/transform` (crop as
+  normalised 0–1 rect, rotate 90/180/270, flip X/Y) and `POST /api/media/:id/revert`.
+  Edits apply in place so every Bricks canvas pointing at the URL keeps working; the
+  first edit copies the as-uploaded file to a `-original` sibling, which is what
+  revert restores. Refuses SVGs (sharp would rasterise vector artwork while keeping
+  the `.svg` name) and animated images (would flatten them to one frame).
+
+### Changed — media tiles
+
+- **Tiles are artwork, not cards.** The caption box under each thumbnail is gone and
+  the name now appears on hover; grid uses `contain` so nothing is cropped. The old
+  `cover` crop meant a wide banner or a logo showed as an unidentifiable centre slice.
+- **Masonry shows the file's true shape.** It was forcing `aspect-ratio` computed
+  from the stored `width`/`height` columns, which fall back to `1` when those are
+  missing or stale — squaring and cropping everything. The `<img>` now renders at its
+  natural ratio and the tile takes that height. Verified 12/12 tiles match exactly.
+- **The Cols slider drives masonry too** (3–7 columns), not just grid. Only the table
+  view greys it out now.
+- **Metro tile view removed** at Bam's request. Gone from the view switcher, the
+  panes, the CSS, and the `viewMode` enum; a stored `metro` preference falls back to
+  grid.
+- **GIFs and videos move on hover.** Tiles paint a still poster and swap to the
+  moving file only when pointed at — 48 autoplaying tiles is a CPU fire and makes the
+  library impossible to scan. Videos are `muted`/`loop`/`playsInline` with
+  `preload="metadata"`, and reset to frame 0 on leave. `prefers-reduced-motion` is
+  honoured; a `GIF`/`▶` badge marks tiles that will move.
+
+### Changed — list toolbar is one control language
+
+- **Five control styles collapsed into one.** The bar mixed pill radius on the
+  filter chips with rounded-rect everywhere else, and ran five different paddings
+  (`6/12`, `8/12`, `8/10`, `6/12`, `6/10`) so no two controls shared a height. Filter
+  chips, sort, search, Cols and the view switch now all resolve from a single pair of
+  tokens — `--th-ctl-h: 34px` and `--th-ctl-r` — with one border and one surface.
+  Verified in the browser: all five report 34px / 10px. View-switch buttons are square
+  (side = control height) rather than three differently-proportioned buttons, and SORT
+  now reads exactly like COLS: one box, inset uppercase label, control inside.
+
+### Fixed — CSS specificity trap in `admin/app/globals.css`
+
+- **The shared input/select base rule outranked every component class.** It is written
+  as `#th-content :where(input…, select, textarea)` and its own comment claims it
+  "contributes ZERO specificity — any component class still wins without
+  `!important`". That was only true of the right-hand side: the bare `#th-content`
+  prefix contributes (1,0,0) by itself, beating any single-class rule. The visible
+  symptom was `.th-lp-sort-select` keeping a border and white background inside its
+  own wrapper — a bordered select sitting inside a bordered control. Wrapping the id
+  in `:where(#th-content)` makes the whole selector zero-specificity, which is what
+  the comment always described. Fixed once at the source rather than per component;
+  Settings-page controls verified unchanged.
+
+### Fixed — image pipeline (`src/lib/imagePipeline.ts`)
+
+- **Animated uploads were silently flattened to a single frame.** sharp reads only
+  the first page unless opened with `{ animated: true }`, so every GIF uploaded to
+  date went in moving and came out still (the four already in the library are past
+  saving — their originals are gone). Animation is now detected off the input's own
+  page count, so animated WebP is covered too; per-frame height is read from
+  `pageHeight` rather than the stacked filmstrip; thumbnails stay deliberately
+  single-frame so tiles have a still poster to swap from. Verified end to end: a
+  4-frame GIF in, 4 frames out, 1-frame thumbnail.
+
 ## [Unreleased] — Bricks Bridge Studio App (2026-07-25, post-beta.1)
 
 Bam's call: Bricks-only bridge (T1 theme shim + T3 plugin compat deferred). "Use

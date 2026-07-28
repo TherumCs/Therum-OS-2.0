@@ -7,6 +7,7 @@ import { resolveSeo, buildMetaTags, buildJsonLd } from '../lib/seo.js';
 import { settingsService } from './settings.service.js';
 import { NotFoundError, ConflictError } from '../lib/errors.js';
 import type { CreateContentInput, UpdateContentInput, ListContentQuery } from '../schemas/content.schema.js';
+import { orderByOf } from '../schemas/listing.js';
 
 const asJson = (v: unknown): Prisma.InputJsonValue => (v ?? {}) as Prisma.InputJsonValue;
 
@@ -16,15 +17,20 @@ export const contentService = {
     if (query.type) where.type = query.type;
     if (query.status) where.status = query.status;
     if (query.q) where.title = { contains: query.q, mode: 'insensitive' };
-    const rows = await db.content.findMany({
-      where,
-      take: query.limit + 1,
-      ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
-      orderBy: { updatedAt: 'desc' },
-    });
+    // `total` counts every match, not just this page — the admin needs it to
+    // show honest counts and to know whether more pages exist.
+    const [rows, total] = await Promise.all([
+      db.content.findMany({
+        where,
+        take: query.limit + 1,
+        ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+        orderBy: orderByOf(query.sort, query.order),
+      }),
+      db.content.count({ where }),
+    ]);
     const hasMore = rows.length > query.limit;
     const items = hasMore ? rows.slice(0, query.limit) : rows;
-    return { items, nextCursor: hasMore ? items[items.length - 1]?.id ?? null : null };
+    return { items, nextCursor: hasMore ? items[items.length - 1]?.id ?? null : null, total };
   },
 
   async get(id: string) {

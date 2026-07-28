@@ -1,17 +1,54 @@
 import { apiGet } from '../../../lib/api';
 import { money, type Paged, type Product } from '../../../lib/types';
 import { createProduct } from '../../actions';
+import { ListControls, ListPager, type SortOption } from '../ListControls';
 
 export const dynamic = 'force-dynamic';
 
-export default async function ProductsPage() {
+const SORTS: SortOption[] = [
+  { key: 'updatedAt:desc', label: 'Last updated' },
+  { key: 'createdAt:desc', label: 'Newest' },
+  { key: 'createdAt:asc', label: 'Oldest' },
+  { key: 'name:asc', label: 'Name A–Z' },
+  { key: 'name:desc', label: 'Name Z–A' },
+  { key: 'status:asc', label: 'Status' },
+];
+// Page size comes from Appearance > Lists & cards, not a constant — the
+// setting existed and was saved but nothing ever read it.
+const PER_PAGE_FALLBACK = 24;
+
+async function perPage(): Promise<number> {
+  const a = await apiGet<{ itemsPerPage: number }>('/api/settings/appearance').catch(() => null);
+  return a?.itemsPerPage ?? PER_PAGE_FALLBACK;
+}
+
+interface SP { status?: string; q?: string; sort?: string; order?: string; cursor?: string }
+
+export default async function ProductsPage({ searchParams }: { searchParams: Promise<SP> }) {
+  const sp = await searchParams;
+  const qs = new URLSearchParams({ limit: String(await perPage()) });
+  if (sp.status && sp.status !== 'all') qs.set('status', sp.status);
+  if (sp.q) qs.set('q', sp.q);
+  if (sp.sort) qs.set('sort', sp.sort);
+  if (sp.order) qs.set('order', sp.order);
+  if (sp.cursor) qs.set('cursor', sp.cursor);
+
   let data: Paged<Product> | null = null;
   let err: string | null = null;
   try {
-    data = await apiGet<Paged<Product>>('/api/products?limit=50');
+    data = await apiGet<Paged<Product>>(`/api/products?${qs}`);
   } catch (e) {
     err = e instanceof Error ? e.message : String(e);
   }
+  const countFor = async (status?: string): Promise<number> => {
+    const q = new URLSearchParams({ limit: '1' });
+    if (status) q.set('status', status);
+    if (sp.q) q.set('q', sp.q);
+    return apiGet<Paged<Product>>(`/api/products?${q}`).then((r) => r.total ?? 0).catch(() => 0);
+  };
+  const [allC, activeC, draftC, archivedC] = await Promise.all([
+    countFor(), countFor('active'), countFor('draft'), countFor('archived'),
+  ]);
   return (
     <section>
       <h1>Products</h1>
@@ -21,7 +58,25 @@ export default async function ProductsPage() {
         <button type="submit">Add product</button>
       </form>
       {err && <div className="notice">API offline — start it on :4100 ({err})</div>}
-      {data && (
+
+      <ListControls
+        filters={[
+          { key: 'all', label: 'All', count: allC },
+          { key: 'active', label: 'Active', count: activeC },
+          { key: 'draft', label: 'Draft', count: draftC },
+          { key: 'archived', label: 'Archived', count: archivedC },
+        ]}
+        sorts={SORTS}
+        searchPlaceholder="Search products…"
+      />
+
+      {data && data.items.length === 0 && (
+        <div className="th-lp-empty">
+          <div className="th-lp-empty-title">No matches</div>
+          <div className="th-lp-empty-sub">Adjust filters or clear the search.</div>
+        </div>
+      )}
+      {data && data.items.length > 0 && (
         <table>
           <thead>
             <tr>
@@ -55,6 +110,7 @@ export default async function ProductsPage() {
           </tbody>
         </table>
       )}
+      {data && <ListPager nextCursor={data.nextCursor ?? null} shown={data.items.length} total={data.total ?? data.items.length} />}
     </section>
   );
 }

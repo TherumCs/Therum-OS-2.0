@@ -1,5 +1,7 @@
 'use client';
-import { useMemo, useRef, useState, type ReactElement } from 'react';
+import { useRef, useState, type ReactElement } from 'react';
+import { ListControls, ListPager, type SortOption } from '../ListControls';
+import { MediaLightbox } from './MediaLightbox';
 import { BASE_PATH } from '../../../lib/session';
 import { filename } from './mediaUtils';
 import { MediaCard } from './MediaCard';
@@ -11,7 +13,7 @@ interface FilterPill {
   count: number;
 }
 
-type ViewMode = 'grid' | 'masonry' | 'metro' | 'table';
+type ViewMode = 'grid' | 'masonry' | 'table';
 
 const VIEW_BUTTONS: { key: ViewMode; title: string; svg: ReactElement }[] = [
   {
@@ -39,18 +41,6 @@ const VIEW_BUTTONS: { key: ViewMode; title: string; svg: ReactElement }[] = [
     ),
   },
   {
-    key: 'metro',
-    title: 'Metro tile view',
-    svg: (
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <rect x="3" y="3" width="11" height="11" />
-        <rect x="16" y="3" width="5" height="5" />
-        <rect x="16" y="10" width="5" height="11" />
-        <rect x="3" y="16" width="11" height="5" />
-      </svg>
-    ),
-  },
-  {
     key: 'table',
     title: 'Table view',
     svg: (
@@ -65,34 +55,43 @@ const VIEW_BUTTONS: { key: ViewMode; title: string; svg: ReactElement }[] = [
 
 // Toolbar + density slider (3-7 cols) + grid/masonry/table view switch, all
 // in one place since they share filter/search state and the density control
-// visually disables itself outside grid view (see globals.css) — matches
+// visually disables itself only in table view (see globals.css) — matches
 // 1.9.44's Therum_List_Page toolbar + its media-specific density/view patch.
+const MEDIA_SORTS: SortOption[] = [
+  { key: 'createdAt:desc', label: 'Newest' },
+  { key: 'createdAt:asc', label: 'Oldest' },
+  { key: 'url:asc', label: 'Filename A–Z' },
+  { key: 'url:desc', label: 'Filename Z–A' },
+  { key: 'size:desc', label: 'Largest' },
+  { key: 'size:asc', label: 'Smallest' },
+  { key: 'kind:asc', label: 'Type' },
+];
+
 export function MediaLibrary({
   items,
   filters,
+  filtering = false,
+  nextCursor = null,
+  total = 0,
   initialViewMode,
   initialDensity,
 }: {
   items: MediaItem[];
   filters: FilterPill[];
+  /** True when a kind filter or search is active — picks the right empty copy. */
+  filtering?: boolean;
+  nextCursor?: string | null;
+  total?: number;
   initialViewMode: string;
   initialDensity: number;
 }) {
-  const [activeFilter, setActiveFilter] = useState('all');
-  const [query, setQuery] = useState('');
-  const [view, setView] = useState<ViewMode>((['grid', 'masonry', 'metro', 'table'] as string[]).includes(initialViewMode) ? (initialViewMode as ViewMode) : 'grid');
+  const [view, setView] = useState<ViewMode>((['grid', 'masonry', 'table'] as string[]).includes(initialViewMode) ? (initialViewMode as ViewMode) : 'grid');
+  // Which asset the lightbox is showing (null = closed). Lives here, not
+  // in each card, so arrow-key navigation can walk the whole loaded page.
+  const [openId, setOpenId] = useState<string | null>(null);
   const [density, setDensity] = useState(initialDensity >= 3 && initialDensity <= 7 ? initialDensity : 5);
   const densitySaveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  const filtered = useMemo(() => {
-    let out = items;
-    if (activeFilter !== 'all') out = out.filter((i) => i.kind === activeFilter);
-    if (query.trim()) {
-      const q = query.trim().toLowerCase();
-      out = out.filter((i) => filename(i.url).toLowerCase().includes(q) || (i.alt ?? '').toLowerCase().includes(q));
-    }
-    return out;
-  }, [items, activeFilter, query]);
 
   function changeView(v: ViewMode) {
     setView(v);
@@ -117,71 +116,56 @@ export function MediaLibrary({
 
   return (
     <>
-      <div className="th-lp-toolbar">
-        <div className="th-lp-pills">
-          {filters.map((f) => (
-            <button key={f.key} type="button" className={'th-lp-pill' + (activeFilter === f.key ? ' active' : '')} onClick={() => setActiveFilter(f.key)}>
-              {f.label}
-              <span className="th-lp-pill-count">{f.count}</span>
-            </button>
-          ))}
-        </div>
-        <div style={{ flex: 1 }} />
-        <div className="th-lp-search">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <circle cx="11" cy="11" r="8" />
-            <path d="m21 21-4.3-4.3" />
-          </svg>
-          <input className="th-lp-search-input" placeholder="Search media…" value={query} onChange={(e) => setQuery(e.target.value)} />
-        </div>
+      <ListControls
+        filters={filters}
+        filterParam="kind"
+        sorts={MEDIA_SORTS}
+        searchPlaceholder="Search media…"
+        trailing={
+          <>
+            <div className="th-density-control" data-view={view}>
+              <span className="th-density-label">Cols</span>
+              <input type="range" min={3} max={7} value={density} className="th-density-slider" onChange={(e) => changeDensity(Number(e.target.value))} />
+              <span className="th-density-value">{density}</span>
+            </div>
 
-        <div className="th-density-control" data-view={view}>
-          <span className="th-density-label">Cols</span>
-          <input type="range" min={3} max={7} value={density} className="th-density-slider" onChange={(e) => changeDensity(Number(e.target.value))} />
-          <span className="th-density-value">{density}</span>
-        </div>
-
-        <div className="th-lp-views">
-          {VIEW_BUTTONS.map((v) => (
-            <button key={v.key} type="button" className={'th-lp-view-btn' + (view === v.key ? ' active' : '')} title={v.title} onClick={() => changeView(v.key)}>
-              {v.svg}
-            </button>
-          ))}
-        </div>
-      </div>
+            <div className="th-lp-views">
+              {VIEW_BUTTONS.map((v) => (
+                <button key={v.key} type="button" className={'th-lp-view-btn' + (view === v.key ? ' active' : '')} title={v.title} onClick={() => changeView(v.key)}>
+                  {v.svg}
+                </button>
+              ))}
+            </div>
+          </>
+        }
+      />
 
       {items.length === 0 ? (
         <div className="th-lp-empty">
-          <div className="th-lp-empty-title">No media yet</div>
-          <div className="th-lp-empty-sub">Upload a file to get started.</div>
-        </div>
-      ) : filtered.length === 0 ? (
-        <div className="th-lp-empty">
-          <div className="th-lp-empty-title">No matches</div>
-          <div className="th-lp-empty-sub">Adjust filters or clear the search.</div>
+          <div className="th-lp-empty-title">{filtering ? 'No matches' : 'No media yet'}</div>
+          <div className="th-lp-empty-sub">{filtering ? 'Adjust filters or clear the search.' : 'Upload a file to get started.'}</div>
         </div>
       ) : (
         <>
           <div className={'th-lp-view th-lp-view-grid' + (view === 'grid' ? ' active' : '')} data-density={density}>
-            {filtered.map((item) => (
-              <MediaCard key={item.id} item={item} />
+            {items.map((item) => (
+              <MediaCard key={item.id} item={item} onOpen={setOpenId} />
             ))}
           </div>
-          <div className={'th-lp-view th-lp-view-masonry' + (view === 'masonry' ? ' active' : '')}>
-            {filtered.map((item) => (
-              <MediaCard key={item.id} item={item} />
-            ))}
-          </div>
-          <div className={'th-lp-view th-lp-view-metro' + (view === 'metro' ? ' active' : '')}>
-            {filtered.map((item) => (
-              <MediaCard key={item.id} item={item} />
+          <div className={'th-lp-view th-lp-view-masonry' + (view === 'masonry' ? ' active' : '')} data-density={density}>
+            {items.map((item) => (
+              <MediaCard key={item.id} item={item} onOpen={setOpenId} />
             ))}
           </div>
           <div className={'th-lp-view th-lp-view-table' + (view === 'table' ? ' active' : '')}>
-            <MediaTable items={filtered} />
+            <MediaTable items={items} />
           </div>
         </>
       )}
+
+      <ListPager nextCursor={nextCursor} shown={items.length} total={total} />
+
+      <MediaLightbox items={items} openId={openId} onClose={() => setOpenId(null)} onNavigate={setOpenId} />
     </>
   );
 }

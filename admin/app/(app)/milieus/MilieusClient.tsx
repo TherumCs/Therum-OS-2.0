@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { LocalFilterBar, sortRows } from '../ClientTableControls';
 import { useRouter } from 'next/navigation';
 
 export interface MilieuRow {
@@ -104,6 +105,8 @@ export function MilieusClient({ initial, loadError }: { initial: MilieuRow[]; lo
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [mq, setMq] = useState('');
+  const [msort, setMsort] = useState('name:asc');
   const creating = editingId !== null;
 
   const save = async () => {
@@ -136,6 +139,17 @@ export function MilieusClient({ initial, loadError }: { initial: MilieuRow[]; lo
     }
   };
 
+  const mNeedle = mq.trim().toLowerCase();
+  const mVisible = sortRows(
+    mNeedle ? initial.filter((m) => `${m.name} ${m.slug}`.toLowerCase().includes(mNeedle)) : initial,
+    msort,
+    {
+      name: (m) => m.name,
+      members: (m) => m.memberCount,
+      discount: (m) => m.discountPct,
+    },
+  );
+
   return (
     <div style={{ display: 'grid', gap: 'var(--th-space-16)' }}>
       {loadError && <div className="notice">Couldn&apos;t reach the backend — the list below may be incomplete.</div>}
@@ -143,7 +157,7 @@ export function MilieusClient({ initial, loadError }: { initial: MilieuRow[]; lo
 
       <div className="th-card" style={{ padding: 'var(--th-space-20)' }}>
         <div className="row-between">
-          <strong>Groups</strong>
+          <strong>Member groups</strong>
           <button
             className="th-btn"
             onClick={() => {
@@ -216,6 +230,23 @@ export function MilieusClient({ initial, loadError }: { initial: MilieuRow[]; lo
             </p>
           )
         ) : (
+          <>
+          <LocalFilterBar
+            query={mq}
+            onQuery={setMq}
+            sortKey={msort}
+            onSort={setMsort}
+            sorts={[
+              { key: 'name:asc', label: 'Name A–Z' },
+              { key: 'name:desc', label: 'Name Z–A' },
+              { key: 'members:desc', label: 'Most members' },
+              { key: 'members:asc', label: 'Fewest members' },
+              { key: 'discount:desc', label: 'Highest discount' },
+            ]}
+            searchPlaceholder="Search milieus…"
+            shown={mVisible.length}
+            total={initial.length}
+          />
           <table style={{ width: '100%', marginTop: 'var(--th-space-12)' }}>
             <thead>
               <tr>
@@ -228,7 +259,7 @@ export function MilieusClient({ initial, loadError }: { initial: MilieuRow[]; lo
               </tr>
             </thead>
             <tbody>
-              {initial.map((m) => (
+              {mVisible.map((m) => (
                 <tr key={m.id}>
                   <td>
                     <span aria-hidden style={{ display: 'inline-block', width: 10, height: 10, borderRadius: 99, background: m.color, marginRight: 8 }} />
@@ -266,6 +297,7 @@ export function MilieusClient({ initial, loadError }: { initial: MilieuRow[]; lo
               ))}
             </tbody>
           </table>
+          </>
         )}
       </div>
 

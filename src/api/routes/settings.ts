@@ -13,6 +13,7 @@ import {
   OnboardingInput,
   SiteSettingsInput,
 } from '../../schemas/settings.schema.js';
+import { applyBackupSchedule } from '../../lib/backupSchedule.js';
 import { settingsService } from '../../services/settings.service.js';
 import { authEventService } from '../../services/authEvent.service.js';
 import { backupService } from '../../services/backup.service.js';
@@ -111,7 +112,12 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     reply.send(await settingsService.getBackupSettings());
   });
   app.patch('/settings/backup', { preHandler: [app.authenticate, requireSettingsWrite] }, async (req, reply) => {
-    reply.send(await settingsService.setBackupSettings(BackupSettingsInput.parse(req.body)));
+    const saved = await settingsService.setBackupSettings(BackupSettingsInput.parse(req.body));
+    // Re-arm immediately rather than at the worker's next boot: changing the
+    // frequency and then seeing nothing happen for a day is indistinguishable
+    // from the setting being broken (which, until this release, it was).
+    await applyBackupSchedule().catch((err: unknown) => req.log.error({ err }, 'backup reschedule failed'));
+    reply.send(saved);
   });
 
   // The post-setup wizard's own step/completed state — read on every

@@ -6,6 +6,7 @@ import { NotFoundError, ConflictError, ValidationError } from '../lib/errors.js'
 import { milieuService } from './milieu.service.js';
 import { capabilityService } from './capability.service.js';
 import type { CreateOrderInput, TransitionOrderInput, ListOrdersQuery } from '../schemas/order.schema.js';
+import { orderByOf } from '../schemas/listing.js';
 
 // Allowed transitions — anything not listed is rejected.
 const TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
@@ -43,16 +44,21 @@ export const orderService = {
     const where: Prisma.OrderWhereInput = {};
     if (query.status) where.status = query.status;
     if (query.customerId) where.customerId = query.customerId;
-    const rows = await db.order.findMany({
-      where,
-      include: orderInclude,
-      take: query.limit + 1,
-      ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
-      orderBy: { createdAt: 'desc' },
-    });
+    // Order search matches the human-facing order number.
+    if (query.q) where.number = { contains: query.q, mode: 'insensitive' };
+    const [rows, total] = await Promise.all([
+      db.order.findMany({
+        where,
+        include: orderInclude,
+        take: query.limit + 1,
+        ...(query.cursor ? { cursor: { id: query.cursor }, skip: 1 } : {}),
+        orderBy: orderByOf(query.sort, query.order),
+      }),
+      db.order.count({ where }),
+    ]);
     const hasMore = rows.length > query.limit;
     const items = hasMore ? rows.slice(0, query.limit) : rows;
-    return { items: items.map(stripAccessToken), nextCursor: hasMore ? items[items.length - 1]?.id ?? null : null };
+    return { items: items.map(stripAccessToken), nextCursor: hasMore ? items[items.length - 1]?.id ?? null : null, total };
   },
 
   async get(id: string) {

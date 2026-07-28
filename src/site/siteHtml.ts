@@ -74,6 +74,10 @@ export interface SitePage {
   chromeHeader?: string;
   chromeFooter?: string;
   chromeCssUrl?: string;
+  /** Front-end admin dock, rendered only for a signed-in admin. */
+  dock?: { markup: string; styles: string; script: string };
+  /** Settings > Performance, applied to the delivered HTML. */
+  perf?: { lazyImages: boolean; minHtml: boolean; minCss: boolean };
 }
 
 export function sitePage(p: SitePage): string {
@@ -91,7 +95,7 @@ export function sitePage(p: SitePage): string {
   const main = hasChrome ? `<main id="brx-content">${p.body}</main>` : `<main><div class="wrap">
 ${p.body}
 </div></main>`;
-  return `<!doctype html>
+  const html = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -99,12 +103,56 @@ ${p.body}
 <title>${esc(p.title)}</title>
 ${p.headExtra ?? ''}
 <style>${CSS}</style>
+${p.dock ? `<style>${p.dock.styles}</style>` : ''}
 ${p.chromeCssUrl ? `<link rel="stylesheet" href="${esc(p.chromeCssUrl)}">` : ''}
 </head>
 <body class="home">
 ${header}
 ${main}
 ${footer}
+${p.dock ? `${p.dock.markup}\n<script>${p.dock.script}</script>` : ''}
 </body>
 </html>`;
+  return applyPerf(html, p.perf);
+}
+
+// Settings > Performance, finally doing something. `lazyImages`, `minHtml` and
+// `minCss` all saved and were read by nothing; the rest of that page's toggles
+// (emoji, embeds, heartbeat, revisions, trash, autosave) configure WordPress-era
+// features this stack does not have, and are labelled as such on the page
+// rather than faked here.
+function applyPerf(html: string, perf?: { lazyImages: boolean; minHtml: boolean; minCss: boolean }): string {
+  if (!perf) return html;
+  let out = html;
+
+  if (perf.lazyImages) {
+    // Only images that do not already declare a loading strategy — a ported
+    // Bricks layout may legitimately want an eager hero.
+    out = out.replace(/<img(?![^>]*\bloading=)([^>]*)>/gi, '<img loading="lazy" decoding="async"$1>');
+  }
+
+  if (perf.minCss) {
+    out = out.replace(/<style>([\s\S]*?)<\/style>/gi, (_m, css: string) =>
+      `<style>${css
+        .replace(/\/\*[\s\S]*?\*\//g, '')
+        .replace(/\s+/g, ' ')
+        .replace(/\s*([{}:;,>])\s*/g, '$1')
+        .replace(/;}/g, '}')
+        .trim()}</style>`);
+  }
+
+  if (perf.minHtml) {
+    // Whitespace between tags only. Anything inside <pre>, <textarea>,
+    // <script> or <style> is left exactly as-is — collapsing those changes
+    // what the page means, not just its size.
+    const keep: string[] = [];
+    out = out.replace(/<(pre|textarea|script|style)\b[\s\S]*?<\/\1>/gi, (m) => {
+      keep.push(m);
+      return `\u0000${keep.length - 1}\u0000`;
+    });
+    out = out.replace(/>\s+</g, '><').replace(/\s{2,}/g, ' ').trim();
+    out = out.replace(/\u0000(\d+)\u0000/g, (_m, i: string) => keep[Number(i)] ?? '');
+  }
+
+  return out;
 }

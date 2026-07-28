@@ -145,7 +145,17 @@ export function Sidebar({
       <div className="th-sb-search">
         <div className="th-sb-search-box">
           <Icon.search width={14} height={14} />
-          <input type="text" placeholder="Search…" aria-label="Search admin" />
+          {/* Read-only on purpose: this box is the palette's entry point, not a
+              second search implementation. It had no state or handler at all
+              before — typing in it did nothing. */}
+          <input
+            type="text"
+            placeholder="Search…"
+            aria-label="Search admin"
+            readOnly
+            onFocus={(e) => { e.currentTarget.blur(); window.dispatchEvent(new Event('th:open-palette')); }}
+            onClick={() => window.dispatchEvent(new Event('th:open-palette'))}
+          />
           <span className="th-sb-search-kbd">⌘K</span>
         </div>
       </div>

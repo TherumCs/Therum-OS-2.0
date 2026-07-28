@@ -9,7 +9,9 @@ export interface MediaItem {
   width?: number | null;
   height?: number | null;
   createdAt: string;
-  meta?: { thumbnailUrl?: string } | null;
+  // `originalUrl` only exists once an image has been edited — it is what the
+  // lightbox's Revert offer is keyed off.
+  meta?: { thumbnailUrl?: string; originalUrl?: string; animated?: boolean } | null;
 }
 
 // The table pane — MediaLibrary owns the toolbar/filtering/view-switching

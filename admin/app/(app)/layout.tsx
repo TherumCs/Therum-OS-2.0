@@ -1,4 +1,5 @@
 import type { ReactNode, CSSProperties } from 'react';
+import { CommandPalette } from './CommandPalette';
 import { headers } from 'next/headers';
 import { apiGet } from '../../lib/api';
 import { buildNav, type StudioNavItem } from '../../lib/nav';
@@ -133,6 +134,8 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div id="th-shell" {...dataAttrs} style={inlineVars as CSSProperties}>
+      {/* Gated by Appearance > Workspace > Keyboard shortcuts. */}
+      <CommandPalette enabled={appearance.keyboardShortcuts} />
       <aside id="th-sb">
         <Sidebar sections={sections} siteName={siteName} siteHost={siteHost} version={about.version} database={about.database} />
       </aside>

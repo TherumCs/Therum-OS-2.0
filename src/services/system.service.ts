@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { db } from '../lib/db.js';
@@ -71,6 +72,19 @@ function checkWebhookSecret(): HealthCheck {
   return { id: 'webhook-secret', label: 'Payment webhook secret', status: 'ok', detail: 'Configured.' };
 }
 
+// admin/ and builder/ ship their own package.json and are deployed separately,
+// so a mismatch with the API's version is a real operational fact worth seeing
+// rather than an assumption. Missing/unreadable reads as 'unknown', never as
+// the API's own version.
+function readSiblingVersion(dir: 'admin' | 'builder'): string {
+  try {
+    const raw = readFileSync(join(process.cwd(), dir, 'package.json'), 'utf8');
+    return (JSON.parse(raw) as { version?: string }).version ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
 export const systemService = {
   async health(): Promise<{ status: CheckStatus; checks: HealthCheck[] }> {
     const checks = await Promise.all([checkDatabase(), checkRedis(), Promise.resolve(checkJwtSecret()), Promise.resolve(checkCors()), Promise.resolve(checkNodeEnv()), Promise.resolve(checkWebhookSecret())]);
@@ -80,8 +94,33 @@ export const systemService = {
 
   // Matches 1.9.44's Settings > About panel (version/db/credits), read from
   // real runtime values rather than hand-maintained strings that drift.
-  about(): { version: string; node: string; database: string; env: string } {
-    return { version: pkg.version, node: process.version, database: 'PostgreSQL', env: env.NODE_ENV };
+  // The About panel used to show four bare values. What an operator actually
+  // wants off this screen is "what am I running, on what, and is it healthy" —
+  // so it now also reports uptime, the platform, and the pieces that are
+  // separately deployable (admin, builder) and can silently drift out of step
+  // with the API version.
+  about(): {
+    version: string;
+    node: string;
+    database: string;
+    env: string;
+    platform: string;
+    uptimeSeconds: number;
+    startedAt: string;
+    adminVersion: string;
+    builderVersion: string;
+  } {
+    return {
+      version: pkg.version,
+      node: process.version,
+      database: 'PostgreSQL',
+      env: env.NODE_ENV,
+      platform: `${process.platform} ${process.arch}`,
+      uptimeSeconds: Math.round(process.uptime()),
+      startedAt: new Date(Date.now() - process.uptime() * 1000).toISOString(),
+      adminVersion: readSiblingVersion('admin'),
+      builderVersion: readSiblingVersion('builder'),
+    };
   },
 
   // Settings > Performance's "PHP runtime" panel, translated to this stack's

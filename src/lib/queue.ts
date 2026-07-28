@@ -22,6 +22,22 @@ export const MILIEUS_QUEUE = 'milieus-sweep';
 
 export const milieusQueue = new Queue(MILIEUS_QUEUE, { connection });
 
+// Scheduled backups (Settings > Backup). `enabled` + `frequency` both saved
+// and were read by nothing — there was no scheduler for them to configure.
+// The worker upserts the schedule at boot and again whenever the setting
+// changes; POST /api/settings/backup/run stays as the manual trigger.
+export const BACKUP_QUEUE = 'backup';
+
+export const backupQueue = new Queue(BACKUP_QUEUE, { connection });
+
+/** Settings > Backup frequency -> cron. Times are deliberately off-peak. */
+export const BACKUP_CRON: Record<string, string> = {
+  hourly: '0 * * * *',
+  twicedaily: '0 3,15 * * *',
+  daily: '0 3 * * *',
+  weekly: '0 3 * * 0',
+};
+
 // Close every background Redis connection this process may hold: both BullMQ
 // queues AND the lazy lib/redis.ts client (first connected by the login rate
 // limiter — see rateLimit.ts). Tests MUST call this in after() — any one of
@@ -31,5 +47,5 @@ export const milieusQueue = new Queue(MILIEUS_QUEUE, { connection });
 // every test file still closed only importQueue, and again because nothing
 // ever closed the rate limiter's lazy client.
 export async function closeQueues(): Promise<void> {
-  await Promise.all([importQueue.close(), milieusQueue.close(), disconnectRedis()]);
+  await Promise.all([importQueue.close(), milieusQueue.close(), backupQueue.close(), disconnectRedis()]);
 }

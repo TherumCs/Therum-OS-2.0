@@ -1,8 +1,8 @@
-import { ContentTypeListPage } from '../ContentTypeListPage';
+import { ContentTypeListPage, type ListSearchParams } from '../ContentTypeListPage';
 
 export const dynamic = 'force-dynamic';
 
-export default function PagesPage() {
+export default async function PagesPage({ searchParams }: { searchParams: Promise<ListSearchParams> }) {
   return (
     <ContentTypeListPage
       type="page"
@@ -13,6 +13,7 @@ export default function PagesPage() {
       emptyTitle="No pages yet"
       emptySub="Create your first page to get started."
       showImport
+      searchParams={await searchParams}
     />
   );
 }

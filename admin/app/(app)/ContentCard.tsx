@@ -5,6 +5,7 @@ import { timeAgo } from '../../lib/types';
 import { cardGradient } from '../../lib/cardGradient';
 import { wordCount } from '../../lib/wordCount';
 import { BASE_PATH } from '../../lib/session';
+import type { ListView } from './listViews';
 
 export interface ContentCardItem {
   id: string;
@@ -41,11 +42,16 @@ function caseStudyMeta(item: ContentCardItem): CaseStudyMeta {
 const STATUS_LABEL: Record<string, string> = { published: 'Published', draft: 'Draft', archived: 'Archived' };
 const STATUS_DOT_CLASS: Record<string, string> = { published: 'is-published', draft: 'is-draft', archived: 'is-archived' };
 
-// Hero card layout — the one 1.9.44 actually has active (Therum_Card_Style::layout()
-// === 'hero'): image up top, status/words/time pill row below, two full-width CTA
-// buttons. Other layouts (Card V1/V2, Compact, Magazine) exist in 1.9.44 but
-// aren't built here — this one is real, not a stand-in guess.
-export function ContentCard({ item }: { item: ContentCardItem }) {
+// One card, four layouts — the set Therum_Card_Style::layout() and
+// Therum_List_Page's view toggles expose in 1.9.44:
+//   card  image up top, title + excerpt + pills, CTA row (the default)
+//   hero  the same card at full width with a tall image — one per row
+//   list  no image; title, pills and actions on a single row
+//   grid  dense multi-column: image, title, status pill, nothing else
+// The differences that are purely visual live in globals.css under
+// .th-lp-list-<view>; only the parts that change WHICH chrome renders are
+// branched here, so all four keep the same kebab menu and actions.
+export function ContentCard({ item, variant = 'card', thumbnailSource = 'auto' }: { item: ContentCardItem; variant?: ListView; thumbnailSource?: string }) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -117,56 +123,73 @@ export function ContentCard({ item }: { item: ContentCardItem }) {
     }
   }
 
-  const bg = item.coverImage ? { backgroundImage: `url(${item.coverImage})` } : { background: cardGradient(item.id) };
+  // Appearance > Lists & cards: 'cover-only' suppresses the generated
+  // gradient stand-in, leaving a plain surface when a page has no cover.
+  const bg = item.coverImage
+    ? { backgroundImage: `url(${item.coverImage})` }
+    : thumbnailSource === 'cover-only'
+      ? undefined
+      : { background: cardGradient(item.id) };
+
+  // List view is a text row — an image band there would just be a coloured
+  // stripe on every line. Grid view drops the excerpt so the tiles stay even.
+  const showThumb = variant !== 'list';
+  const showExcerpt = variant === 'card' || variant === 'hero';
+
+  const kebab = (
+    <div className="th-lp-card-kebab-wrap" ref={menuRef}>
+      <button type="button" className="th-lp-kebab-btn" aria-label="More actions" aria-expanded={menuOpen} onClick={() => setMenuOpen((v) => !v)}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+          <circle cx="12" cy="5" r="2" />
+          <circle cx="12" cy="12" r="2" />
+          <circle cx="12" cy="19" r="2" />
+        </svg>
+      </button>
+      {menuOpen && (
+        <div className="th-lp-kebab-menu" role="menu">
+          <a role="menuitem" className="th-lp-kebab-item" href={previewUrl} target="_blank" rel="noopener" onClick={() => setMenuOpen(false)}>
+            Preview
+          </a>
+          {item.caseStudyDetails && (
+            <button
+              role="menuitem"
+              type="button"
+              className="th-lp-kebab-item"
+              disabled={busy}
+              onClick={() => {
+                setMenuOpen(false);
+                // Re-seed from the CURRENT prop every open — the card
+                // stays mounted across router.refresh(), so mount-time
+                // state would show (and re-save) stale values after any
+                // out-of-band meta change (audit finding #6).
+                setDetails(caseStudyMeta(item));
+                setDetailsOpen(true);
+              }}
+            >
+              Details
+            </button>
+          )}
+          <button role="menuitem" type="button" className="th-lp-kebab-item" onClick={handleDuplicate} disabled={busy}>
+            Duplicate
+          </button>
+          <button role="menuitem" type="button" className="th-lp-kebab-item danger" onClick={handleDelete} disabled={busy}>
+            Delete
+          </button>
+        </div>
+      )}
+    </div>
+  );
 
   return (
-    <div className="th-lp-card" aria-busy={busy}>
-      <div className="th-lp-card-thumb" style={bg}>
-        <div className="th-lp-card-kebab-wrap" ref={menuRef}>
-          <button type="button" className="th-lp-kebab-btn" aria-label="More actions" aria-expanded={menuOpen} onClick={() => setMenuOpen((v) => !v)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
-              <circle cx="12" cy="5" r="2" />
-              <circle cx="12" cy="12" r="2" />
-              <circle cx="12" cy="19" r="2" />
-            </svg>
-          </button>
-          {menuOpen && (
-            <div className="th-lp-kebab-menu" role="menu">
-              <a role="menuitem" className="th-lp-kebab-item" href={previewUrl} target="_blank" rel="noopener" onClick={() => setMenuOpen(false)}>
-                Preview
-              </a>
-              {item.caseStudyDetails && (
-                <button
-                  role="menuitem"
-                  type="button"
-                  className="th-lp-kebab-item"
-                  disabled={busy}
-                  onClick={() => {
-                    setMenuOpen(false);
-                    // Re-seed from the CURRENT prop every open — the card
-                    // stays mounted across router.refresh(), so mount-time
-                    // state would show (and re-save) stale values after any
-                    // out-of-band meta change (audit finding #6).
-                    setDetails(caseStudyMeta(item));
-                    setDetailsOpen(true);
-                  }}
-                >
-                  Details
-                </button>
-              )}
-              <button role="menuitem" type="button" className="th-lp-kebab-item" onClick={handleDuplicate} disabled={busy}>
-                Duplicate
-              </button>
-              <button role="menuitem" type="button" className="th-lp-kebab-item danger" onClick={handleDelete} disabled={busy}>
-                Delete
-              </button>
-            </div>
-          )}
+    <div className={`th-lp-card th-lp-card-${variant}`} aria-busy={busy}>
+      {showThumb && (
+        <div className="th-lp-card-thumb" style={bg}>
+          {kebab}
         </div>
-      </div>
+      )}
       <div className="th-lp-card-meta">
         <div className="th-lp-card-title">{item.title || '(untitled)'}</div>
-        {item.excerpt && <p className="th-lp-card-excerpt">{item.excerpt}</p>}
+        {showExcerpt && item.excerpt && <p className="th-lp-card-excerpt">{item.excerpt}</p>}
         <div className="th-lp-card-pills">
           <span className="th-lp-card-pill">
             <span className={'th-lp-card-pill-dot ' + (STATUS_DOT_CLASS[item.status] ?? '')} />
@@ -214,6 +237,9 @@ export function ContentCard({ item }: { item: ContentCardItem }) {
             Edit
           </a>
         </div>
+        {/* No image band in list view, so the kebab rides at the end of the
+            row instead of floating over the thumbnail. */}
+        {!showThumb && kebab}
       </div>
     </div>
   );

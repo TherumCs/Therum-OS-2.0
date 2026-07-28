@@ -17,13 +17,27 @@ export default async function MilieusPage() {
     loadError = true;
   }
 
+  const members = milieus.reduce((sum, m) => sum + m.memberCount, 0);
+  const open = milieus.filter((m) => m.regEnabled).length;
+
   return (
-    <div>
-      <h2 style={{ marginTop: 0, fontSize: 'var(--th-fs-lg)' }}>Milieus</h2>
-      <p className="muted" style={{ marginTop: -8 }}>
-        Named member groups — bundle customers into milieus with their own discount, expiry, and member list.
-      </p>
+    <section>
+      <div className="th-lp-header">
+        <div className="th-lp-header-left">
+          <div className="th-lp-meta">
+            <span className="th-lp-meta-dot" />
+            {milieus.length} {milieus.length === 1 ? 'MILIEU' : 'MILIEUS'} · {members} MEMBERS · {open} OPEN TO SIGNUP
+          </div>
+          <h1 className="th-lp-title">Milieus</h1>
+          <p className="th-lp-sub">
+            Named groups of customers — wholesale, friends and family, a members club. Each milieu carries its
+            own discount, its own expiry, and its own member list, and can open a public signup page that
+            people join themselves.
+          </p>
+        </div>
+      </div>
+
       <MilieusClient initial={milieus} loadError={loadError} />
-    </div>
+    </section>
   );
 }

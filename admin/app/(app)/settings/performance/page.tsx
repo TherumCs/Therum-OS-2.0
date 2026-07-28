@@ -64,7 +64,7 @@ export default async function PerformanceSettingsPage() {
     <div>
       <h2 style={{ marginTop: 0, fontSize: 'var(--th-fs-lg)' }}>Performance</h2>
       <p className="muted" style={{ marginTop: -8 }}>
-        All settings below save, but none are load-bearing yet — see each group for why.
+        Lazy-load and minification are live. The rest save but are not load-bearing yet — see each group for why.
       </p>
 
       <div className="settings-group">
@@ -94,8 +94,9 @@ export default async function PerformanceSettingsPage() {
       <div className="settings-group">
         <h3 className="settings-group-title">Caching &amp; loading</h3>
         <p className="settings-group-desc">
-          Saved, not load-bearing: Object cache has no in-memory cache layer to gate yet; lazy-load and defer-JS both describe
-          public-page rendering, and 2.0 has no public-facing theme/renderer yet.
+          <strong>Lazy-load images is live</strong> — it adds `loading=&quot;lazy&quot;` to public-page images that don&apos;t
+          already set a strategy. Object cache still has no cache layer to gate. Defer-JS has nothing to defer: the public
+          site ships one script (the admin dock), and only to signed-in admins.
         </p>
         <ToggleRow label="Object cache" desc="In-memory cache for queries." domain="performance" field="cache" initial={perf.cache} />
         <ToggleRow
@@ -117,8 +118,9 @@ export default async function PerformanceSettingsPage() {
       <div className="settings-group">
         <h3 className="settings-group-title">Strip the bloat</h3>
         <p className="settings-group-desc">
-          Saved, not load-bearing: emoji/oEmbed scripts are a public-page concern and 2.0 has no public renderer yet;
-          heartbeat frequency has no polling mechanism in this admin to slow down or turn off.
+          Saved, not load-bearing — and unlikely to become so. These three strip WordPress-era behaviour: 2.0&apos;s
+          public renderer emits no emoji script and no oEmbed discovery, and there is no admin-heartbeat poll to slow
+          down. Kept so an imported 1.9.44 config round-trips without losing values.
         </p>
         <ToggleRow
           label="Disable emoji scripts"
@@ -151,8 +153,8 @@ export default async function PerformanceSettingsPage() {
       <div className="settings-group">
         <h3 className="settings-group-title">Data housekeeping</h3>
         <p className="settings-group-desc">
-          Saved, not load-bearing: Content has no revision, trash, or autosave concept in this schema, so there&apos;s
-          nothing yet for these numbers to bound.
+          Saved, not load-bearing — and these need a feature built, not a setting wired. The schema has no revision
+          table, no soft-delete/trash, and the builder has no autosave, so there is nothing for these numbers to bound.
         </p>
         <Field label="Post revisions kept">
           <NumberInput domain="performance" field="revisionsLimit" initial={perf.revisionsLimit} />
@@ -168,8 +170,9 @@ export default async function PerformanceSettingsPage() {
       <div className="settings-group">
         <h3 className="settings-group-title">Minification</h3>
         <p className="settings-group-desc">
-          Saved, not load-bearing: both describe minifying public-page output, and 2.0 has no public-facing renderer yet
-          to apply it to.
+          <strong>Both are live.</strong> Applied to every public page as it is served. HTML minification collapses
+          whitespace between tags only — content inside &lt;pre&gt;, &lt;textarea&gt;, &lt;script&gt; and &lt;style&gt; is
+          left byte-for-byte, since collapsing those changes what the page means.
         </p>
         <ToggleRow label="Minify CSS" desc="" domain="performance" field="minCss" initial={perf.minCss} />
         <ToggleRow label="Minify HTML" desc="" domain="performance" field="minHtml" initial={perf.minHtml} />

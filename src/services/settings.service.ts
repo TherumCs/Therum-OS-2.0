@@ -28,7 +28,7 @@ const SEO_DEFAULTS_DEFAULTS: SeoDefaults = { siteName: '', siteDescription: '', 
 // represented here at all, not even as an unused field.
 export interface Appearance {
   density: 'compact' | 'comfortable' | 'breathing';
-  sidebarStyle: 'default' | 'pills' | 'minimal';
+  sidebarStyle: 'default' | 'pills' | 'floating' | 'solid' | 'minimal' | 'dividers';
   cardStyle: 'flat' | 'shadow' | 'glass';
   colorMode: 'light' | 'dark' | 'system';
   contrast: 'normal' | 'high';
@@ -81,10 +81,31 @@ export interface Appearance {
   alwaysVisibleFocusRings: boolean;
   largerClickTargets: boolean;
 
-  // Advanced — grip handles / autosave-toggle / code-editor theme are
-  // deliberately NOT fields here; see CHANGELOG for why each is N/A.
   keyboardShortcuts: boolean;
   debugOverlays: boolean;
+
+  // Ported from 1.9.44's Therum_Themes::default_state() (2026-07-27). The
+  // note that used to sit above keyboardShortcuts called grips / autosave /
+  // code-editor theme "deliberately NOT fields" — they are now, along with
+  // the rest of the 1.9.44 chrome options the Appearance page was missing.
+  sidebarLayout: 'both' | 'icons' | 'text';
+  sidebarFoldable: boolean;
+
+  glass: boolean;
+  /** Mode; `glassTint` above holds the custom colour used when this is 'color'. */
+  glassTintMode: 'auto' | 'dark' | 'light' | 'color';
+  surfaceEffect: 'none' | 'glass-light' | 'glass-dark' | 'glass-colored' | 'gradient' | 'blurred';
+  bgImage: 'none' | 'mesh' | 'grid' | 'noise' | 'dots';
+
+  /** Card TEMPLATE — a different axis from cardLayout (density) and cardStyle (surface). */
+  cardTemplate: 'hero' | 'detailed' | 'list-1' | 'list-2' | 'list-3';
+  cardImage: 'gradient' | 'featured' | 'stock' | 'wireframe' | 'pattern';
+
+  bentoGap: number;
+  autoSave: boolean;
+  showGrips: boolean;
+  desktopMode: boolean;
+  codeEditorTheme: 'therum' | 'github' | 'monokai' | 'solarized' | 'nord';
 }
 
 const APPEARANCE_KEY = 'appearance';
@@ -134,6 +155,23 @@ const APPEARANCE_DEFAULTS: Appearance = {
 
   keyboardShortcuts: true,
   debugOverlays: false,
+
+  sidebarLayout: 'both',
+  sidebarFoldable: false,
+
+  glass: false,
+  glassTintMode: 'dark',
+  surfaceEffect: 'none',
+  bgImage: 'none',
+
+  cardTemplate: 'hero',
+  cardImage: 'gradient',
+
+  bentoGap: 16,
+  autoSave: true,
+  showGrips: false,
+  desktopMode: false,
+  codeEditorTheme: 'therum',
 };
 
 export interface AdminDock {

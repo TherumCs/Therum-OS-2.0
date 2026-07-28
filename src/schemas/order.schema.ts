@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { sortFields } from './listing.js';
 
 export const OrderItemInput = z.object({
   variantId: z.string().min(1),
@@ -27,8 +28,10 @@ export const TransitionOrderInput = z.object({
 export const ListOrdersQuery = z.object({
   status: z.enum(['pending', 'processing', 'shipped', 'delivered', 'failed', 'cancelled']).optional(),
   customerId: z.string().optional(),
+  q: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().optional(),
+  ...sortFields(['createdAt', 'number', 'status', 'total'], 'createdAt'),
 });
 
 export type CreateOrderInput = z.infer<typeof CreateOrderInput>;

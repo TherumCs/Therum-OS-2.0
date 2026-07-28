@@ -15,22 +15,60 @@ export interface ProcessedImage {
   width: number;
   height: number;
   thumbnail: Buffer;
+  /** True when the source has more than one frame (GIF, animated WebP). */
+  animated: boolean;
 }
 
-export async function processImage(input: Buffer): Promise<ProcessedImage> {
+export interface ProcessOptions {
+  /** Longest-edge bound; 0 means "do not resize". Settings > Uploads. */
+  resizeMaxPx?: number;
+  /** false keeps EXIF/ICC — sharp drops it by default on re-encode. */
+  stripExif?: boolean;
+  /** Re-encode to WebP. */
+  autoWebp?: boolean;
+}
+
+export async function processImage(input: Buffer, opts: ProcessOptions = {}): Promise<ProcessedImage> {
+  // Animated formats have to be opened with `animated: true` or sharp reads
+  // only the first page and re-encodes a single still — which is exactly what
+  // happened to every GIF uploaded before this: they went in animated and came
+  // out as one frame, silently. Detected off the input's own page count rather
+  // than the extension, so an animated WebP is handled the same way.
+  const probe = await sharp(input).metadata();
+  const animated = (probe.pages ?? 1) > 1;
+
   // .rotate() with no args reads the EXIF orientation tag and bakes it into
   // the pixel data before the metadata (including that same tag) is dropped.
-  const base = sharp(input).rotate();
+  // Skipped for animated input: there is no EXIF orientation on a GIF, and
+  // rotate() on a multi-page image operates on the stacked filmstrip.
+  const opened = sharp(input, animated ? { animated: true } : {});
+  const base = animated ? opened : opened.rotate();
   const meta = await base.metadata();
 
-  const oversized = (meta.width ?? 0) > MAX_DIMENSION || (meta.height ?? 0) > MAX_DIMENSION;
+  // For an animated image `meta.height` is the height of the whole stacked
+  // filmstrip, so the per-frame height (pageHeight) is what to measure.
+  const height = animated ? meta.pageHeight ?? meta.height ?? 0 : meta.height ?? 0;
+  const bound = opts.resizeMaxPx ?? MAX_DIMENSION;
+  const oversized = bound > 0 && ((meta.width ?? 0) > bound || (meta.height ?? 0) > bound);
   const main = oversized
-    ? base.clone().resize({ width: MAX_DIMENSION, height: MAX_DIMENSION, fit: 'inside', withoutEnlargement: true })
+    ? base.clone().resize({ width: bound, height: bound, fit: 'inside', withoutEnlargement: true })
     : base.clone();
-  const buffer = await main.toBuffer();
-  const outMeta = await sharp(buffer).metadata();
+  // withMetadata() puts EXIF/ICC back; without it sharp has already dropped
+  // them, which is what makes "strip EXIF" the default rather than a step.
+  const kept = opts.stripExif === false ? main.withMetadata() : main;
+  const buffer = await (opts.autoWebp ? kept.webp() : kept).toBuffer();
+  const outMeta = await sharp(buffer, animated ? { animated: true } : {}).metadata();
 
-  const thumbnail = await base.clone().resize({ width: THUMB_WIDTH, withoutEnlargement: true }).toBuffer();
+  // The thumbnail is deliberately a single still even when the source moves:
+  // a grid of 48 playing GIFs is a CPU fire, and a static poster is what lets
+  // the tile swap to the real animated file only on hover.
+  const thumbnail = await sharp(input).rotate().resize({ width: THUMB_WIDTH, withoutEnlargement: true }).toBuffer();
 
-  return { buffer, width: outMeta.width ?? 0, height: outMeta.height ?? 0, thumbnail };
+  return {
+    buffer,
+    width: outMeta.width ?? 0,
+    height: animated ? outMeta.pageHeight ?? outMeta.height ?? 0 : outMeta.height ?? 0,
+    thumbnail,
+    animated,
+  };
 }

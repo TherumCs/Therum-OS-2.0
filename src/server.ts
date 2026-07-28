@@ -3,6 +3,7 @@ import Fastify from 'fastify';
 import helmet from '@fastify/helmet';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
+import { join } from 'node:path';
 import fastifyStatic from '@fastify/static';
 import { env } from './lib/env.js';
 import { UPLOADS_DIR } from './lib/uploads.js';
@@ -74,8 +75,26 @@ export async function buildServer() {
   });
 
   await app.register(helmet);
-  await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
+  // Hard ceiling only — the REAL limit is Settings > Uploads > maxUploadMb,
+  // enforced in lib/uploadPolicy.ts. This has to sit at or above the schema's
+  // own maximum (2048 MB), otherwise multipart rejects a file with a generic
+  // error before the configured limit is ever consulted, and raising the
+  // setting above 50 MB would silently do nothing.
+  await app.register(multipart, { limits: { fileSize: 2048 * 1024 * 1024 } });
   await app.register(fastifyStatic, { root: UPLOADS_DIR, prefix: '/api/uploads/', decorateReply: false });
+  // The visual builder (builder/, a Vite SPA whose base is '/builder/') is
+  // served from THIS origin rather than its own dev port. NEXT_PUBLIC_BUILDER_URL
+  // pointed at :10004 — a port nothing listens on since the API moved to
+  // :10009 — so every "Edit" hand-off landed on a dead host. One origin is
+  // also the rule for the admin (see api/adminProxy.ts); the builder is no
+  // different.
+  await app.register(fastifyStatic, {
+    root: join(process.cwd(), 'builder', 'dist'),
+    prefix: '/builder/',
+    decorateReply: false,
+  });
+  // SPA fallback: deep links like /builder/?content=… must serve index.html.
+  app.get('/builder', async (_req, reply) => reply.redirect('/builder/'));
   // Explicit allowlist (CORS_ORIGINS) rather than reflecting any origin —
   // the previous `origin: true` accepted requests from anywhere.
   const allowedOrigins = env.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean);

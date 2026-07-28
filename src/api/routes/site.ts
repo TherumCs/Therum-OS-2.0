@@ -3,6 +3,7 @@ import { db } from '../../lib/db.js';
 import { contentService } from '../../services/content.service.js';
 import { settingsService } from '../../services/settings.service.js';
 import { capabilityService } from '../../services/capability.service.js';
+import { dockMarkup, dockScript, dockStyles } from '../../site/adminDock.js';
 import { sitePage, type NavItem } from '../../site/siteHtml.js';
 import { esc } from '../../site/storefrontHtml.js';
 
@@ -27,6 +28,10 @@ const fmtDate = (d: Date | string | null): string =>
   d ? new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' }) : '';
 
 export interface ChromeCtx {
+  /** Front-end admin dock, present only for a signed-in admin. */
+  dock?: { markup: string; styles: string; script: string };
+  /** Settings > Performance, applied to the delivered HTML. */
+  perf?: { lazyImages: boolean; minHtml: boolean; minCss: boolean };
   chromeHeader?: string;
   chromeFooter?: string;
   chromeCssUrl?: string;
@@ -49,9 +54,65 @@ async function loadChrome(site: { chromeHeaderSlug: string | null; chromeFooterS
   return out;
 }
 
-async function buildNav(current: string): Promise<{ siteName: string; tagline: string; homepageSlug: string | null; nav: NavItem[]; chrome: ChromeCtx }> {
+// Builds the front-end admin dock for one request, or null when the caller is
+// not a signed-in admin. Kept out of buildNav so the auth failure paths read
+// in one place.
+async function buildDock(req: FastifyRequest, current: string): Promise<{ markup: string; styles: string; script: string } | null> {
+  const raw = /(?:^|;\s*)th_session=([^;]+)/.exec(req.headers.cookie ?? '')?.[1];
+  if (!raw) return null;
+  let userId: string;
+  try {
+    const claims = (req.server as unknown as { jwt: { verify: (t: string) => { sub?: string } } })
+      .jwt.verify(decodeURIComponent(raw));
+    if (!claims.sub) return null;
+    userId = claims.sub;
+  } catch {
+    return null; // expired or forged — behave exactly as logged out
+  }
+  // The token carries only `sub` (a cuid), so the avatar initial has to come
+  // from the account itself — falling back to sub put a "C" on every avatar,
+  // the first letter of the id rather than of the name.
+  const account = await db.adminUser.findUnique({ where: { id: userId }, select: { username: true } });
+  if (!account) return null;
+  const username = account.username;
+
+  const settings = await settingsService.getAdminDock();
+  const slug = current.replace(/^\//, '').split('?')[0] ?? '';
+  const row = slug ? await db.content.findFirst({ where: { slug }, select: { id: true, title: true } }) : null;
+  // A real content row names itself; index routes (/blog, /work) have no row,
+  // so title-case the path rather than mislabelling everything "Home".
+  const fallbackCrumb = slug
+    ? slug.split('/')[0]!.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+    : 'Home';
+  return {
+    markup: dockMarkup({
+      crumb: row?.title ?? fallbackCrumb,
+      // Hands off through the admin so the session token stays out of
+      // this page's HTML — see admin/app/edit/[id]/route.ts.
+      editUrl: row ? `/tos-admin/edit/${row.id}` : null,
+      username,
+      settings,
+    }),
+    styles: dockStyles(),
+    script: dockScript(),
+  };
+}
+
+async function buildNav(current: string, req?: FastifyRequest): Promise<{ siteName: string; tagline: string; homepageSlug: string | null; nav: NavItem[]; chrome: ChromeCtx }> {
   const site = await settingsService.getSite();
   const chrome = await loadChrome(site);
+  // The admin dock rides along in `chrome` because every sitePage() call site
+  // already spreads it — one place to add it, no route left behind. Only ever
+  // built for a request carrying a valid admin session, so a logged-out
+  // visitor gets byte-identical HTML.
+  const dock = req ? await buildDock(req, current) : undefined;
+  if (dock) (chrome as ChromeCtx & { dock?: unknown }).dock = dock;
+  const perf = await settingsService.getPerformance();
+  (chrome as ChromeCtx & { perf?: unknown }).perf = {
+    lazyImages: perf.lazyImages,
+    minHtml: perf.minHtml,
+    minCss: perf.minCss,
+  };
   const [pages, postCount, workCount, commerce] = await Promise.all([
     db.content.findMany({ where: { type: 'page', status: 'published' }, select: { slug: true, title: true }, orderBy: { createdAt: 'asc' }, take: 6 }),
     db.content.count({ where: { type: 'post', status: 'published' } }),
@@ -118,8 +179,9 @@ async function indexCards(type: 'post' | 'case_study', base: string): Promise<st
 }
 
 export async function siteRoutes(app: FastifyInstance): Promise<void> {
-  const notFound = async (reply: FastifyReply, path: string): Promise<void> => {
-    const ctx = await buildNav(path);
+
+  const notFound = async (reply: FastifyReply, path: string, req?: FastifyRequest): Promise<void> => {
+    const ctx = await buildNav(path, req);
     send(reply, sitePage({
       ...ctx.chrome,
       title: `Not found — ${ctx.siteName}`,
@@ -131,7 +193,7 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
 
   // ── / — homepage: the configured page, else a landing from what exists ──
   app.get('/', async (req, reply) => {
-    const ctx = await buildNav('/');
+    const ctx = await buildNav('/', req);
     if (ctx.homepageSlug) {
       try {
         const r = await contentService.renderBySlug(ctx.homepageSlug, originOf(req));
@@ -165,8 +227,8 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── /blog + /blog/:slug ──
-  app.get('/blog', async (_req, reply) => {
-    const ctx = await buildNav('/blog');
+  app.get('/blog', async (req, reply) => {
+    const ctx = await buildNav('/blog', req);
     send(reply, sitePage({ ...ctx.chrome, title: `Blog — ${ctx.siteName}`, siteName: ctx.siteName, nav: ctx.nav, body: `<h1 class="page-title">Blog</h1>${await indexCards('post', '/blog')}` }));
   });
 
@@ -176,17 +238,17 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
       // origin carries the section prefix so canonical/og:url match the URL
       // actually served (posts live under /blog, not at the root).
       const r = await contentService.renderBySlug(slug, `${originOf(req)}/blog`);
-      if (r.type !== 'post') return notFound(reply, `/blog/${slug}`);
-      const ctx = await buildNav('/blog');
+      if (r.type !== 'post') return notFound(reply, `/blog/${slug}`, req);
+      const ctx = await buildNav('/blog', req);
       send(reply, sitePage({ ...ctx.chrome, title: `${r.title} — ${ctx.siteName}`, headExtra: headExtraFor(r), siteName: ctx.siteName, nav: ctx.nav, body: bareOrArticle(ctx, r, true) }));
     } catch {
-      return notFound(reply, `/blog/${slug}`);
+      return notFound(reply, `/blog/${slug}`, req);
     }
   });
 
   // ── /work + /work/:slug — Case Studies (Portfolio) ──
-  app.get('/work', async (_req, reply) => {
-    const ctx = await buildNav('/work');
+  app.get('/work', async (req, reply) => {
+    const ctx = await buildNav('/work', req);
     send(reply, sitePage({ ...ctx.chrome, title: `Work — ${ctx.siteName}`, siteName: ctx.siteName, nav: ctx.nav, body: `<h1 class="page-title">Work</h1>${await indexCards('case_study', '/work')}` }));
   });
 
@@ -194,11 +256,11 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
     const { slug } = req.params as { slug: string };
     try {
       const r = await contentService.renderBySlug(slug, `${originOf(req)}/work`);
-      if (r.type !== 'case_study') return notFound(reply, `/work/${slug}`);
-      const ctx = await buildNav('/work');
+      if (r.type !== 'case_study') return notFound(reply, `/work/${slug}`, req);
+      const ctx = await buildNav('/work', req);
       send(reply, sitePage({ ...ctx.chrome, title: `${r.title} — ${ctx.siteName}`, headExtra: headExtraFor(r), siteName: ctx.siteName, nav: ctx.nav, body: bareOrArticle(ctx, r, true) }));
     } catch {
-      return notFound(reply, `/work/${slug}`);
+      return notFound(reply, `/work/${slug}`, req);
     }
   });
 
@@ -214,11 +276,11 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
     }
     try {
       const r = await contentService.renderBySlug(slug, originOf(req));
-      if (r.type !== 'page') return notFound(reply, `/${slug}`);
-      const ctx = await buildNav(`/${slug}`);
+      if (r.type !== 'page') return notFound(reply, `/${slug}`, req);
+      const ctx = await buildNav(`/${slug}`, req);
       send(reply, sitePage({ ...ctx.chrome, title: `${r.title} — ${ctx.siteName}`, headExtra: headExtraFor(r), siteName: ctx.siteName, nav: ctx.nav, body: bareOrArticle(ctx, r, false) }));
     } catch {
-      return notFound(reply, `/${slug}`);
+      return notFound(reply, `/${slug}`, req);
     }
   });
 }

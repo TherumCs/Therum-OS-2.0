@@ -18,7 +18,7 @@ export interface Behavior {
 // `Appearance` interface + `APPEARANCE_DEFAULTS` exactly — keep both in sync.
 export interface Appearance {
   density: 'compact' | 'comfortable' | 'breathing';
-  sidebarStyle: 'default' | 'pills' | 'minimal';
+  sidebarStyle: 'default' | 'pills' | 'floating' | 'solid' | 'minimal' | 'dividers';
   cardStyle: 'flat' | 'shadow' | 'glass';
   colorMode: 'light' | 'dark' | 'system';
   contrast: 'normal' | 'high';
@@ -62,6 +62,25 @@ export interface Appearance {
 
   keyboardShortcuts: boolean;
   debugOverlays: boolean;
+
+  // Ported from 1.9.44 (2026-07-27) — keep in sync with
+  // src/services/settings.service.ts's Appearance + APPEARANCE_DEFAULTS.
+  sidebarLayout: 'both' | 'icons' | 'text';
+  sidebarFoldable: boolean;
+
+  glass: boolean;
+  glassTintMode: 'auto' | 'dark' | 'light' | 'color';
+  surfaceEffect: 'none' | 'glass-light' | 'glass-dark' | 'glass-colored' | 'gradient' | 'blurred';
+  bgImage: 'none' | 'mesh' | 'grid' | 'noise' | 'dots';
+
+  cardTemplate: 'hero' | 'detailed' | 'list-1' | 'list-2' | 'list-3';
+  cardImage: 'gradient' | 'featured' | 'stock' | 'wireframe' | 'pattern';
+
+  bentoGap: number;
+  autoSave: boolean;
+  showGrips: boolean;
+  desktopMode: boolean;
+  codeEditorTheme: 'therum' | 'github' | 'monokai' | 'solarized' | 'nord';
 }
 
 export const DEFAULT_APPEARANCE: Appearance = {
@@ -110,6 +129,23 @@ export const DEFAULT_APPEARANCE: Appearance = {
 
   keyboardShortcuts: true,
   debugOverlays: false,
+
+  sidebarLayout: 'both',
+  sidebarFoldable: false,
+
+  glass: false,
+  glassTintMode: 'dark',
+  surfaceEffect: 'none',
+  bgImage: 'none',
+
+  cardTemplate: 'hero',
+  cardImage: 'gradient',
+
+  bentoGap: 16,
+  autoSave: true,
+  showGrips: false,
+  desktopMode: false,
+  codeEditorTheme: 'therum',
 };
 
 // data-* attribute values for #th-shell — one shared builder so the "omit
@@ -151,6 +187,24 @@ export function appearanceDataAttrs(a: Appearance): Record<string, string | unde
     'data-always-focus': a.alwaysVisibleFocusRings ? 'on' : undefined,
     'data-larger-targets': a.largerClickTargets ? 'on' : undefined,
     'data-debug-overlays': a.debugOverlays ? 'on' : undefined,
+
+    // Ported from 1.9.44 (2026-07-27). Same convention: omit at baseline so
+    // an unset attribute and an explicit default render identically.
+    'data-sidebar-layout': a.sidebarLayout === 'both' ? undefined : a.sidebarLayout,
+    'data-sidebar-foldable': a.sidebarFoldable ? 'on' : undefined,
+    'data-glass': a.glass ? 'on' : undefined,
+    'data-glass-tint-mode': a.glassTintMode === 'dark' ? undefined : a.glassTintMode,
+    'data-surface-effect': a.surfaceEffect === 'none' ? undefined : a.surfaceEffect,
+    'data-bg-image': a.bgImage === 'none' ? undefined : a.bgImage,
+    'data-card-template': a.cardTemplate === 'hero' ? undefined : a.cardTemplate,
+    'data-card-image': a.cardImage === 'gradient' ? undefined : a.cardImage,
+    'data-show-grips': a.showGrips ? 'on' : undefined,
+    // Defaults on, so only the off case needs a selector.
+    'data-autosave': a.autoSave ? undefined : 'off',
+    'data-code-theme': a.codeEditorTheme === 'therum' ? undefined : a.codeEditorTheme,
+    'data-desktop-mode': a.desktopMode ? 'on' : undefined,
+    // Defaults on, so only the off case needs a selector.
+    'data-shortcuts': a.keyboardShortcuts ? undefined : 'off',
   };
 }
 
@@ -169,6 +223,8 @@ export function appearanceInlineVars(a: Appearance): Record<string, string> {
     const rgb = hexToRgbTriplet(a.glassTint);
     if (rgb) vars['--th-glass-tint'] = rgb;
   }
+  // Dashboard bento gap — a free number, so a var rather than an attribute.
+  if (a.bentoGap !== 16) vars['--th-bento-gap'] = `${a.bentoGap}px`;
   if (a.bodyFont) vars['--th-font-body'] = a.bodyFont;
   if (a.displayFont) vars['--th-font-display'] = a.displayFont;
   if (a.monoFont) vars['--th-font-mono'] = a.monoFont;

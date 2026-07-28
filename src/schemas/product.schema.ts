@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { sortFields } from './listing.js';
 
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
@@ -57,6 +58,7 @@ export const ListProductsQuery = z.object({
   q: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().optional(),
+  ...sortFields(['updatedAt', 'createdAt', 'name', 'status'], 'updatedAt'),
 });
 
 export const UpdateVariantInput = z.object({

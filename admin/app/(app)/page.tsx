@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { apiGet } from '../../lib/api';
 import { CardResizeHandle } from './CardResizeHandle';
+import { DASHBOARD_PRESETS, activePreset, type PresetKey } from './dashboardPresets';
 import { timeAgo } from '../../lib/types';
 import type { Paged, Product, Order, Extension } from '../../lib/types';
 import { BASE_PATH } from '../../lib/session';
@@ -155,6 +156,8 @@ export default async function Home() {
     { id: 'site-health', size: 'xs' },
   ]).filter((c) => (c.id === 'products' ? commerceActive : true));
 
+  const current = activePreset(layout);
+
   const pages = content?.items.filter((c) => c.type === 'page') ?? [];
   const posts = content?.items.filter((c) => c.type === 'post') ?? [];
   const byStatus = (items: ContentItem[]) => {
@@ -206,7 +209,7 @@ export default async function Home() {
 
       <div className="th-edit-bar">
         <div className="th-edit-bar-text">
-          <strong>Edit layout</strong> · use the arrows to reorder, drag a card&apos;s corner to resize.
+          <strong>Edit layout</strong>{' · '}arrows reorder, drag a card&apos;s bottom-right corner to resize.
         </div>
         <div className="th-edit-bar-actions">
           <form action={`${BASE_PATH}/api/dashboard-layout/reset`} method="post" style={{ display: 'inline' }}>
@@ -217,6 +220,23 @@ export default async function Home() {
           <label htmlFor="th-edit-toggle" className="th-btn th-btn-primary" style={{ cursor: 'pointer' }}>
             Done
           </label>
+        </div>
+        <div className="th-dash-presets">
+          <span className="th-dash-presets-label">View</span>
+          {(Object.entries(DASHBOARD_PRESETS) as [PresetKey, { label: string; hint: string }][]).map(([key, p]) => (
+            <form key={key} action={`${BASE_PATH}/api/dashboard-layout/preset`} method="post" style={{ display: 'inline' }}>
+              <input type="hidden" name="layout" value={JSON.stringify(layout)} />
+              <input type="hidden" name="preset" value={key} />
+              <button
+                type="submit"
+                className={'th-dash-preset' + (current === key ? ' active' : '')}
+                title={p.hint}
+                aria-pressed={current === key}
+              >
+                {p.label}
+              </button>
+            </form>
+          ))}
         </div>
       </div>
 

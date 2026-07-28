@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { LocalFilterBar, sortRows } from '../ClientTableControls';
 import { useRouter } from 'next/navigation';
 import { BASE_PATH } from '../../../lib/session';
 
@@ -76,6 +77,8 @@ export function ClustersClient({ initial, loadError }: { initial: ClusterRow[]; 
   const [name, setName] = useState('');
   const [picked, setPicked] = useState<Candidate[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
+  const [q, setQ] = useState('');
+  const [sortKey, setSortKey] = useState('name:asc');
   const editorOpen = editingId !== null;
 
   const openCreate = () => {
@@ -122,6 +125,19 @@ export function ClustersClient({ initial, loadError }: { initial: ClusterRow[]; 
     }
   };
 
+  const needle = q.trim().toLowerCase();
+  const visible = sortRows(
+    needle
+      ? initial.filter((c) => `${c.name} ${c.primaryName ?? ''}`.toLowerCase().includes(needle))
+      : initial,
+    sortKey,
+    {
+      name: (c) => c.name,
+      members: (c) => c.memberCount,
+      health: (c) => (c.hasDrift ? 'drift' : 'consistent'),
+    },
+  );
+
   return (
     <div style={{ display: 'grid', gap: 'var(--th-space-16)' }}>
       {loadError && <div className="notice">Couldn&apos;t reach the backend — the list below may be incomplete.</div>}
@@ -129,7 +145,7 @@ export function ClustersClient({ initial, loadError }: { initial: ClusterRow[]; 
 
       <div className="th-card" style={{ padding: 'var(--th-space-20)' }}>
         <div className="row-between">
-          <strong>Groups</strong>
+          <strong>Merged products</strong>
           <button className="th-btn" onClick={openCreate}>
             {editorOpen ? 'Cancel' : '+ New group'}
           </button>
@@ -158,6 +174,23 @@ export function ClustersClient({ initial, loadError }: { initial: ClusterRow[]; 
             </p>
           )
         ) : (
+          <>
+          <LocalFilterBar
+            query={q}
+            onQuery={setQ}
+            sortKey={sortKey}
+            onSort={setSortKey}
+            sorts={[
+              { key: 'name:asc', label: 'Name A–Z' },
+              { key: 'name:desc', label: 'Name Z–A' },
+              { key: 'members:desc', label: 'Most members' },
+              { key: 'members:asc', label: 'Fewest members' },
+              { key: 'health:asc', label: 'Health' },
+            ]}
+            searchPlaceholder="Search groups…"
+            shown={visible.length}
+            total={initial.length}
+          />
           <table style={{ width: '100%', marginTop: 'var(--th-space-12)' }}>
             <thead>
               <tr>
@@ -169,7 +202,7 @@ export function ClustersClient({ initial, loadError }: { initial: ClusterRow[]; 
               </tr>
             </thead>
             <tbody>
-              {initial.map((c) => (
+              {visible.map((c) => (
                 <tr key={c.id}>
                   <td>{c.name}</td>
                   <td>{c.memberCount}</td>
@@ -196,6 +229,7 @@ export function ClustersClient({ initial, loadError }: { initial: ClusterRow[]; 
               ))}
             </tbody>
           </table>
+          </>
         )}
       </div>
 

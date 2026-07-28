@@ -12,3 +12,6 @@ admin/.next/
 admin/.env.local
 builder/dist/
 .next-test/
+
+# Database backups — real dumps of live content, never committed.
+backups/
