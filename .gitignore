@@ -15,3 +15,9 @@ builder/dist/
 
 # Database backups — real dumps of live content, never committed.
 backups/
+
+# Bricks is COMMERCIAL, licensed software — installed through the Bricks
+# Bridge ZIP installer, not source we wrote. Vendoring it here republished a
+# paid theme and made the repo 96% not-our-code (77.8 MB of 81 MB).
+# Therum OS is Therum OS. Nothing licensed belongs in this repo.
+bricks-addons/
