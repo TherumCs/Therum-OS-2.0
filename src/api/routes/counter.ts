@@ -447,7 +447,9 @@ export async function counterAdminRoutes(app: FastifyInstance): Promise<void> {
     reply.send({
       kind: extracted.kind,
       headers,
-      suggested: catalogImport.suggestMapping(headers),
+      // Sampled rows, not just the headers — the values are what identify a
+      // column, and a header may be in any language or absent entirely.
+      suggested: catalogImport.suggestMapping(headers, extracted.rows.slice(1, 41)),
       sample: extracted.rows.slice(1, 6),
       totalRows: extracted.rows.length - 1,
       images: extracted.images,

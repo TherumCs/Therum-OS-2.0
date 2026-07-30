@@ -38,18 +38,19 @@ export const TARGET_FIELDS: { id: TargetField; label: string; hint: string }[] =
   { id: 'ignore', label: '— skip this column —', hint: '' },
 ];
 
-// Header spellings seen in the wild, lowercased. Order matters only in that
-// the first field with a hit wins.
-const SYNONYMS: Record<Exclude<TargetField, 'ignore'>, string[]> = {
-  name: ['name', 'product', 'product name', 'title', 'item', 'item name', 'description short', 'produkt'],
-  price: ['price', 'unit price', 'cost', 'amount', 'rrp', 'msrp', 'retail', 'sale price', 'preis'],
-  description: ['description', 'desc', 'details', 'long description', 'body', 'notes', 'about'],
-  sku: ['sku', 'code', 'item code', 'product code', 'barcode', 'upc', 'ean', 'mpn', 'ref'],
-  image: ['image', 'image url', 'img', 'photo', 'picture', 'thumbnail', 'image link', 'images'],
-  category: ['category', 'categories', 'type', 'department', 'collection', 'group'],
-  tags: ['tags', 'tag', 'labels', 'keywords'],
-  stock: ['stock', 'qty', 'quantity', 'inventory', 'on hand', 'available'],
-  status: ['status', 'state', 'published', 'active'],
+// A LAST-RESORT hint only. Field detection reads the DATA (see inferMapping);
+// these exist for the one case data cannot settle — telling two similar text
+// columns apart when the file has no rows to judge by.
+const HEADER_HINTS: Record<Exclude<TargetField, 'ignore'>, RegExp> = {
+  name: /name|product|title|item|produkt|artikel|nombre|producto|nom|produit|prodotto/i,
+  price: /price|cost|amount|rrp|msrp|retail|preis|precio|prix|prezzo|importe/i,
+  description: /desc|details|body|notes|about|beschreib|descri/i,
+  sku: /sku|code|barcode|upc|ean|mpn|ref|codigo|codice|artikelnummer/i,
+  image: /image|img|photo|picture|thumb|bild|imagen|foto|immagine/i,
+  category: /categor|type|department|collection|group|kategorie|rubrique|gruppe/i,
+  tags: /tags?|labels|keywords|schlagworte|etiquetas|etichette/i,
+  stock: /stock|qty|quantit|inventory|on hand|available|menge|bestand|cantidad/i,
+  status: /status|state|published|active|zustand|estado|stato/i,
 };
 
 /**
@@ -111,23 +112,162 @@ function sniffDelimiter(text: string): string {
   return best;
 }
 
-/** Best guess of which target field each header means. */
-export function suggestMapping(headers: string[]): TargetField[] {
-  const taken = new Set<TargetField>();
-  return headers.map((raw) => {
-    const h = raw.toLowerCase().replace(/[_-]+/g, ' ').trim();
-    for (const [field, words] of Object.entries(SYNONYMS) as [Exclude<TargetField, 'ignore'>, string[]][]) {
-      if (taken.has(field)) continue;
-      // Exact first, then contains — "Product Name" should reach `name`, but
-      // "name" must not be stolen by a "filename" column if a better one exists.
-      if (words.includes(h) || words.some((w) => h === w)) { taken.add(field); return field; }
-    }
-    for (const [field, words] of Object.entries(SYNONYMS) as [Exclude<TargetField, 'ignore'>, string[]][]) {
-      if (taken.has(field)) continue;
-      if (words.some((w) => h.includes(w))) { taken.add(field); return field; }
-    }
-    return 'ignore';
+/**
+ * What each column IS, decided by looking at the values.
+ *
+ * The first version of this matched header names against a list of words, then
+ * grew a German, Spanish, French and Italian branch of that list — which is a
+ * losing game: the next catalogue is in Japanese, or the header just says
+ * "Col3". The data does not have that problem. A column of "$3.50 / $12.00 /
+ * $4.25" is the price in any language, a column of URLs ending .jpg is the
+ * image, and the longest prose is the description.
+ *
+ * Header text is still read, but only as a TIEBREAK — when two columns look
+ * equally like a name, "Product" beats "Notes". Data always outranks it.
+ */
+interface ColumnProfile {
+  values: string[];
+  filled: number;
+  currency: number;   // values carrying a currency symbol
+  decimal: number;    // values that are a number with a fractional part
+  integer: number;    // whole numbers
+  url: number;
+  imageUrl: number;
+  avgLength: number;
+  uniqueRatio: number;
+  separated: number;  // values that look like a list ("a, b, c")
+  pathish: number;    // values containing a / — a category path
+  codeish: number;    // ABC-123 style identifiers
+  numeric: number;    // parses as a number at all
+}
+
+const CURRENCY = /[$€£¥₩₹₽¢]|\b(usd|eur|gbp|jpy|cad|aud|chf)\b/i;
+
+function profile(values: string[]): ColumnProfile {
+  const filled = values.filter((v) => v.trim() !== '');
+  const n = Math.max(1, filled.length);
+  const count = (test: (v: string) => boolean): number => filled.filter(test).length / n;
+  const numeric = (v: string): string => v.replace(/[^0-9.,-]/g, '');
+  return {
+    values: filled,
+    filled: filled.length,
+    currency: count((v) => CURRENCY.test(v) && /\d/.test(v)),
+    decimal: count((v) => /^-?[\d.,\s]+$/.test(numeric(v)) && /[.,]\d{1,2}\s*$/.test(numeric(v))),
+    integer: count((v) => /^\d{1,7}$/.test(v.trim())),
+    url: count((v) => /^https?:\/\//i.test(v.trim())),
+    imageUrl: count((v) => /^https?:\/\//i.test(v.trim()) && /\.(jpe?g|png|webp|gif|avif)(\?|$)/i.test(v.trim())),
+    avgLength: filled.reduce((sum, v) => sum + v.length, 0) / n,
+    uniqueRatio: new Set(filled.map((v) => v.toLowerCase())).size / n,
+    separated: count((v) => /[,;|]/.test(v) && v.split(/[,;|]/).every((p) => p.trim().length > 0 && p.trim().length < 30)),
+    pathish: count((v) => /^[^/\s][^/]*\/[^/]+/.test(v.trim()) && !/^https?:/i.test(v.trim())),
+    // A code has a LETTER in it (SKU-12, AB1234) or is a long all-digit
+    // barcode. Without the letter requirement "1.00" matched, and a price
+    // column was read as a SKU.
+    // A code carries DIGITS (SKU-12, AB1234) or is a long all-digit barcode.
+    // Requiring only "letters and no spaces" matched the word "snacks", and a
+    // category column was read as a SKU.
+    codeish: count((v) => {
+      const t = v.trim();
+      if (/^\d{8,14}$/.test(t)) return true;               // EAN / UPC
+      if (/\s/.test(t) || t.length < 3) return false;
+      return /\d/.test(t) && /[A-Za-z]/.test(t) && /^[A-Za-z0-9][A-Za-z0-9._\/-]*$/.test(t);
+    }),
+    numeric: count((v) => /^[^a-z]*\d[\d.,\s]*$/i.test(v.trim())),
+  };
+}
+
+/** How strongly a column looks like a given field. 0 means "not this". */
+function score(field: Exclude<TargetField, 'ignore'>, p: ColumnProfile, header: string): number {
+  // The header is a TIEBREAK, not the mechanism — data signals (currency, a
+  // URL, a number) are weighted several times higher, so a mislabelled column
+  // still lands correctly. But when two readings are genuinely close, a header
+  // that says "Long Description" is real evidence and should decide it.
+  const hint = HEADER_HINTS[field].test(header) ? 1.2 : 0;
+  if (!p.filled) return hint * 0.5; // nothing to judge but the header
+  switch (field) {
+    case 'image':
+      // An image column is unmistakable, so it is scored highest of all.
+      return p.imageUrl * 6 + p.url * 1.5 + hint;
+    case 'price':
+      // A currency symbol settles it outright. Failing that, decimals.
+      return p.currency * 5 + p.decimal * 2.2 + hint - p.url * 3;
+    case 'stock':
+      // Whole numbers with no currency and no decimal point.
+      return p.integer * 2.4 - p.currency * 4 - p.decimal * 2 + hint;
+    case 'description':
+      // The longest prose in the file. Length is the whole signal.
+      return Math.min(p.avgLength / 25, 3) + hint - p.url * 2 - p.currency * 2 - p.numeric * 4;
+    case 'name':
+      // Short, distinct, TEXT — and not any of the above. The numeric penalty
+      // is doing real work: a column of "1.00 / 2.00" is unique and short, so
+      // without it a price column outscored the actual product name.
+      return (p.uniqueRatio * 2.2)
+        + (p.avgLength > 2 && p.avgLength < 60 ? 1.2 : 0)
+        + hint - p.numeric * 5 - p.currency * 4 - p.url * 4 - p.pathish * 2;
+    case 'category':
+      // Repeats down the page (few distinct values), or reads as a path.
+      return p.pathish * 3 + (1 - p.uniqueRatio) * 1.8 + hint - p.url * 3 - p.currency * 3 - p.separated * 1.2 - p.numeric * 3;
+    case 'tags':
+      // Tag lists are SHORT. Long comma-separated prose is a description that
+      // happens to contain commas.
+      return p.separated * 2.6 + (1 - p.uniqueRatio) * 0.6 + hint
+        - Math.max(0, (p.avgLength - 14) / 12) - p.url * 3 - p.currency * 3;
+    case 'sku':
+      return p.codeish * 2.6 + p.uniqueRatio * 0.8 - (1 - p.uniqueRatio) * 2.5
+        + hint - p.currency * 3 - p.url * 3 - p.decimal * 3;
+    case 'status':
+      // A handful of repeated short words.
+      return (p.uniqueRatio < 0.3 && p.avgLength < 12 ? 1.4 : 0) + hint - p.url * 3 - p.currency * 3;
+    default:
+      return 0;
+  }
+}
+
+const MIN_CONFIDENCE = 1.0;
+
+/**
+ * Assign fields to columns from the data, one field at a time, strongest first.
+ *
+ * @param rows sample rows WITHOUT the header. Passing none falls back to
+ *             header text alone, which is the old, weaker behaviour.
+ */
+export function suggestMapping(headers: string[], rows: string[][] = []): TargetField[] {
+  const profiles = headers.map((_, i) => profile(rows.map((r) => r[i] ?? '')));
+  const out: TargetField[] = headers.map(() => 'ignore');
+
+  // Every (column, field) pair scored, then taken best-first so the most
+  // confident reading wins its column outright rather than the leftmost column
+  // claiming a field it only weakly resembles.
+  const fields = Object.keys(HEADER_HINTS) as Exclude<TargetField, 'ignore'>[];
+  const candidates: { col: number; field: Exclude<TargetField, 'ignore'>; s: number }[] = [];
+  headers.forEach((h, col) => {
+    for (const field of fields) candidates.push({ col, field, s: score(field, profiles[col]!, h) });
   });
+  candidates.sort((a, b) => b.s - a.s);
+
+  const usedCols = new Set<number>();
+  const usedFields = new Set<TargetField>();
+  for (const c of candidates) {
+    if (c.s < MIN_CONFIDENCE) break;
+    if (usedCols.has(c.col) || usedFields.has(c.field)) continue;
+    out[c.col] = c.field;
+    usedCols.add(c.col);
+    usedFields.add(c.field);
+  }
+
+  // A file with no Name yet is unusable, so the best remaining text column
+  // takes it rather than leaving the operator to find it.
+  if (!usedFields.has('name')) {
+    let best = -1;
+    let bestScore = -Infinity;
+    headers.forEach((h, col) => {
+      if (usedCols.has(col)) return;
+      const s = score('name', profiles[col]!, h);
+      if (s > bestScore) { bestScore = s; best = col; }
+    });
+    if (best >= 0) out[best] = 'name';
+  }
+  return out;
 }
 
 /** "$1,299.00" → 129900. Returns null when there is no number in there. */
@@ -168,7 +308,7 @@ export function analyze(text: string): AnalyzeResult {
   const body = rows.slice(1);
   return {
     headers,
-    suggested: suggestMapping(headers),
+    suggested: suggestMapping(headers, body.slice(0, 40)),
     sample: body.slice(0, 5),
     totalRows: body.length,
     delimiter: delim,

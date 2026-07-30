@@ -46,19 +46,56 @@ test('parseDelimited: a comma-heavy description does not beat the real delimiter
   assert.equal(rows[1]?.[1], 'one, two, three');
 });
 
-test('suggestMapping: recognises the names real exports use', () => {
-  const m = suggestMapping(['Product Name', 'Unit Price', 'Long Description', 'Image URL', 'SKU', 'Nonsense']);
-  assert.equal(m[0], 'name');
-  assert.equal(m[1], 'price');
-  assert.equal(m[2], 'description');
-  assert.equal(m[3], 'image');
-  assert.equal(m[4], 'sku');
-  assert.equal(m[5], 'ignore', 'an unrecognised column is skipped, not guessed at');
+test('field detection reads the DATA, so the header language stops mattering', () => {
+  // This replaced a list of header words that had grown a German, Spanish,
+  // French and Italian branch — a losing game, because the next catalogue is
+  // in Japanese or its columns are called "Col3". A price is a price because
+  // it looks like money.
+  assert.deepEqual(
+    suggestMapping(['Artikel', 'Preis', 'Beschreibung', 'Kategorie'], [
+      ['Yuzu Kit Kat', '€3,50', 'Zitrus weisse Schokolade', 'snacks/japan'],
+      ['Ramune', '€2,00', 'Murmel Flasche', 'snacks/japan'],
+    ]),
+    ['name', 'price', 'description', 'category'],
+  );
+  assert.deepEqual(
+    suggestMapping(['商品名', '価格', 'カテゴリ'], [
+      ['抹茶キットカット', '¥980', 'snacks/japan'],
+      ['ラムネ', '¥250', 'snacks/japan'],
+    ]),
+    ['name', 'price', 'category'],
+    'a language no word list covers',
+  );
 });
 
-test('suggestMapping: never assigns the same field to two columns', () => {
-  const m = suggestMapping(['name', 'title', 'item']);
-  assert.equal(m.filter((f) => f === 'name').length, 1);
+test('field detection works with useless headers, or none at all', () => {
+  assert.deepEqual(
+    suggestMapping(['Col1', 'Col2', 'Col3', 'Col4'], [
+      ['Yuzu Kit Kat', '$3.50', 'A sweet and sour citrus white chocolate bar from Japan', 'https://cdn.x/y.jpg'],
+      ['Ramune', '$2.00', 'A carbonated soda sealed with a glass marble in the neck', 'https://cdn.x/r.jpg'],
+    ]),
+    ['name', 'price', 'description', 'image'],
+  );
+  assert.deepEqual(
+    suggestMapping(['', '', ''], [['Pocky', '¥980', 'https://cdn.x/p.png'], ['Hi-Chew', '¥750', 'https://cdn.x/h.png']]),
+    ['name', 'price', 'image'],
+    'no headers whatsoever',
+  );
+});
+
+test('a count is not a price, even though both are numbers', () => {
+  // The distinguishing feature is the currency symbol and the decimal, not
+  // the position or the header.
+  assert.deepEqual(
+    suggestMapping(['A', 'B', 'C'], [['Mochi', '12', '$4.50'], ['Senbei', '300', '$3.25']]),
+    ['name', 'stock', 'price'],
+  );
+});
+
+test('header text still breaks a tie when the data cannot', () => {
+  // Two indistinguishable text columns: the header is all there is to go on.
+  const m = suggestMapping(['Product', 'Notes'], [['Mochi', 'Soft rice cake'], ['Senbei', 'Rice cracker']]);
+  assert.equal(m[0], 'name');
 });
 
 test('parseMoneyToMinor: money arrives in every format and must land in cents', () => {
