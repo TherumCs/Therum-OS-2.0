@@ -11,11 +11,16 @@ const idParam = (req: { params: unknown }): string => (req.params as { id: strin
 export async function mediaRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', requireCapability('content'));
 
-  app.get('/media', async (req, reply) => {
+  // AUTHENTICATED. These two were open while every mutation below was guarded,
+  // so the whole library was enumerable by anyone: upload URL, original
+  // filename, dimensions, byte size and date, including files uploaded but
+  // never published. The FILES themselves stay public under /api/uploads —
+  // that is how images load on the storefront — but the INDEX is not public.
+  app.get('/media', { preHandler: app.authenticate }, async (req, reply) => {
     reply.send(await mediaService.list(ListMediaQuery.parse(req.query)));
   });
 
-  app.get('/media/:id', async (req, reply) => {
+  app.get('/media/:id', { preHandler: app.authenticate }, async (req, reply) => {
     reply.send(await mediaService.get(idParam(req)));
   });
 

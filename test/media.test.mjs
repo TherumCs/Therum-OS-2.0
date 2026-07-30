@@ -38,17 +38,19 @@ test('media: create, list, get, delete round-trip', async () => {
   assert.equal(asset.kind, 'image');
   assert.equal(asset.alt, 'Hero image');
 
-  const list = await app.inject({ method: 'GET', url: '/api/media' });
+  // The media INDEX now requires auth — it used to answer anyone, exposing
+  // every upload URL, filename and size.
+  const list = await app.inject({ method: 'GET', url: '/api/media', headers: auth() });
   assert.equal(list.statusCode, 200);
   assert.ok(list.json().items.some((i) => i.id === asset.id));
 
-  const got = await app.inject({ method: 'GET', url: `/api/media/${asset.id}` });
+  const got = await app.inject({ method: 'GET', url: `/api/media/${asset.id}`, headers: auth() });
   assert.equal(got.statusCode, 200);
   assert.equal(got.json().url, 'https://example.com/hero.jpg');
 
   const del = await app.inject({ method: 'DELETE', url: `/api/media/${asset.id}`, headers: auth() });
   assert.equal(del.statusCode, 200);
-  assert.equal((await app.inject({ method: 'GET', url: `/api/media/${asset.id}` })).statusCode, 404);
+  assert.equal((await app.inject({ method: 'GET', url: `/api/media/${asset.id}`, headers: auth() })).statusCode, 404);
 });
 
 test('media: create requires auth; rejects invalid url', async () => {

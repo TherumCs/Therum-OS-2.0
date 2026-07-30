@@ -264,6 +264,74 @@ document.addEventListener('DOMContentLoaded',function(){
 });
 `;
 
+/**
+ * Head metadata for a store page.
+ *
+ * Storefront pages shipped with nothing but a <title>: no description, no
+ * canonical, no og: tags. For a shop that is money — a product shared to a
+ * message thread or a story came through as a bare URL with no image, no name
+ * and no price.
+ *
+ * `noindex` exists because the correct answer for /cart, /checkout, /account
+ * and a receipt is not a canonical URL, it is "do not index this at all".
+ * Those pages are per-shopper and some carry an access token.
+ */
+export interface SeoMeta {
+  description?: string;
+  /** Path or absolute URL. Combined with `origin` to emit an absolute og:url. */
+  canonical?: string;
+  /** Absolute or root-relative image URL for social cards. */
+  image?: string;
+  /** og:type — 'website' for listings, 'product' for a PDP. */
+  type?: 'website' | 'product' | 'article';
+  /** Scheme + host of the current request, so og:url can be absolute. */
+  origin?: string;
+  siteName?: string;
+  noindex?: boolean;
+  /** Minor units. Emitted as product:price for rich results. */
+  priceMinor?: number;
+  currency?: string;
+}
+
+function seoTags(title: string, seo?: SeoMeta): string {
+  if (!seo) return '';
+  const abs = (u?: string): string | undefined => {
+    if (!u) return undefined;
+    if (/^https?:\/\//i.test(u)) return u;
+    return seo.origin ? seo.origin.replace(/\/$/, '') + u : undefined;
+  };
+  const out: string[] = [];
+  if (seo.noindex) {
+    // Keep these out of the index entirely, and out of link previews.
+    out.push('<meta name="robots" content="noindex,nofollow">');
+    return out.join('\n');
+  }
+  if (seo.description) {
+    out.push(`<meta name="description" content="${esc(seo.description)}">`);
+    out.push(`<meta property="og:description" content="${esc(seo.description)}">`);
+  }
+  const canonical = abs(seo.canonical);
+  if (canonical) {
+    out.push(`<link rel="canonical" href="${esc(canonical)}">`);
+    out.push(`<meta property="og:url" content="${esc(canonical)}">`);
+  }
+  out.push(`<meta property="og:title" content="${esc(title)}">`);
+  out.push(`<meta property="og:type" content="${esc(seo.type ?? 'website')}">`);
+  if (seo.siteName) out.push(`<meta property="og:site_name" content="${esc(seo.siteName)}">`);
+  const image = abs(seo.image);
+  if (image) {
+    out.push(`<meta property="og:image" content="${esc(image)}">`);
+    out.push('<meta name="twitter:card" content="summary_large_image">');
+  } else {
+    out.push('<meta name="twitter:card" content="summary">');
+  }
+  if (typeof seo.priceMinor === 'number') {
+    out.push(`<meta property="product:price:amount" content="${(seo.priceMinor / 100).toFixed(2)}">`);
+    out.push(`<meta property="product:price:currency" content="${esc(seo.currency ?? 'USD')}">`);
+  }
+  return out.join('\n');
+}
+
 export interface StoreChrome {
   /** Pre-rendered site header markup (the ported theme's own header). */
   header?: string;
@@ -286,7 +354,7 @@ export interface StoreChrome {
  * filters and the product-card behaviour, none of which the site chrome knows
  * about. Only the frame is replaced.
  */
-export function layout(title: string, body: string, extraScript = '', chrome?: StoreChrome): string {
+export function layout(title: string, body: string, extraScript = '', chrome?: StoreChrome, seo?: SeoMeta): string {
   const header = chrome?.header
     ? `<div id="brx-header">${chrome.header}</div>`
     : `<header class="site"><div class="wrap">
@@ -303,16 +371,17 @@ export function layout(title: string, body: string, extraScript = '', chrome?: S
   // Only the ported header carries the cart/search/wishlist hooks; the
   // fallback chrome above has its own plain cart link and needs none of it.
   const headerIcons = chrome?.header ? chrome.headerIcons ?? HEADER_CART_DEFAULTS : null;
-  return layoutInner(title, body, extraScript, header, footer, themeCss, headerIcons);
+  return layoutInner(title, body, extraScript, header, footer, themeCss, headerIcons, seo);
 }
 
-function layoutInner(title: string, body: string, extraScript: string, header: string, footer: string, themeCss: string, headerIcons: HeaderCartConfig | null = null): string {
+function layoutInner(title: string, body: string, extraScript: string, header: string, footer: string, themeCss: string, headerIcons: HeaderCartConfig | null = null, seo?: SeoMeta): string {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title>
+${seoTags(title, seo)}
 ${themeCss}
 <style>${CSS}${BANNER_STYLES}${PRODUCT_GRID_FALLBACK_CSS}${CHECKOUT_FLOW_CSS}${SHOP_TOOLBAR_CSS}${WISHLIST_CSS}${ACCOUNT_CSS}${headerIcons ? HEADER_CART_CSS : ''}</style>
 </head>

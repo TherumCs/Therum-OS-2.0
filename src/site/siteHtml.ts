@@ -81,6 +81,11 @@ footer.site .wrap{max-width:1080px;display:flex;justify-content:space-between;ga
  * meta.css, which is injected after this and wins.
  */
 export const PORTED_DOC_CSS = `
+/* A heading that exists for the document outline but not for the eye. Used
+   where a ported layout has no h1 of its own — see bareOrArticle in site.ts. */
+.th-sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+
 #brx-content .brxe-container,#brx-content .brxe-block,#brx-content .brxe-section{
   width:100%;max-width:100%}
 /* The column. Everything in these pages lives inside it. */

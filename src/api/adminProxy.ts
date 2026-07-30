@@ -114,8 +114,12 @@ export async function adminProxy(app: FastifyInstance): Promise<void> {
     if (stealth.adminKnock) {
       const url = new URL(req.url, 'http://x');
       if (url.searchParams.get('k') === stealth.adminKnock) {
+        // Secure in production: this is a year-long cookie whose whole job is
+        // to stop the admin answering 404, so it should not ride a plaintext
+        // request. Left off in development because localhost is http.
+        const secure = env.NODE_ENV === 'production' ? '; Secure' : '';
         reply.header('set-cookie',
-          `${KNOCK_COOKIE}=${encodeURIComponent(stealth.adminKnock)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`);
+          `${KNOCK_COOKIE}=${encodeURIComponent(stealth.adminKnock)}; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=31536000`);
       }
     }
 

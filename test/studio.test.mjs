@@ -87,11 +87,15 @@ test('capability enforcement: disabling content 403s content AND media (media ri
   await app.inject({ method: 'PATCH', url: '/api/capabilities/content', headers: auth(), payload: { enabled: false } });
   const contentOff = await app.inject({ method: 'GET', url: '/api/content', headers: auth() });
   assert.equal(contentOff.statusCode, 403);
-  const mediaOff = await app.inject({ method: 'GET', url: '/api/media' });
+  // Authenticated now: the media INDEX used to answer anyone, which meant the
+  // whole library — every upload URL, filename and size — was public. The
+  // capability gate still runs first, so the 403 below is the point of this
+  // test and is unaffected by the auth requirement.
+  const mediaOff = await app.inject({ method: 'GET', url: '/api/media', headers: auth() });
   assert.equal(mediaOff.statusCode, 403);
 
   await app.inject({ method: 'PATCH', url: '/api/capabilities/content', headers: auth(), payload: { enabled: true } });
-  assert.equal((await app.inject({ method: 'GET', url: '/api/media' })).statusCode, 200, 'restored');
+  assert.equal((await app.inject({ method: 'GET', url: '/api/media', headers: auth() })).statusCode, 200, 'restored');
 });
 
 test('fresh-install defaults: commerce/content default ON (native providers are stable); connections defaults OFF (native is planned)', async () => {
@@ -108,4 +112,23 @@ test('unlocked: pairing opens — bricks enables, ecosystem provider selectable'
   const cp = await app.inject({ method: 'PATCH', url: '/api/capabilities/commerce', headers: auth(), payload: { provider: 'counter-wp' } });
   assert.equal(cp.statusCode, 200);
   assert.equal(cp.json().active, 'counter-wp');
+});
+
+test('the media INDEX and customer WRITES require authentication', async () => {
+  // Both of these answered anonymous callers. The capability hook in front of
+  // each route gates the FEATURE, never the caller, so an open route in these
+  // files reads as guarded when it is not.
+  for (const url of ['/api/media', '/api/media/anything']) {
+    const res = await app.inject({ method: 'GET', url });
+    assert.equal(res.statusCode, 401, `${url} must not answer anonymously`);
+  }
+  const created = await app.inject({
+    method: 'POST', url: '/api/customers',
+    payload: { email: `anon-${Date.now()}@test.local` },
+  });
+  assert.equal(created.statusCode, 401, 'POST /customers must not create rows anonymously');
+
+  // The files themselves stay public — that is how storefront images load.
+  const withAuth = await app.inject({ method: 'GET', url: '/api/media', headers: auth() });
+  assert.equal(withAuth.statusCode, 200);
 });

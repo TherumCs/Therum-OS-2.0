@@ -152,7 +152,9 @@ export const ORDER_TRACKING_RUNTIME = `
     var ship = (o.shipments || []);
     out.innerHTML = '<button class="ot__back" type="button" data-ot-back>&larr; Track another</button>'
       + '<p class="ot__no">Order ' + esc(o.number) + '</p>'
-      + '<h1 class="ot__state">' + esc(headline(o)) + '</h1>'
+      // h2, not h1 — the page already has one, and this is the state of the
+      // order rather than the name of the page.
+      + '<h2 class="ot__state">' + esc(headline(o)) + '</h2>'
       + '<p class="ot__when">Placed ' + esc(day(o.placedAt)) + (o.destination ? ' · heading to ' + esc(o.destination) : '') + '</p>'
       + (ship.length
           ? ship.map(shipmentBlock).join('')

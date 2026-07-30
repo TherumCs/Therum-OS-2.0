@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
 import { db } from '../../lib/db.js';
 import { capabilityService } from '../../services/capability.service.js';
-import { layout, closedPage, esc, money, type StoreChrome } from '../../site/storefrontHtml.js';
+import { layout, closedPage, esc, money, type StoreChrome, type SeoMeta } from '../../site/storefrontHtml.js';
 import { buildNav } from './site.js';
 import { settingsService } from '../../services/settings.service.js';
 import { productGrid, CARD_EVOLVE_RUNTIME, CARD_REVEAL_RUNTIME, type CardPreset } from '../../site/productGrid.js';
@@ -85,9 +85,24 @@ async function commerceOn(): Promise<boolean> {
  * chrome page is unpublished, the store still renders with Counter's plain
  * frame instead of 500ing a checkout.
  */
-async function page(title: string, body: string, extraScript = ''): Promise<string> {
-  return layout(title, body, extraScript, await storeChrome());
+async function page(title: string, body: string, extraScript = '', seo?: SeoMeta): Promise<string> {
+  return layout(title, body, extraScript, await storeChrome(), seo);
 }
+
+/**
+ * The public origin of THIS request, so canonical and og:url can be absolute —
+ * relative og:url is ignored by most scrapers. Read from the forwarded headers
+ * because in production this sits behind nginx, so req.protocol alone says http
+ * even when the shopper is on https.
+ */
+function originOf(req: { headers: Record<string, unknown>; protocol: string }): string {
+  const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? '');
+  const proto = String(req.headers['x-forwarded-proto'] ?? req.protocol ?? 'http').split(',')[0];
+  return host ? `${proto}://${host}` : '';
+}
+
+/** Pages that must never be indexed: per-shopper, transactional, or tokened. */
+const PRIVATE_PAGE: SeoMeta = { noindex: true };
 
 /**
  * Sort options.
@@ -150,7 +165,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     html(reply, await page(`${heading} — Therum Store`,
       `<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">${esc(heading)}</h1>` +
       `<p class="page-sub">It may have been renamed or removed.</p>` +
-      `<p style="margin-top:12px"><a class="btn ghost sm" href="/shop">Back to the shop</a></p></div>`));
+      `<p style="margin-top:12px"><a class="btn ghost sm" href="/shop">Back to the shop</a></p></div>`, '', PRIVATE_PAGE));
   };
 
   // ── The shop, and every category and tag view of it ──
@@ -468,7 +483,18 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
       ${toolbar}
       ${quickBuyOnCards ? quickBuySheetMarkup() : ''}
       ${products.length ? cards : `<div class="empty-state"><div class="big">🛍️</div><p>No products${q || category || tag || color || size ? ' match those filters' : ' here yet'}.</p>${q || category || tag || color || size ? '<p style="margin-top:12px"><a class="btn ghost sm" href="/shop">Clear filters</a></p>' : ''}</div>`}
-    `, `${SHOP_TOOLBAR_RUNTIME}${quickBuyOnCards ? CHECKOUT_FLOW_RUNTIME : ''}${counter.cardEvolve && counter.cardAction !== 'none' ? CARD_EVOLVE_RUNTIME : ''}${counter.cardReveal === 'none' ? '' : CARD_REVEAL_RUNTIME}`));
+    `, `${SHOP_TOOLBAR_RUNTIME}${quickBuyOnCards ? CHECKOUT_FLOW_RUNTIME : ''}${counter.cardEvolve && counter.cardAction !== 'none' ? CARD_EVOLVE_RUNTIME : ''}${counter.cardReveal === 'none' ? '' : CARD_REVEAL_RUNTIME}`, {
+      description: preset.title
+        ? `Shop ${preset.title} at The Sidemoney Company.`
+        : 'Shop every drop from The Sidemoney Company.',
+      // The canonical is the clean category or shop path, WITHOUT the filter
+      // query — otherwise every filter combination is its own indexable URL
+      // competing with the others.
+      canonical: preset.canonical ?? '/shop',
+      origin: originOf(req),
+      type: 'website',
+      siteName: 'The Sidemoney Company',
+    }));
   };
 
   app.get('/shop', async (req, reply) => shopPage(req, reply));
@@ -482,6 +508,35 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     const cat = await db.productCategory.findUnique({ where: { slug }, select: { name: true, slug: true } });
     if (!cat) return notFoundStore(reply, 'Category not found');
     return shopPage(req, reply, { category: cat.slug, title: cat.name, canonical: `/c/${cat.slug}` });
+  });
+
+  // NESTED category URLs, e.g. /c/mens/accessories. The ported header links
+  // this way and there is no reason a real store should not: categories carry
+  // a parent. The parent is VERIFIED rather than decorative — /c/womens/
+  // accessories must not quietly serve the same page as /c/mens/accessories,
+  // or two URLs return identical content and split their own ranking.
+  app.get('/c/:parent/:slug', async (req, reply) => {
+    if (!(await commerceOn())) return html(reply, closedPage());
+    const { parent, slug } = req.params as { parent: string; slug: string };
+    // A TRAILING SLASH lands here with an empty slug — /c/mens/ matches this
+    // two-segment route, not /c/:slug. The ported header links every category
+    // with a trailing slash, so this is the common case, not the edge one:
+    // without it, adding this route silently 404s the entire main nav.
+    if (!slug) {
+      const top = await db.productCategory.findUnique({ where: { slug: parent }, select: { name: true, slug: true } });
+      if (!top) return notFoundStore(reply, 'Category not found');
+      return shopPage(req, reply, { category: top.slug, title: top.name, canonical: `/c/${top.slug}` });
+    }
+    const cat = await db.productCategory.findUnique({
+      where: { slug },
+      select: { name: true, slug: true, parent: { select: { slug: true, name: true } } },
+    });
+    if (!cat || cat.parent?.slug !== parent) return notFoundStore(reply, 'Category not found');
+    return shopPage(req, reply, {
+      category: cat.slug,
+      title: cat.name,
+      canonical: `/c/${parent}/${cat.slug}`,
+    });
   });
 
   app.get('/t/:slug', async (req, reply) => {
@@ -507,7 +562,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     });
     if (!p || p.status !== 'active') {
       reply.status(404);
-      return html(reply, await page('Not found', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Product not found</h1><p class="page-sub"><a href="/shop" style="color:var(--ac-btn)">Back to the shop</a></p></div>'));
+      return html(reply, await page('Not found', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Product not found</h1><p class="page-sub"><a href="/shop" style="color:var(--ac-btn)">Back to the shop</a></p></div>', '', PRIVATE_PAGE));
     }
 
     const variants = p.variants.map((v) => ({
@@ -580,7 +635,19 @@ if(picker)picker.addEventListener('click',(e)=>{
   document.getElementById('add').disabled=sel.available<=0;
 });
 document.getElementById('add').addEventListener('click',(e)=>{if(sel)addToCart(sel.id,1,e.target)});
-`));
+`, {
+      description: (p.description ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300)
+        || `${p.name} from The Sidemoney Company.`,
+      canonical: `/product/${p.slug}`,
+      image: p.image ?? undefined,
+      origin: originOf(req),
+      type: 'product',
+      siteName: 'The Sidemoney Company',
+      // Variants come back ordered by price asc, so the first is the 'from'
+      // price the page already shows.
+      priceMinor: variants[0]?.price,
+      currency: 'USD',
+    }));
   });
 
   // ── /cart — session review, coupon, line edits (all client-rendered from
@@ -591,8 +658,10 @@ document.getElementById('add').addEventListener('click',(e)=>{if(sel)addToCart(s
   // and swaps between them in place. Keeping /checkout as a real URL means the
   // step is linkable and the back button behaves — a mode held only in memory
   // strands anyone who reloads mid-payment.
+  // Cart and checkout are per-shopper and carry nothing a search engine should
+  // hold, so they are noindex rather than canonicalised.
   const flowPage = async (title: string, section: string): Promise<string> =>
-    page(title, `${await heading(section)}${checkoutFlowMarkup()}`, CHECKOUT_FLOW_RUNTIME);
+    page(title, `${await heading(section)}${checkoutFlowMarkup()}`, CHECKOUT_FLOW_RUNTIME, PRIVATE_PAGE);
 
   app.get('/cart', async (_req, reply) => {
     if (!(await commerceOn())) return html(reply, closedPage());
@@ -612,7 +681,7 @@ document.getElementById('add').addEventListener('click',(e)=>{if(sel)addToCart(s
     // The wishlist tab embeds the real wishlist markup so wishlist.ts's runtime
     // — already on every store page for the hearts — hydrates it. One list,
     // one implementation.
-    html(reply, await page('Account — Therum Store', `${await heading('Account')}${accountMarkup(wishlistMarkup())}`, ACCOUNT_RUNTIME));
+    html(reply, await page('Account — Therum Store', `${await heading('Account')}${accountMarkup(wishlistMarkup())}`, ACCOUNT_RUNTIME, PRIVATE_PAGE));
   });
 
   app.get('/wishlist', async (_req, reply) => {
@@ -621,21 +690,29 @@ document.getElementById('add').addEventListener('click',(e)=>{if(sel)addToCart(s
     // rendering an empty list a shopper can never fill.
     if (!(await settingsService.getCounter()).wishlistEnabled) {
       reply.status(404);
-      return html(reply, await page('Wishlist — Therum Store', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Not found</h1></div>'));
+      return html(reply, await page('Wishlist — Therum Store', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Not found</h1></div>', '', PRIVATE_PAGE));
     }
     // No runtime argument: WISHLIST_RUNTIME ships on every store page already,
     // because the heart on a product card needs it too.
-    html(reply, await page('Wishlist — Therum Store', `${await heading('Wishlist')}${wishlistMarkup()}`));
+    html(reply, await page('Wishlist — Therum Store', `${await heading('Wishlist')}${wishlistMarkup()}`, '', PRIVATE_PAGE));
   });
 
   // Order tracking. Linked from the footer and previously a 404 — the page
   // existed on the reference site and was never ported.
-  app.get('/order-tracking', async (_req, reply) => {
+  app.get('/order-tracking', async (req, reply) => {
     if (!(await commerceOn())) return html(reply, closedPage());
     html(reply, await page(
       'Track your order — Therum Store',
       `<style>${ORDER_TRACKING_CSS}</style>${orderTrackingMarkup()}`,
       ORDER_TRACKING_RUNTIME,
+      {
+        // Indexable on purpose: people search "<brand> track order". What the
+        // form RETURNS is private, but the form itself should rank.
+        description: 'Track your Sidemoney order — enter your order number and the email on the order to see carrier and delivery status.',
+        canonical: '/order-tracking',
+        origin: originOf(req),
+        siteName: 'The Sidemoney Company',
+      },
     ));
   });
 
@@ -649,7 +726,7 @@ document.getElementById('add').addEventListener('click',(e)=>{if(sel)addToCart(s
     const { order: number, token } = req.query as { order?: string; token?: string };
     const notFound = async (): Promise<void> => {
       reply.status(404);
-      html(reply, await page('Order — Therum Store', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Order not found</h1><p class="page-sub">Check the link from your receipt email.</p></div>'));
+      html(reply, await page('Order — Therum Store', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Order not found</h1><p class="page-sub">Check the link from your receipt email.</p></div>', '', PRIVATE_PAGE));
     };
     if (!number || !token) return await notFound();
     const order = await db.order.findUnique({
@@ -681,7 +758,7 @@ document.getElementById('add').addEventListener('click',(e)=>{if(sel)addToCart(s
           </div>
         </div>
         <p style="text-align:center;margin-top:24px"><a href="/shop" style="color:var(--ac-btn);font-weight:600;font-size:14px">Continue shopping →</a></p>
-      </div>`));
+      </div>`, '', PRIVATE_PAGE));
   });
 
   // Bare / belongs to the Base Theme site renderer (site.ts) — the shop is

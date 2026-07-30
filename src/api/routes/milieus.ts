@@ -11,6 +11,8 @@ import {
   PublicRegisterInput,
   UpdateMilieuInput,
 } from '../../schemas/milieu.schema.js';
+import { checkRateLimit } from '../../lib/rateLimit.js';
+import { TooManyRequestsError } from '../../lib/errors.js';
 
 // Public signup endpoint (M4) — deliberately UNauthenticated (it's the whole
 // point of a registration link), but still capability-gated: memberships off
@@ -19,7 +21,11 @@ import {
 export async function publicMilieuRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', requireCapability('memberships'));
 
+  // Unauthenticated by design — this is the public "join" form. Throttled
+  // because it writes a membership row on every call.
   app.post('/public/register/:regSlug', async (req, reply) => {
+    const rl = await checkRateLimit(`milieu-register:${req.ip}`, 10, 900);
+    if (!rl.allowed) throw new TooManyRequestsError('Too many registrations from this address — try again shortly.', rl.retryAfterSeconds);
     const { regSlug } = req.params as { regSlug: string };
     const input = PublicRegisterInput.parse(req.body);
     reply.status(201).send(await milieuService.register(regSlug, input, req.ip));

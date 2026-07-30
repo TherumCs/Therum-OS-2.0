@@ -159,6 +159,28 @@ export async function buildNav(current: string, req?: FastifyRequest): Promise<{
   return { siteName: site.siteName, tagline: site.tagline, homepageSlug: site.homepageSlug, chrome, nav, site };
 }
 
+
+/**
+ * Head metadata for a LISTING page (/blog, /work).
+ *
+ * Individual posts get this from contentService.renderBySlug via headExtraFor;
+ * the indexes were passing nothing, so they had no description, no canonical
+ * and no og: tags at all. A listing is usually the page that ranks, so it is
+ * the last one that should be bare.
+ */
+function listingHead(req: FastifyRequest, path: string, title: string, description: string): string {
+  const url = `${originOf(req)}${path}`;
+  return [
+    `<meta name="description" content="${esc(description)}">`,
+    `<link rel="canonical" href="${esc(url)}">`,
+    `<meta property="og:title" content="${esc(title)}">`,
+    `<meta property="og:description" content="${esc(description)}">`,
+    `<meta property="og:url" content="${esc(url)}">`,
+    '<meta property="og:type" content="website">',
+    '<meta name="twitter:card" content="summary">',
+  ].join('\n');
+}
+
 /**
  * Whether to print the H1 above a page's content.
  *
@@ -197,7 +219,17 @@ function bareOrArticle(
   withTitle = true,
 ): string {
   // Ported full-bleed layouts carry their own headings/spacing — no article shell.
-  if (ctx.chrome.chromeHeader || ctx.chrome.chromeFooter) return r.html;
+  if (ctx.chrome.chromeHeader || ctx.chrome.chromeFooter) {
+    // ...except that several of them do NOT carry an h1. The policy pages and
+    // the FAQ open straight at h2, and the homepage's headline is a styled div,
+    // so those pages had no top-level heading at all — the document had no name
+    // for a screen reader or a crawler. Where the page really is missing one,
+    // add it from the title and hide it visually, so the design is untouched.
+    if (!/<h1[\s>]/i.test(r.html)) {
+      return `<h1 class="th-sr-only">${esc(r.title)}</h1>${r.html}`;
+    }
+    return r.html;
+  }
   return contentBody(r, showMeta, withTitle);
 }
 
@@ -291,7 +323,9 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
   // ── /blog + /blog/:slug ──
   app.get('/blog', async (req, reply) => {
     const ctx = await buildNav('/blog', req);
-    send(reply, sitePage({ ...ctx.chrome, title: `Blog — ${ctx.siteName}`, siteName: ctx.siteName, nav: ctx.nav, body: `<h1 class="page-title">Blog</h1>${await indexCards('post', '/blog')}` }));
+    send(reply, sitePage({ ...ctx.chrome, title: `Blog — ${ctx.siteName}`,
+      headExtra: listingHead(req, '/blog', `Blog — ${ctx.siteName}`, `News, drops and writing from ${ctx.siteName}.`),
+      siteName: ctx.siteName, nav: ctx.nav, body: `<h1 class="page-title">Blog</h1>${await indexCards('post', '/blog')}` }));
   });
 
   app.get('/blog/:slug', async (req, reply) => {
@@ -311,7 +345,9 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
   // ── /work + /work/:slug — Case Studies (Portfolio) ──
   app.get('/work', async (req, reply) => {
     const ctx = await buildNav('/work', req);
-    send(reply, sitePage({ ...ctx.chrome, title: `Work — ${ctx.siteName}`, siteName: ctx.siteName, nav: ctx.nav, body: `<h1 class="page-title">Work</h1>${await indexCards('case_study', '/work')}` }));
+    send(reply, sitePage({ ...ctx.chrome, title: `Work — ${ctx.siteName}`,
+      headExtra: listingHead(req, '/work', `Work — ${ctx.siteName}`, `Selected projects and case studies from ${ctx.siteName}.`),
+      siteName: ctx.siteName, nav: ctx.nav, body: `<h1 class="page-title">Work</h1>${await indexCards('case_study', '/work')}` }));
   });
 
   app.get('/work/:slug', async (req, reply) => {

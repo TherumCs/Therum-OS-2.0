@@ -13,6 +13,8 @@ import { walletPayments, assertWalletProvider } from '../../counter/walletPaymen
 import { customerTokenFrom, requireCustomer } from '../../counter/customerSession.js';
 import { customerAccountService } from '../../services/customerAccount.service.js';
 import { UnauthorizedError, ValidationError } from '../../lib/errors.js';
+import { checkRateLimit } from '../../lib/rateLimit.js';
+import { TooManyRequestsError } from '../../lib/errors.js';
 
 // Counter — HTTP surface.
 //
@@ -56,7 +58,11 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
     name: z.string().max(120).optional(),
   });
 
+  // The login and code paths are throttled inside customerAuth; registration
+  // was not, so account creation itself was the unlimited door.
   app.post('/shop/account/register', async (req, reply) => {
+    const rl = await checkRateLimit(`customer-register:${req.ip}`, 5, 900);
+    if (!rl.allowed) throw new TooManyRequestsError('Too many sign-ups from this address — try again shortly.', rl.retryAfterSeconds);
     const input = RegisterInput.parse(req.body);
     const out = await customerAuth.registerWithPassword({ ...input, ip: req.ip });
     reply.status(201).send(publicSession(out));
@@ -202,7 +208,12 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
 
   // Anyone may submit; it lands pending and `verified` is computed, never
   // taken from the request.
+  // Reviews land as 'pending' and only 'approved' ones are ever served, so spam
+  // cannot publish itself. The limit is about the write, not the display: an
+  // unthrottled public insert is still a way to fill the table.
   app.post('/shop/products/:productId/reviews', async (req, reply) => {
+    const rl = await checkRateLimit(`review-submit:${req.ip}`, 5, 3600);
+    if (!rl.allowed) throw new TooManyRequestsError('Too many reviews from this address — try again later.', rl.retryAfterSeconds);
     const { productId } = req.params as { productId: string };
     const input = z.object({
       reviewerName: z.string().min(1).max(120),

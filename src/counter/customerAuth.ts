@@ -121,6 +121,18 @@ export const customerAuth = {
     const ip = input.ip ?? null;
     // Rate-limited per email BEFORE touching the hash, so this cannot be used
     // as a password-guessing oracle.
+    // TWO limiters, because they stop different attacks. The per-email one
+    // below defends a single account against a password guessing run. It does
+    // nothing about spraying one common password across thousands of DIFFERENT
+    // addresses from one host — every attempt is a fresh key, so no limit is
+    // ever reached. The per-IP limiter is what catches that.
+    if (ip) {
+      const ipRl = await checkRateLimit(`customer-login-ip:${ip}`, 30, 15 * 60);
+      if (!ipRl.allowed) {
+        await authEventService.logCustomer('customer_login_throttled', email, ip, 'per-IP rate limit reached');
+        throw new TooManyRequestsError('Too many attempts — try again shortly.', ipRl.retryAfterSeconds);
+      }
+    }
     const rl = await checkRateLimit(`customer-login:${email}`, 10, 15 * 60);
     if (!rl.allowed) {
       // Logged as its own type. A throttled attempt means the limiter already

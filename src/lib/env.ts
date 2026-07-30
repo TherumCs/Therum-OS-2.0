@@ -40,6 +40,28 @@ const EnvSchema = z.object({
 
 export type Env = z.infer<typeof EnvSchema>;
 
+// PRODUCTION GATE. The system-health preflight already reports on these, but a
+// warning on a dashboard nobody opened is not protection: the point of failure
+// here is a deploy, and a deploy should stop. Development is left alone.
+const PROD_REQUIRED = (e: Env): string[] => {
+  const bad: string[] = [];
+  if (/dev-only|change-?me|placeholder|secret123/i.test(e.JWT_SECRET)) {
+    bad.push('JWT_SECRET is still a development placeholder.');
+  }
+  if (!e.CREDENTIAL_KEY) {
+    // Without it, crypto.ts derives the credential key from JWT_SECRET — so
+    // rotating the signing key silently orphans every stored payment
+    // credential. Fine to defer in dev; not something to discover in prod.
+    bad.push('CREDENTIAL_KEY must be set so it can be rotated apart from JWT_SECRET.');
+  }
+  const origins = e.CORS_ORIGINS.split(',').map((o) => o.trim()).filter(Boolean);
+  if (origins.includes('*')) bad.push('CORS_ORIGINS must not be wildcarded.');
+  if (origins.every((o) => /^https?:\/\/(localhost|127\.0\.0\.1)(:|$)/.test(o))) {
+    bad.push('CORS_ORIGINS is still localhost-only — set the real origin(s).');
+  }
+  return bad;
+};
+
 const parsed = EnvSchema.safeParse(process.env);
 if (!parsed.success) {
   // eslint-disable-next-line no-console
@@ -48,3 +70,12 @@ if (!parsed.success) {
 }
 
 export const env: Env = parsed.data;
+
+if (env.NODE_ENV === 'production') {
+  const problems = PROD_REQUIRED(env);
+  if (problems.length) {
+    // eslint-disable-next-line no-console
+    console.error('Refusing to start in production:\n' + problems.map((p) => `  - ${p}`).join('\n'));
+    process.exit(1);
+  }
+}
