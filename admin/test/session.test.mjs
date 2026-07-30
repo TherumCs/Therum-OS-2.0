@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac } from 'node:crypto';
-import { verifyJwt } from '../lib/session.ts';
+import { verifyJwt, inspectSession, shouldRenew, signSession, SESSION_TTL_SECONDS } from '../lib/session.ts';
 
 const SECRET = process.env.JWT_SECRET;
 
@@ -51,4 +51,51 @@ test('verifyJwt rejects a token missing sub/role claims', async () => {
   const data = `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ iat: now, exp: now + 3600 })}`;
   const noClaims = `${data}.${createHmac('sha256', SECRET).update(data).digest('base64url')}`;
   assert.equal(await verifyJwt(noClaims), null);
+});
+
+// ── Sliding sessions ───────────────────────────────────────────────────
+// The admin used to sign you out mid-work: a 12h token that nothing renewed.
+// An ACTIVE session must renew; an idle one must still expire.
+
+function mintWithLife(secondsLeft) {
+  const now = Math.floor(Date.now() / 1000);
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ sub: 'u1', role: 'admin', iat: now, exp: now + secondsLeft })).toString('base64url');
+  const data = `${header}.${payload}`;
+  return `${data}.${createHmac('sha256', SECRET).update(data).digest('base64url')}`;
+}
+
+test('shouldRenew: only once past halfway through the token life', () => {
+  assert.equal(shouldRenew(mintWithLife(SESSION_TTL_SECONDS - 60)), false, 'a fresh token is not renewed on every request');
+  assert.equal(shouldRenew(mintWithLife(Math.floor(SESSION_TTL_SECONDS / 2) - 60)), true, 'past halfway it renews');
+  assert.equal(shouldRenew(mintWithLife(60)), true, 'nearly dead renews');
+  assert.equal(shouldRenew('not-a-token'), false, 'garbage does not throw');
+});
+
+test('signSession mints a token this app accepts, with a full lifetime', async () => {
+  const fresh = await signSession('u1', 'admin');
+  const seen = await verifyJwt(fresh);
+  assert.equal(seen?.sub, 'u1');
+  assert.equal(seen?.role, 'admin');
+  const { exp } = JSON.parse(Buffer.from(fresh.split('.')[1], 'base64url').toString());
+  const life = exp - Math.floor(Date.now() / 1000);
+  assert.ok(life > SESSION_TTL_SECONDS - 30 && life <= SESSION_TTL_SECONDS, `renewed token should carry a full life, got ${life}s`);
+  assert.equal(shouldRenew(fresh), false, 'a just-renewed token is not immediately renewed again');
+});
+
+test('inspectSession names WHY a session failed, not just that it did', async () => {
+  assert.equal((await inspectSession(undefined)).verdict, 'no-cookie');
+  // A well-formed token signed with the WRONG secret — which in practice means
+  // the admin and the API are running with different JWT_SECRETs, the failure
+  // this verdict exists to name.
+  const now = Math.floor(Date.now() / 1000);
+  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
+  const payload = Buffer.from(JSON.stringify({ sub: 'u1', role: 'admin', iat: now, exp: now + 600 })).toString('base64url');
+  const wrongSig = createHmac('sha256', 'a-different-secret-entirely-not-the-real-one').update(`${header}.${payload}`).digest('base64url');
+  assert.equal((await inspectSession(`${header}.${payload}.${wrongSig}`)).verdict, 'bad-signature');
+  // Garbage that is not even base64 is reported separately rather than being
+  // mislabelled as a signature failure.
+  assert.equal((await inspectSession('a.b.c')).verdict, 'verify-threw');
+  assert.equal((await inspectSession(mintWithLife(-60))).verdict, 'expired');
+  assert.equal((await inspectSession(await signSession('u1', 'admin'))).verdict, 'ok');
 });

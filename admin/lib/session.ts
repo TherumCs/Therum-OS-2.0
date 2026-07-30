@@ -61,17 +61,94 @@ export interface SessionUser {
 // Verifies a standard 3-segment HS256 JWT (header.payload.signature) — the
 // exact format the backend mints (see src/services/auth.service.ts).
 export async function verifyJwt(token: string | undefined | null): Promise<SessionUser | null> {
-  if (!token) return null;
+  return (await inspectSession(token)).user;
+}
+
+/**
+ * Why a session was rejected — every failure above returns the same null, so
+ * "logged out again" could equally be a missing cookie, a secret mismatch or an
+ * expired token, and those are three different bugs. This reports which.
+ */
+export type SessionVerdict =
+  | 'ok'
+  | 'no-cookie'
+  | 'malformed'
+  | 'bad-signature'
+  | 'expired'
+  | 'bad-claims'
+  | 'verify-threw';
+
+export async function inspectSession(
+  token: string | undefined | null,
+): Promise<{ user: SessionUser | null; verdict: SessionVerdict; detail?: string }> {
+  if (!token) return { user: null, verdict: 'no-cookie' };
   const [headerB64, payloadB64, sigB64] = token.split('.');
-  if (!headerB64 || !payloadB64 || !sigB64) return null;
+  if (!headerB64 || !payloadB64 || !sigB64) return { user: null, verdict: 'malformed' };
   try {
     const ok = await crypto.subtle.verify('HMAC', await hmacKey(), fromB64url(sigB64), new TextEncoder().encode(`${headerB64}.${payloadB64}`));
-    if (!ok) return null;
+    // A signature failure here almost always means the admin process and the
+    // API are running with DIFFERENT JWT_SECRETs, not that anyone forged one.
+    if (!ok) return { user: null, verdict: 'bad-signature' };
     const payload = JSON.parse(new TextDecoder().decode(fromB64url(payloadB64))) as { sub?: string; role?: string; exp?: number };
-    if (typeof payload.exp !== 'number' || payload.exp <= Math.floor(Date.now() / 1000)) return null;
-    if (typeof payload.sub !== 'string' || typeof payload.role !== 'string') return null;
-    return { sub: payload.sub, role: payload.role };
+    if (typeof payload.exp !== 'number') return { user: null, verdict: 'bad-claims' };
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.exp <= now) {
+      return { user: null, verdict: 'expired', detail: `expired ${Math.round((now - payload.exp) / 60)} min ago` };
+    }
+    if (typeof payload.sub !== 'string' || typeof payload.role !== 'string') return { user: null, verdict: 'bad-claims' };
+    return { user: { sub: payload.sub, role: payload.role }, verdict: 'ok', detail: `${Math.round((payload.exp - now) / 60)} min left` };
+  } catch (e) {
+    return { user: null, verdict: 'verify-threw', detail: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+// ── Sliding sessions ────────────────────────────────────────────────────
+//
+// The token lasts 12 hours and NOTHING renewed it. Work straight through the
+// afternoon and it expired underneath you; step away for longer than that and
+// you came back to the login screen. Either way it reads as "it keeps logging
+// me out", because from the browser an expired token and no token at all look
+// identical.
+//
+// So an ACTIVE session now renews itself: once a token is past halfway through
+// its life, the next request mints a fresh one. Keep using the admin and you
+// stay signed in; leave it alone for 12 hours and it still expires, which is
+// the part worth keeping.
+//
+// This mints the SAME token the backend does (src/services/auth.service.ts's
+// signJwt — same header, same claims, same secret), so it is one auth system
+// with two issuers, not a parallel scheme.
+
+export const SESSION_TTL_SECONDS = 60 * 60 * 12;
+
+const b64urlFromBytes = (bytes: Uint8Array): string => {
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
+const b64urlFromJson = (obj: unknown): string =>
+  b64urlFromBytes(new TextEncoder().encode(JSON.stringify(obj)));
+
+async function signingKey(): Promise<CryptoKey> {
+  return crypto.subtle.importKey('raw', new TextEncoder().encode(jwtSecret()), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+}
+
+export async function signSession(sub: string, role: string): Promise<string> {
+  const now = Math.floor(Date.now() / 1000);
+  const data = `${b64urlFromJson({ alg: 'HS256', typ: 'JWT' })}.${b64urlFromJson({ sub, role, iat: now, exp: now + SESSION_TTL_SECONDS })}`;
+  const sig = await crypto.subtle.sign('HMAC', await signingKey(), new TextEncoder().encode(data));
+  return `${data}.${b64urlFromBytes(new Uint8Array(sig))}`;
+}
+
+/** True once the token is past halfway through its life. */
+export function shouldRenew(token: string): boolean {
+  const payloadB64 = token.split('.')[1];
+  if (!payloadB64) return false;
+  try {
+    const { exp } = JSON.parse(new TextDecoder().decode(fromB64url(payloadB64))) as { exp?: number };
+    if (typeof exp !== 'number') return false;
+    return exp - Math.floor(Date.now() / 1000) < SESSION_TTL_SECONDS / 2;
   } catch {
-    return null;
+    return false;
   }
 }

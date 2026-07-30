@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { COOKIE_NAME, verifyJwt } from './lib/session';
+import { COOKIE_NAME, SESSION_TTL_SECONDS, inspectSession, shouldRenew, signSession } from './lib/session';
 
 // Gates the whole admin app behind a real login (username+password against a
 // real AdminUser, backend-verified — see lib/session.ts). /api/auth/* must
@@ -32,12 +32,38 @@ export async function proxy(req: NextRequest) {
     return passThroughWithEmbedHeader(req);
   }
   const token = req.cookies.get(COOKIE_NAME)?.value;
-  if (await verifyJwt(token)) {
-    return passThroughWithEmbedHeader(req);
+  const session = await inspectSession(token);
+  if (session.user) {
+    const res = passThroughWithEmbedHeader(req);
+    // RENEW an active session. Without this the token simply ran out mid-use
+    // and the next click was the login screen.
+    if (token && shouldRenew(token)) {
+      res.cookies.set(COOKIE_NAME, await signSession(session.user.sub, session.user.role), {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge: SESSION_TTL_SECONDS,
+      });
+    }
+    return res;
   }
+  // Says WHY, on the one line that matters. "Logged out again" has several
+  // different causes that all look identical from the browser.
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[admin auth] redirecting ${pathname} to /login — ${session.verdict}` +
+      (session.detail ? ` (${session.detail})` : '') +
+      ` | cookies seen: ${req.cookies.getAll().map((c) => c.name).join(',') || 'none'}`,
+  );
   const url = req.nextUrl.clone();
   url.pathname = '/login';
   url.searchParams.set('from', pathname);
+  // Carried in the URL because this server's stdout is not attached to any
+  // terminal — a console line would go nowhere anyone can read. It names the
+  // cause ("expired", "no-cookie", "bad-signature") so "it logged me out
+  // again" can be diagnosed from the address bar instead of guessed at.
+  url.searchParams.set('why', session.verdict);
   return NextResponse.redirect(url);
 }
 
