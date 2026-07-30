@@ -42,6 +42,9 @@ export function ImportClient() {
   const [fileName, setFileName] = useState('');
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [rows, setRows] = useState<string[][] | null>(null);
+  // Catalogue PDFs almost always open with a logo or a banner, so the first
+  // image is rarely the first product's. This shifts the pairing.
+  const [imageOffset, setImageOffset] = useState(0);
   const [mapping, setMapping] = useState<TargetField[]>([]);
   const [withImages, setWithImages] = useState(true);
   const [onDuplicate, setOnDuplicate] = useState<'skip' | 'update'>('skip');
@@ -108,7 +111,14 @@ export function ImportClient() {
       const res = await fetch(`${BASE_PATH}/api/catalog-import/commit`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ ...(rows ? { rows } : { text }), mapping, withImages, onDuplicate, defaultStatus }),
+        body: JSON.stringify({
+          ...(rows ? { rows } : { text }),
+          mapping,
+          withImages,
+          onDuplicate,
+          defaultStatus,
+          ...(rowImages.length ? { rowImages } : {}),
+        }),
       });
       if (!res.ok) throw new Error(await res.text());
       setResult((await res.json()) as Result);
@@ -120,6 +130,16 @@ export function ImportClient() {
   }
 
   const hasName = mapping.includes('name');
+
+  // Images found inside the file are paired to rows IN ORDER, after the
+  // offset. This is what actually gets sent — the preview below shows the same
+  // pairing, so what you check is what imports.
+  const embedded = analysis?.images ?? [];
+  const nameCol = mapping.indexOf('name');
+  const bodyRows = rows ? rows.slice(1) : [];
+  const rowImages: (string | null)[] = embedded.length
+    ? bodyRows.map((_, i) => embedded[i + imageOffset]?.dataUrl ?? null)
+    : [];
 
   if (result) {
     return (
@@ -193,17 +213,44 @@ export function ImportClient() {
           {analysis.notes?.map((n) => (
             <p key={n} className="th-hint" style={{ marginTop: 8 }}>{n}</p>
           ))}
-          {!!analysis.images?.length && (
-            <div style={{ marginTop: 12 }}>
-              <p className="th-hint">{analysis.images.length} image(s) found in the file, in page order:</p>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
-                {analysis.images.slice(0, 12).map((img) => (
-                  <img
-                    key={`${img.page}-${img.index}`}
-                    src={img.dataUrl}
-                    alt={`Page ${img.page}, image ${img.index + 1}`}
-                    style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--th-line)' }}
-                  />
+          {!!embedded.length && (
+            <div style={{ marginTop: 16 }}>
+              <div style={{ display: 'flex', gap: 14, alignItems: 'center', flexWrap: 'wrap' }}>
+                <strong style={{ fontSize: 14 }}>{embedded.length} image(s) found inside the file</strong>
+                <label className="th-hint">
+                  Skip the first{' '}
+                  <input
+                    type="number"
+                    min={0}
+                    max={embedded.length}
+                    value={imageOffset}
+                    onChange={(e) => setImageOffset(Math.max(0, Math.min(embedded.length, Number(e.target.value) || 0)))}
+                    style={{ width: 64 }}
+                  />{' '}
+                  — a catalogue usually opens with a logo, not a product.
+                </label>
+              </div>
+              <p className="th-hint" style={{ marginTop: 6 }}>
+                Paired to rows in order. Check the first few match before importing.
+              </p>
+              <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 10 }}>
+                {bodyRows.slice(0, 8).map((r, i) => (
+                  <div key={i} style={{ width: 96, textAlign: 'center' }}>
+                    {rowImages[i] ? (
+                      <img
+                        src={rowImages[i]!}
+                        alt=""
+                        style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--th-line)' }}
+                      />
+                    ) : (
+                      <div style={{ width: 96, height: 96, borderRadius: 8, border: '1px dashed var(--th-line)', display: 'grid', placeItems: 'center' }}>
+                        <span className="th-hint">none</span>
+                      </div>
+                    )}
+                    <div className="th-hint" style={{ marginTop: 4, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      {nameCol >= 0 ? r[nameCol] : `Row ${i + 1}`}
+                    </div>
+                  </div>
                 ))}
               </div>
             </div>

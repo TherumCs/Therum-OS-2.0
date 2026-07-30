@@ -113,14 +113,14 @@ async function fromPdf(buffer: Buffer): Promise<ExtractedFile> {
     for (const [y, items] of byBaseline) {
       lines.push({ page: p, y, items: items.sort((a, b) => a.x - b.x) });
     }
-    images.push(...(await pageImages(page, p)));
+    images.push(...(await pageImages(page, p, pdfjs.OPS.paintImageXObject)));
     page.cleanup();
   }
 
   // Top of the page downwards, page by page.
   lines.sort((a, b) => (a.page - b.page) || (b.y - a.y));
 
-  const rows = linesToRows(lines);
+  const rows = dropLeadingBanner(linesToRows(lines));
   const notes: string[] = [`Read ${doc.numPages} page(s) — ${rows.length} row(s) of text and ${images.length} image(s).`];
   if (rows.length && (rows[0]?.length ?? 0) < 2) {
     notes.push('This PDF does not look tabular — every line came out as a single column. Map that column to Name and fill the rest in afterwards, or use a CSV if you have one.');
@@ -130,6 +130,30 @@ async function fromPdf(buffer: Buffer): Promise<ExtractedFile> {
   }
   await task.destroy();
   return { kind: 'pdf', rows, images, notes };
+}
+
+/**
+ * Drop the title above the table.
+ *
+ * A catalogue PDF opens with a name, a date, a page header — lines that are
+ * one cell wide while the table below is three. Row 0 is then taken as the
+ * header, the REAL header becomes a data row, and every column is mislabelled.
+ *
+ * The table's own width is the giveaway: it is whatever most rows have. Rows
+ * before the first one of that width are the banner.
+ */
+function dropLeadingBanner(rows: string[][]): string[][] {
+  if (rows.length < 3) return rows;
+  const widths = rows.map((r) => r.filter((c) => c.trim() !== '').length);
+  const tally = new Map<number, number>();
+  for (const w of widths) tally.set(w, (tally.get(w) ?? 0) + 1);
+  let modal = 1;
+  let best = 0;
+  for (const [w, n] of tally) if (w > 1 && n > best) { best = n; modal = w; }
+  if (modal < 2) return rows;
+  const firstFull = widths.findIndex((w) => w >= modal);
+  // Never eat the whole file chasing a header that is not there.
+  return firstFull > 0 && firstFull < rows.length - 1 ? rows.slice(firstFull) : rows;
 }
 
 /**
@@ -231,33 +255,77 @@ export function wordVsColumnThreshold(gaps: number[]): number {
       cut = Math.sqrt(lo * hi);
     }
   }
-  // A weak jump means the gaps are all much the same — a paragraph, not a
-  // table. Keep the line whole rather than inventing columns in prose.
-  return bestRatio >= 1.8 ? cut : Infinity;
+  if (bestRatio >= 1.8) return cut;
+
+  // NO CLEAR JUMP. Two very different situations look like this, and the
+  // absolute size tells them apart.
+  //
+  // Some producers (Chrome's print-to-PDF among them) emit a whole CELL as one
+  // text item, so a table page has no word gaps at all — every gap present is
+  // a column gap, and they are all wide. Measured on such a page: 14 22 29 46
+  // 59, best ratio 1.59, and treating that as prose merged the entire table
+  // into a single column.
+  //
+  // Prose, by contrast, is nothing but word gaps, and those are small.
+  const smallest = sorted[0]!;
+  if (smallest >= 10) return smallest / 2; // all gaps are columns
+  return Infinity;                          // all gaps are word spaces
 }
 
 const MAX_PDF_IMAGE_BYTES = 8 * 1024 * 1024;
 
 /** Embedded images, as data URLs, so the browser can show them for matching. */
-async function pageImages(page: { getOperatorList: () => Promise<{ fnArray: number[]; argsArray: unknown[][] }>; objs: { get: (n: string) => unknown } }, pageNo: number): Promise<{ page: number; index: number; dataUrl: string }[]> {
+interface PdfObjs {
+  get: (name: string, callback?: (value: unknown) => void) => unknown;
+  has?: (name: string) => boolean;
+}
+
+/**
+ * Wait for a pdfjs object to resolve.
+ *
+ * Image XObjects are decoded ASYNCHRONOUSLY. Asking for them straight after
+ * getOperatorList returns the first one and throws "isn't resolved yet" for
+ * the rest — a three-image catalogue page yielded one image, or none,
+ * depending on timing. The two-argument form of objs.get registers a callback
+ * instead, which fires when the object is ready.
+ */
+function resolveObj(objs: PdfObjs, name: string): Promise<unknown> {
+  return new Promise((resolve) => {
+    // A file that never resolves an object must not hang the whole request.
+    const timer = setTimeout(() => resolve(null), 10_000);
+    const done = (value: unknown): void => { clearTimeout(timer); resolve(value); };
+    try {
+      if (objs.has?.(name)) { done(objs.get(name)); return; }
+      objs.get(name, done);
+    } catch {
+      done(null);
+    }
+  });
+}
+
+async function pageImages(
+  page: { getOperatorList: () => Promise<{ fnArray: number[]; argsArray: unknown[][] }>; objs: PdfObjs },
+  pageNo: number,
+  paintImageOp: number,
+): Promise<{ page: number; index: number; dataUrl: string }[]> {
   const out: { page: number; index: number; dataUrl: string }[] = [];
   try {
     const ops = await page.getOperatorList();
-    let index = 0;
+    const names: string[] = [];
     for (let i = 0; i < ops.fnArray.length; i += 1) {
-      // 85 = OPS.paintImageXObject. Compared numerically because the enum is
-      // not exported from the legacy build.
-      if (ops.fnArray[i] !== 85) continue;
+      if (ops.fnArray[i] !== paintImageOp) continue;
       const name = (ops.argsArray[i]?.[0] ?? '') as string;
-      if (!name) continue;
-      let img: unknown;
-      try { img = page.objs.get(name); } catch { continue; }
+      if (name && !names.includes(name)) names.push(name);
+      if (names.length >= 60) break; // a design-heavy PDF has hundreds of fragments
+    }
+    let index = 0;
+    for (const name of names) {
+      const img = await resolveObj(page.objs, name);
       const record = img as { width?: number; height?: number; data?: Uint8ClampedArray | Uint8Array };
       if (!record?.data || !record.width || !record.height) continue;
       const png = await rgbaToPng(record.data, record.width, record.height);
       if (!png || png.length > MAX_PDF_IMAGE_BYTES) continue;
       out.push({ page: pageNo, index: index++, dataUrl: `data:image/png;base64,${png.toString('base64')}` });
-      if (out.length >= 60) break; // a design-heavy PDF has hundreds of fragments
     }
   } catch {
     // An unreadable image stream must not lose the text we already have.

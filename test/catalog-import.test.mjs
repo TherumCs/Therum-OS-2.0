@@ -143,9 +143,15 @@ test('wordVsColumnThreshold: splits word spaces from column gutters', async () =
   const cut = wordVsColumnThreshold(real);
   assert.ok(cut > 7 && cut < 22, `expected a cut between 7 and 22, got ${cut}`);
 
-  // Evenly spaced gaps are prose, not a table: keep the line whole rather
-  // than inventing columns.
+  // Evenly spaced SMALL gaps are prose: keep the line whole rather than
+  // inventing columns.
   assert.equal(wordVsColumnThreshold([6, 7, 7, 8, 8, 9]), Infinity);
+
+  // Evenly spaced LARGE gaps are a table whose producer emitted each cell as
+  // one item (Chrome's print-to-PDF does this) — there are no word gaps to
+  // contrast against, so every gap is a column. Measured on a real page.
+  const allColumns = wordVsColumnThreshold([14, 22, 29, 46, 59]);
+  assert.ok(allColumns < 14, `every gap should split, got ${allColumns}`);
   assert.equal(wordVsColumnThreshold([5]), Infinity, 'one gap cannot define a split');
 });
 

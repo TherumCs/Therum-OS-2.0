@@ -470,6 +470,9 @@ export async function counterAdminRoutes(app: FastifyInstance): Promise<void> {
     const input = z.object({
       text: z.string().max(20 * 1024 * 1024).optional(),
       rows: z.array(z.array(z.string())).max(50_000).optional(),
+      // Data URLs lifted out of a PDF, one per row. Capped so a pathological
+      // file cannot post a hundred megabytes of base64 back at us.
+      rowImages: z.array(z.string().max(12 * 1024 * 1024).nullable()).max(5_000).optional(),
       mapping: z.array(z.enum(['name', 'description', 'price', 'sku', 'image', 'category', 'tags', 'status', 'stock', 'ignore'])),
       withImages: z.boolean().optional(),
       onDuplicate: z.enum(['skip', 'update']).optional(),
@@ -484,6 +487,7 @@ export async function counterAdminRoutes(app: FastifyInstance): Promise<void> {
       mapping: input.mapping,
       rows: rows.slice(1),
       withImages: input.withImages,
+      rowImages: input.rowImages,
       onDuplicate: input.onDuplicate,
       defaultStatus: input.defaultStatus,
     });

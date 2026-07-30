@@ -360,6 +360,30 @@ async function importImage(url: string, alt: string): Promise<string | null> {
   }
 }
 
+/**
+ * Store an image that arrived INSIDE the file (a PDF), not as a URL.
+ *
+ * The extractor pulls these out page by page; this is what actually puts them
+ * in Media and on the product. Before it existed the images were extracted,
+ * shown, and then silently dropped at import.
+ */
+async function importDataUrl(dataUrl: string, alt: string): Promise<string | null> {
+  const m = /^data:(image\/[a-z+.-]+);base64,(.+)$/i.exec(dataUrl.trim());
+  if (!m) return null;
+  try {
+    const buf = Buffer.from(m[2]!, 'base64');
+    if (!buf.length || buf.length > MAX_IMAGE_BYTES) return null;
+    const ext = (m[1]!.split('/')[1] ?? 'png').replace('+xml', '');
+    const asset = await mediaService.upload(
+      { filename: `${slugify(alt) || 'image'}.${ext}`, mimetype: m[1]!, buffer: buf },
+      alt,
+    );
+    return (asset as { url?: string }).url ?? null;
+  } catch {
+    return null;
+  }
+}
+
 /** Resolve or create a category from "mens/t-shirts" or "Mens". */
 async function categoryIdForPath(path: string): Promise<string | null> {
   const segments = path.split('/').map((s) => s.trim()).filter(Boolean);
@@ -397,6 +421,11 @@ export interface CommitOptions {
   rows: string[][];
   /** Fetch and store remote images. Off makes a large import much faster. */
   withImages?: boolean;
+  /**
+   * One data URL per row, for images that came out of the file itself.
+   * Aligned with `rows`; a null means that row has no image.
+   */
+  rowImages?: (string | null)[];
   /** What to do when a product with the same slug already exists. */
   onDuplicate?: 'skip' | 'update';
   /** Status for rows whose file does not say. Draft, so nothing goes live unreviewed. */
@@ -446,8 +475,12 @@ export async function commit(opts: CommitOptions): Promise<CommitResult> {
       const stock = Number.parseInt(cell('stock'), 10);
 
       let imageUrl: string | null = null;
-      if (withImages && cell('image')) {
-        imageUrl = await importImage(cell('image'), name);
+      if (withImages) {
+        // An image column wins when there is one; otherwise the image lifted
+        // out of the file for this row.
+        const embedded = opts.rowImages?.[r] ?? null;
+        if (cell('image')) imageUrl = await importImage(cell('image'), name);
+        else if (embedded) imageUrl = await importDataUrl(embedded, name);
         if (imageUrl) out.imagesImported += 1;
       }
 
