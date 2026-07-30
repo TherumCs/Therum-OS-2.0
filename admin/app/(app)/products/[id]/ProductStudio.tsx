@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { BASE_PATH } from '../../../../lib/session';
 import { MediaPicker } from '../../MediaPicker';
@@ -23,6 +23,20 @@ import type { EditorProduct } from './ProductEditor';
 // on screen together.
 
 interface Term { id: string; name: string; slug: string }
+
+/** Enter commits, Escape reverts. Blur alone means typing then looking at the
+ *  screen produces nothing, which reads exactly like a broken editor. */
+function commitKeys(e: ReactKeyboardEvent<HTMLInputElement | HTMLTextAreaElement>): void {
+  if (e.key === 'Enter' && !(e.target as HTMLElement).matches('textarea')) {
+    e.preventDefault();
+    (e.target as HTMLInputElement).blur();
+  }
+  if (e.key === 'Escape') {
+    const el = e.target as HTMLInputElement;
+    el.value = el.defaultValue;
+    el.blur();
+  }
+}
 
 type Selection =
   | { kind: 'product' }
@@ -47,6 +61,9 @@ export function ProductStudio({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  // Which field last saved, so the confirmation appears NEXT TO the thing that
+  // changed rather than only in the header where nobody is looking.
+  const [savedField, setSavedField] = useState<string | null>(null);
   const [pickerFor, setPickerFor] = useState<null | 'primary' | 'gallery'>(null);
   const [newVariant, setNewVariant] = useState({ sku: '', price: '', color: '', size: '', inventory: '0' });
 
@@ -66,6 +83,7 @@ export function ProductStudio({
         return null;
       }
       setSaved(true);
+      window.setTimeout(() => setSaved(false), 2200);
       router.refresh();
       return json;
     } catch (e) {
@@ -220,11 +238,11 @@ export function ProductStudio({
           <div className="th-studio__group-head"><span>Product</span></div>
           <label className="th-studio__field">
             <span>Name</span>
-            <input defaultValue={p.name} onBlur={(e) => { const name = e.target.value.trim(); if (name && name !== p.name) { setP({ ...p, name }); void patch({ name }); } }} />
+            <input onKeyDown={commitKeys} defaultValue={p.name} onBlur={(e) => { const name = e.target.value.trim(); if (name && name !== p.name) { setP({ ...p, name }); void patch({ name }); } }} />
           </label>
           <label className="th-studio__field">
             <span>Slug</span>
-            <input defaultValue={p.slug} onBlur={(e) => { const slug = e.target.value.trim(); if (slug && slug !== p.slug) { setP({ ...p, slug }); void patch({ slug }); } }} />
+            <input onKeyDown={commitKeys} defaultValue={p.slug} onBlur={(e) => { const slug = e.target.value.trim(); if (slug && slug !== p.slug) { setP({ ...p, slug }); void patch({ slug }); } }} />
           </label>
           <label className="th-studio__field">
             <span>Status</span>
@@ -236,7 +254,7 @@ export function ProductStudio({
           </label>
           <label className="th-studio__field">
             <span>Description</span>
-            <textarea rows={5} defaultValue={p.description ?? ''} onBlur={(e) => { const description = e.target.value; if (description !== (p.description ?? '')) { setP({ ...p, description }); void patch({ description }); } }} />
+            <textarea onKeyDown={commitKeys} rows={5} defaultValue={p.description ?? ''} onBlur={(e) => { const description = e.target.value; if (description !== (p.description ?? '')) { setP({ ...p, description }); void patch({ description }); } }} />
           </label>
 
           <div className="th-studio__group-head"><span>Categories</span></div>
@@ -315,6 +333,7 @@ export function ProductStudio({
             <label className="th-studio__field" key={field}>
               <span>{label}</span>
               <input
+                onKeyDown={commitKeys}
                 defaultValue={(selectedVariant[field] as string | null) ?? ''}
                 onBlur={(e) => {
                   const value = e.target.value.trim() || null;
@@ -330,6 +349,7 @@ export function ProductStudio({
             {/* Entered in dollars, stored in cents — money is integer minor
                 units everywhere in this codebase. */}
             <input
+              onKeyDown={commitKeys}
               type="number" step="0.01" min="0"
               defaultValue={(selectedVariant.price / 100).toFixed(2)}
               onBlur={(e) => {
@@ -343,6 +363,7 @@ export function ProductStudio({
           <label className="th-studio__field">
             <span>Stock</span>
             <input
+              onKeyDown={commitKeys}
               type="number" min="0"
               defaultValue={selectedVariant.inventory}
               onBlur={(e) => {
@@ -397,8 +418,9 @@ export function ProductStudio({
         <div className="th-studio__title">
           <h1>{p.name || 'Untitled product'}</h1>
           <span className={'pill pill-' + p.status}>{p.status}</span>
-          {busy && <span className="th-hint">Saving…</span>}
-          {saved && !busy && <span className="th-hint">Saved</span>}
+          {busy && <span className="th-studio__save is-busy">Saving…</span>}
+          {saved && !busy && <span className="th-studio__save is-ok">✓ Saved</span>}
+          {!busy && !saved && <span className="th-hint">Changes save as you go — Enter to commit, Esc to revert.</span>}
         </div>
       </header>
       {error && <div className="notice">{error}</div>}

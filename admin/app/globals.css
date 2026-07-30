@@ -1760,3 +1760,31 @@ input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: 
 }
 .th-pv-chip.on { background: var(--th-accent-btn, #3858e9); border-color: var(--th-accent-btn, #3858e9); color: #fff; }
 .th-btn--xs { padding: 2px 8px; font-size: var(--th-fs-2xs); }
+
+
+/* A tab is a tab. `.th-tab` sits on a <button>/<a>, and the global control
+   styling gave those a border-radius — so the 2px bottom border curved up at
+   both ends and read as half a button outline rather than an underline.
+   Squaring the corners and dropping any inherited background is the whole
+   fix; the rule lives here, after those, because that is what makes it win. */
+.th-tabs .th-tab,
+.th-studio__stagebar .th-tab {
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  min-height: 0;
+  border-top: 0; border-left: 0; border-right: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;           /* sit ON the container's hairline */
+}
+.th-tabs .th-tab.on,
+.th-studio__stagebar .th-tab.on { border-bottom-color: var(--th-accent-btn, #3858e9); }
+.th-tabs .th-tab:focus-visible { outline: 2px solid var(--th-accent-btn, #3858e9); outline-offset: -2px; }
+.th-studio__save { font-size: var(--th-fs-2xs); font-weight: 600; padding: 3px 9px; border-radius: 999px; }
+.th-studio__save.is-busy { background: var(--th-bg); color: var(--th-muted); }
+.th-studio__save.is-ok { background: rgba(16,185,129,.12); color: #0f9d68; }
+/* Row actions sit quiet until the row is hovered — visible enough to find,
+   quiet enough not to compete with the data. */
+.th-rowactions { display: flex; gap: 6px; justify-content: flex-end; opacity: .25; transition: opacity var(--th-dur, 180ms) ease; }
+tr:hover .th-rowactions, tr:focus-within .th-rowactions { opacity: 1; }
+@media (hover: none) { .th-rowactions { opacity: 1; } }

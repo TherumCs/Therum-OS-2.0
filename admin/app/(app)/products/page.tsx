@@ -1,4 +1,5 @@
 import { apiGet } from '../../../lib/api';
+import { BASE_PATH } from '../../../lib/session';
 import { money, type Paged, type Product } from '../../../lib/types';
 import { createProduct } from '../../actions';
 import { ListControls, ListPager, type SortOption } from '../ListControls';
@@ -110,13 +111,19 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
               <th>Status</th>
               <th>Variants</th>
               <th>From</th>
+              <th aria-label="Actions" />
             </tr>
           </thead>
           <tbody>
             {data.items.map((p) => (
               <tr key={p.id}>
                 <td>
-                  <a href={`products/${p.id}`} style={{ fontWeight: 600 }}>{p.name}</a>
+                  {/* BASE_PATH, not a bare /products/… — a plain <a> does not
+                      get the basePath prepended the way next/link does, so an
+                      absolute path here lands on the STOREFRONT. The original
+                      relative href avoided that by accident and would have
+                      broken from any deeper URL. */}
+                  <a href={`${BASE_PATH}/products/${p.id}`} style={{ fontWeight: 600 }}>{p.name}</a>
                   <div className="sub">{p.slug}</div>
                 </td>
                 <td>
@@ -124,11 +131,18 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
                 </td>
                 <td>{p.variants.length}</td>
                 <td>{p.variants.length ? money(Math.min(...p.variants.map((v) => v.price))) : '—'}</td>
+                <td className="th-rowactions">
+                  {/* A bold name that happens to be clickable is not an
+                      affordance. Edit and View, on every row, like every other
+                      store admin. View goes to the real storefront page. */}
+                  <a className="th-btn th-btn--xs" href={`${BASE_PATH}/products/${p.id}`}>Edit</a>
+                  <a className="th-btn th-btn--xs" href={`/product/${p.slug}`} target="_blank" rel="noreferrer">View ↗</a>
+                </td>
               </tr>
             ))}
             {!data.items.length && (
               <tr>
-                <td colSpan={4} className="muted">
+                <td colSpan={5} className="muted">
                   No products yet.
                 </td>
               </tr>
