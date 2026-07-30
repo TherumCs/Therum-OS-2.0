@@ -221,7 +221,14 @@ export async function buildServer() {
   // Both are cheap and neither exposes anything: the Link header points at an
   // endpoint that already answers publicly, and the rewrite just reaches the
   // same routes by another spelling.
-  app.addHook('onSend', async (req, reply) => {
+  //
+  // TAKES AND RETURNS THE PAYLOAD. An onSend hook declared as (req, reply)
+  // resolves to undefined, and Fastify treats that as the new body — which
+  // discarded the compressed stream the moment @fastify/compress was added and
+  // served every HTML page as 0 bytes with "stream closed prematurely". It only
+  // looked harmless before because there was no upstream hook producing a
+  // stream to lose.
+  app.addHook('onSend', async (req, reply, payload) => {
     // Only on document responses — a Link header on every JSON reply is noise.
     const type = String(reply.getHeader('content-type') ?? '');
     if (req.method === 'GET' && type.includes('text/html')) {
@@ -229,6 +236,7 @@ export async function buildServer() {
       const host = req.headers['x-forwarded-host'] ?? req.headers.host;
       if (host) reply.header('Link', `<${proto}://${host}/wp-json/>; rel="https://api.w.org/"`);
     }
+    return payload;
   });
 
   await app.register(wooCompatRoutes);

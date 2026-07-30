@@ -17,17 +17,6 @@ function itemId(item: NavItem): string {
   return item.href;
 }
 
-// Therum-curated structural items (Pages/Posts/Media, Plugins/Users/Settings,
-// etc.) are anchored to their default section — movable within it, but not
-// draggable into a custom section. Ports therum_is_locked_item(): 1.9.44 gates
-// on the `page=therum-` id prefix; this codebase's equivalent stable prefix
-// is the href itself (every built-in route), so anything NOT under a
-// user-created custom section id is locked. Custom sections (created via
-// "+ Add section") are exempt — their items are freely movable by definition.
-export function isLockedItem(itemHref: string, defaultNav: NavSection[]): boolean {
-  return defaultNav.some((sec) => sec.items.some((it) => it.href === itemHref));
-}
-
 /**
  * Apply a user's saved sidebar layout to the default nav. Ports
  * therum_apply_sidebar_layout() (mu-plugins/therum-admin.php lines 921-1043)

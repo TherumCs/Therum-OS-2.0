@@ -55,39 +55,6 @@ export function FormSelect({
   );
 }
 
-export function FormNumber({
-  label,
-  desc,
-  field,
-  min,
-  max,
-}: {
-  label: string;
-  desc: string;
-  field: string;
-  min?: number;
-  max?: number;
-}) {
-  const form = useSettingsForm<Record<string, number>>();
-  return (
-    <div className="settings-toggle-row">
-      <div className="settings-toggle-row-text">
-        <span className="settings-toggle-row-label">{label}</span>
-        <span className="settings-toggle-row-desc">{desc}</span>
-      </div>
-      <input
-        className="settings-select"
-        type="number"
-        min={min}
-        max={max}
-        value={form.value[field] ?? 0}
-        onChange={(e) => form.set(field, Number(e.target.value))}
-        style={{ width: 90 }}
-      />
-    </div>
-  );
-}
-
 /**
  * A set of options the merchant checks on or off, order preserved.
  *

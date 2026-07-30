@@ -131,15 +131,6 @@ export interface ShipmentReadyToRoute extends CounterEvent {
   vendorId: string | null;
 }
 
-export type CounterEvents =
-  | CartItemAdded
-  | CartItemUpdated
-  | CartItemRemoved
-  | OrderCreated
-  | OrderPaid
-  | OrderRefunded
-  | ShipmentReadyToRoute;
-
 /** Convenience constructors — every event gets its timestamp the same way. */
 export const event = {
   cartItemAdded: (p: Omit<CartItemAdded, 'name' | 'at'>): CartItemAdded => ({ name: 'cart.item.added', at: new Date(), ...p }),

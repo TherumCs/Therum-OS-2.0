@@ -41,25 +41,6 @@ export async function resolveCategoryPath(segments: string[]): Promise<CategoryN
   return node;
 }
 
-/** The Hats category → `mens/accessories/hats`. */
-export async function categoryPath(id: string): Promise<string> {
-  const segments: string[] = [];
-  let cursor: string | null = id;
-  // Bounded rather than `while (cursor)`: a cycle in the tree would otherwise
-  // spin forever here. taxonomy.service refuses to create one, but a loop in a
-  // request path should not depend on that holding.
-  for (let depth = 0; cursor && depth < 12; depth += 1) {
-    const row: { slug: string; parentId: string | null } | null = await db.productCategory.findUnique({
-      where: { id: cursor },
-      select: { slug: true, parentId: true },
-    });
-    if (!row) break;
-    segments.unshift(row.slug);
-    cursor = row.parentId;
-  }
-  return segments.join('/');
-}
-
 /**
  * A category and everything beneath it.
  *

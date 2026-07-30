@@ -38,10 +38,5 @@ export const UpdateCouponInput = z.object({
   milieuId: z.string().nullable().optional(),
 });
 
-export const ApplyCouponInput = z.object({
-  cartToken: z.string().length(32),
-  code: z.string().min(1).max(40),
-});
-
 export type CreateCouponInput = z.infer<typeof CreateCouponInput>;
 export type UpdateCouponInput = z.infer<typeof UpdateCouponInput>;

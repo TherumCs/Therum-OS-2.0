@@ -27,8 +27,6 @@ export type CustomerAuthEventType =
   | 'customer_logout'
   | 'customer_identity_unlinked';
 
-export type AuthEventType = AdminAuthEventType | CustomerAuthEventType;
-
 export type AuthScope = 'admin' | 'customer';
 
 // 1.9.44 had no auth-specific audit log at all (confirmed in the research
