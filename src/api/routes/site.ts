@@ -321,6 +321,10 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // ── /blog + /blog/:slug ──
+  // NOT gated on having posts, unlike /work. The homepage's editorial cards
+  // link here, so 404ing an empty blog turns the front page into a dead end —
+  // and unlike case studies, posts ARE coming to this site. An empty index with
+  // its own empty state is the honest interim.
   app.get('/blog', async (req, reply) => {
     const ctx = await buildNav('/blog', req);
     send(reply, sitePage({ ...ctx.chrome, title: `Blog — ${ctx.siteName}`,
@@ -344,6 +348,14 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
 
   // ── /work + /work/:slug — Case Studies (Portfolio) ──
   app.get('/work', async (req, reply) => {
+    // No published case studies means the section does not exist on this site.
+    // An empty index is a dead page: it is crawlable, it ranks for nothing, and
+    // it invites a visitor to click into an empty room. The route and the
+    // renderer stay — publish a case study and the section comes back on its
+    // own, no code change.
+    if ((await db.content.count({ where: { type: 'case_study', status: 'published' } })) === 0) {
+      return notFound(reply, '/work', req);
+    }
     const ctx = await buildNav('/work', req);
     send(reply, sitePage({ ...ctx.chrome, title: `Work — ${ctx.siteName}`,
       headExtra: listingHead(req, '/work', `Work — ${ctx.siteName}`, `Selected projects and case studies from ${ctx.siteName}.`),
