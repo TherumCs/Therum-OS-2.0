@@ -1,4 +1,5 @@
 import { apiGet } from '../../../lib/api';
+import { BASE_PATH } from '../../../lib/session';
 import { money, type Paged, type Order } from '../../../lib/types';
 import { transitionOrder } from '../../actions';
 import { ListControls, ListPager, type SortOption } from '../ListControls';
@@ -101,7 +102,10 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
             {data.items.map((o) => (
               <tr key={o.id}>
                 <td>
-                  {o.number}
+                  {/* The order number is the way IN. It was plain text, so a
+                      list of orders was a list of dead ends — you could advance
+                      an order's status but never open it to see what was in it. */}
+                  <a href={`${BASE_PATH}/orders/${o.id}`} style={{ fontWeight: 600 }}>{o.number}</a>
                   <div className="sub">{o.items.length} item(s)</div>
                 </td>
                 <td>
@@ -112,6 +116,7 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 </td>
                 <td>{money(o.total)}</td>
                 <td className="actions">
+                  <a className="th-btn th-btn--xs" href={`${BASE_PATH}/orders/${o.id}`}>Open</a>
                   {(NEXT[o.status] ?? []).map((s) => (
                     <form key={s} action={transitionOrder.bind(null, o.id, s)}>
                       <button className="ghost">{s}</button>

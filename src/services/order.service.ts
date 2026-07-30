@@ -19,7 +19,20 @@ const TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
 };
 
 const orderInclude = {
-  items: { include: { variant: { select: { id: true, sku: true, price: true } } } },
+  // The PRODUCT comes with the variant. Without it an order line knows a SKU
+  // and nothing else — the admin could not name what was bought, let alone
+  // link to it, which made the order page a list of prices with no products.
+  // Colour and size come too, because "TEE-L" is not what a human ordered.
+  items: {
+    include: {
+      variant: {
+        select: {
+          id: true, sku: true, price: true, color: true, size: true,
+          product: { select: { id: true, name: true, slug: true, image: true } },
+        },
+      },
+    },
+  },
   payment: true,
   customer: { select: { id: true, email: true, name: true } },
 } satisfies Prisma.OrderInclude;

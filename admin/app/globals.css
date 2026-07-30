@@ -1788,3 +1788,10 @@ input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: 
 .th-rowactions { display: flex; gap: 6px; justify-content: flex-end; opacity: .25; transition: opacity var(--th-dur, 180ms) ease; }
 tr:hover .th-rowactions, tr:focus-within .th-rowactions { opacity: 1; }
 @media (hover: none) { .th-rowactions { opacity: 1; } }
+
+/* Order detail: items get the room, the money and the actions sit beside. */
+.th-order__cols { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--th-space-20); align-items: start; margin-top: var(--th-space-12); }
+@media (max-width: 900px) { .th-order__cols { grid-template-columns: minmax(0, 1fr); } }
+.th-order__side { border: 1px solid var(--th-line); border-radius: var(--th-r); padding: var(--th-space-14); background: var(--th-surface); }
+.th-order__row { display: flex; justify-content: space-between; gap: var(--th-space-10); padding: 4px 0; font-size: var(--th-fs-sm); }
+.th-order__row--total { border-top: 1px solid var(--th-line); margin-top: 6px; padding-top: 8px; font-weight: 700; }

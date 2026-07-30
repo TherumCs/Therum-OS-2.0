@@ -251,6 +251,14 @@
 /* Color mode — dark is a real alternate palette (not just an inverted
    filter), scoped to the authenticated app shell only; the login screen has
    its own independent, already-designed branding and isn't affected. */
+/* ALSO matched when the attribute is on a DESCENDANT.
+   CSS custom properties inherit downward, and the admin sets data-color-mode
+   on #th-shell — which is <body>'s child. So <body> kept the LIGHT --th-bg and
+   painted a pale frame around dark content: the page read as half-themed, a
+   light shell with a dark middle. Selecting the ancestor too hands the same
+   tokens to <html> and <body>, so the whole document flips together. */
+html:has([data-color-mode='dark']),
+body:has([data-color-mode='dark']),
 [data-color-mode='dark'] {
   --th-ink: #f1f5f9;
   --th-ink-2: #cbd5e1;
