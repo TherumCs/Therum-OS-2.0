@@ -17,14 +17,28 @@ function jwt() {
 const auth = () => ({ authorization: `Bearer ${jwt()}`, 'content-type': 'application/json' });
 
 let app;
+// This suite runs against the DEVELOPMENT database, where `printful` may be a
+// REAL connection the operator set up. The cleanup below used to delete it
+// outright — running the tests silently destroyed a live credential, and the
+// only symptom was the connection vanishing from Nexus later.
+//
+// So: snapshot whatever is there first, and put it back afterwards.
+const TOUCHED = ['printful', 'custom-pod-partner'];
+let preExisting = [];
 
 before(async () => {
+  preExisting = await db.connection.findMany({ where: { provider: { in: TOUCHED } } });
   app = await buildServer();
 });
 
 after(async () => {
-  await db.connection.deleteMany({ where: { provider: { in: ['printful', 'custom-pod-partner'] } } });
-  await db.connectionAuditLog.deleteMany({ where: { provider: { in: ['printful', 'custom-pod-partner'] } } });
+  await db.connection.deleteMany({ where: { provider: { in: TOUCHED } } });
+  await db.connectionAuditLog.deleteMany({ where: { provider: { in: TOUCHED } } });
+  // Restore the operator's own rows exactly as they were.
+  for (const row of preExisting) {
+    const { id: _id, ...data } = row;
+    await db.connection.create({ data });
+  }
   await app.close();
   await closeQueues();
   await disconnectDb();

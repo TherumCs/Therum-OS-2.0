@@ -9,6 +9,7 @@ import { buildServer } from '../dist/server.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { db, disconnectDb } from '../dist/lib/db.js';
 import { hashPassword } from '../dist/lib/password.js';
+import { settingsService } from '../dist/services/settings.service.js';
 
 const SECRET = process.env.JWT_SECRET ?? '';
 function adminJwtFor(sub) {
@@ -56,14 +57,24 @@ const uPass = 'correct-horse-battery-staple';
 let uId;
 
 before(async () => {
+  // These tests share the DEVELOPMENT database, and 2FA enforcement is a
+  // site-wide setting. A run killed mid-test leaves it ON, which then 403s
+  // every unrelated test in the next run — and locks the developer out of
+  // their own admin. Clearing it here makes that unrecoverable state
+  // self-healing rather than something to debug twice.
+  await settingsService.setSecurity({ requireTwoFactor: false });
   app = await buildServer();
   const user = await db.adminUser.create({ data: { username: uName, passwordHash: await hashPassword(uPass) } });
   uId = user.id;
 });
 after(async () => {
+  // Belt and braces: `withEnforcement` restores it too, but an assertion that
+  // throws outside that helper must not leave the flag set.
+  await settingsService.setSecurity({ requireTwoFactor: false });
   await db.authEvent.deleteMany({ where: { username: { contains: 'it-hard-' } } });
   await db.apiToken.deleteMany({ where: { userId: uId } });
-  await db.adminUser.deleteMany({ where: { username: uName } });
+  if (efId) await db.apiToken.deleteMany({ where: { userId: efId } });
+  await db.adminUser.deleteMany({ where: { username: { in: [uName, efName] } } });
   await app.close();
   await closeQueues();
   await disconnectDb();
@@ -218,4 +229,154 @@ test('change-password: requires the correct current password, then the new one a
 test('a token minted with a role other than admin or pending2fa is rejected outright', async () => {
   const r = await app.inject({ method: 'GET', url: '/api/me', headers: { authorization: `Bearer ${fakeRoleJwt(uId, 'editor')}` } });
   assert.equal(r.statusCode, 401);
+});
+
+// ─── 2FA enforcement (site-wide) ────────────────────────────────────────────
+//
+// The setting is restored through settingsService directly rather than over
+// HTTP, because HTTP is exactly what the feature under test blocks — a
+// cleanup that has to get past the gate it just enabled is a cleanup that
+// fails when the gate works. Leaving enforcement on would strand every later
+// test in this run AND the developer's own login.
+async function withEnforcement(fn) {
+  await settingsService.setSecurity({ requireTwoFactor: true });
+  try {
+    await fn();
+  } finally {
+    await settingsService.setSecurity({ requireTwoFactor: false });
+    if (efId) {
+      await db.adminUser.update({
+        where: { id: efId },
+        data: { totpEnabled: false, totpSecret: null, backupCodes: null, totpLastStep: null },
+      });
+    }
+  }
+}
+
+// A DEDICATED account, not the shared `uName` one. Earlier tests in this file
+// change that user's password and deliberately trip its login rate limiter, so
+// reusing it here made these tests fail on a 401 that had nothing to do with
+// 2FA — a false failure pointing at the wrong feature.
+const efName = 'it-hard-2fa-' + Math.random().toString(36).slice(2, 8);
+const efPass = 'enforcement-test-passphrase';
+let efId;
+
+async function enforcementUser() {
+  if (!efId) {
+    const u = await db.adminUser.create({ data: { username: efName, passwordHash: await hashPassword(efPass) } });
+    efId = u.id;
+  }
+  return efId;
+}
+
+async function sessionToken() {
+  const id = await enforcementUser();
+  const r = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: efName, password: efPass } });
+  const body = JSON.parse(r.body);
+  assert.ok(body.token, `login failed (${r.statusCode}): ${r.body}`);
+  return { token: body.token, id };
+}
+
+test('enforcement leaves the password login working — it gates the session, not the door', async () => {
+  await withEnforcement(async () => {
+    await enforcementUser();
+    const r = await app.inject({ method: 'POST', url: '/api/auth/login', payload: { username: efName, password: efPass } });
+    // Refusing the login itself would lock out every existing account the
+    // instant the toggle is flipped, including whoever flipped it.
+    assert.equal(r.statusCode, 200);
+    assert.ok(JSON.parse(r.body).token, 'no session token issued');
+  });
+});
+
+test('an un-enrolled session is refused everywhere except enrolment', async () => {
+  await withEnforcement(async () => {
+    const { token } = await sessionToken();
+    const auth = { authorization: `Bearer ${token}` };
+
+    const blocked = await app.inject({ method: 'GET', url: '/api/settings/site', headers: auth });
+    assert.equal(blocked.statusCode, 403);
+    assert.equal(JSON.parse(blocked.body).error.code, 'two_factor_required');
+
+    for (const url of ['/api/me', '/api/auth/2fa']) {
+      const r = await app.inject({ method: 'GET', url, headers: auth });
+      assert.equal(r.statusCode, 200, `${url} must stay reachable or enrolment is impossible`);
+    }
+    const enroll = await app.inject({ method: 'POST', url: '/api/auth/2fa/enroll', headers: auth });
+    assert.equal(enroll.statusCode, 200);
+
+    // Not on the allowlist on purpose: opting back out cannot be the escape hatch.
+    const disable = await app.inject({ method: 'POST', url: '/api/auth/2fa/disable', headers: auth });
+    assert.equal(disable.statusCode, 403);
+  });
+});
+
+test('/api/me tells the admin shell to show enrolment', async () => {
+  await withEnforcement(async () => {
+    const { token } = await sessionToken();
+    const me = JSON.parse((await app.inject({ method: 'GET', url: '/api/me', headers: { authorization: `Bearer ${token}` } })).body);
+    assert.equal(me.mustEnrollTwoFactor, true);
+    assert.equal(me.twoFactorEnabled, false);
+  });
+});
+
+test('enrolling ends the block — the way out actually works', async () => {
+  await withEnforcement(async () => {
+    const { token } = await sessionToken();
+    const auth = { authorization: `Bearer ${token}` };
+    const { secret } = JSON.parse((await app.inject({ method: 'POST', url: '/api/auth/2fa/enroll', headers: auth })).body);
+    const confirm = await app.inject({
+      method: 'POST',
+      url: '/api/auth/2fa/confirm',
+      headers: auth,
+      payload: { code: totpNow(secret) },
+    });
+    assert.equal(confirm.statusCode, 200);
+    assert.equal(JSON.parse(confirm.body).backupCodes.length, 8);
+
+    const after = await app.inject({ method: 'GET', url: '/api/settings/site', headers: auth });
+    assert.equal(after.statusCode, 200, 'still blocked after enrolling');
+  });
+});
+
+test('an API token from an un-enrolled account is refused, with a reason', async () => {
+  const issued = JSON.parse(
+    (await app.inject({
+      method: 'POST',
+      url: '/api/auth/tokens',
+      headers: { authorization: `Bearer ${adminJwtFor(await enforcementUser())}` },
+      payload: { name: 'enforcement-probe', scope: 'read' },
+    })).body,
+  );
+  const apiToken = issued.token;
+  const ok = await app.inject({ method: 'GET', url: '/api/settings/site', headers: { authorization: `Bearer ${apiToken}` } });
+  assert.equal(ok.statusCode, 200);
+
+  await withEnforcement(async () => {
+    // A token has no interactive session behind it, so it cannot enrol and the
+    // allowlist would be meaningless — it fails, but says why.
+    const r = await app.inject({ method: 'GET', url: '/api/settings/site', headers: { authorization: `Bearer ${apiToken}` } });
+    assert.equal(r.statusCode, 403);
+    assert.equal(JSON.parse(r.body).error.code, 'two_factor_required');
+  });
+});
+
+test('enforcementReadiness reports who would be affected before the toggle is flipped', async () => {
+  const id = await enforcementUser();
+  const r = await app.inject({ method: 'GET', url: '/api/settings/security', headers: { authorization: `Bearer ${adminJwtFor(id)}` } });
+  assert.equal(r.statusCode, 200);
+  const { readiness } = JSON.parse(r.body);
+  const me = readiness.withoutTwoFactor.find((u) => u.username === efName);
+  assert.ok(me, 'the un-enrolled test user is missing from the readiness list');
+  assert.ok(readiness.total >= 1 && readiness.enrolled >= 0);
+});
+
+test('turning enforcement off restores access immediately, not after a cache TTL', async () => {
+  await settingsService.setSecurity({ requireTwoFactor: true });
+  const { token } = await sessionToken();
+  const auth = { authorization: `Bearer ${token}` };
+  assert.equal((await app.inject({ method: 'GET', url: '/api/settings/site', headers: auth })).statusCode, 403);
+  await settingsService.setSecurity({ requireTwoFactor: false });
+  // The cached read is cleared on write. If it were only TTL-bounded, an
+  // admin undoing a mistake would sit locked out watching nothing happen.
+  assert.equal((await app.inject({ method: 'GET', url: '/api/settings/site', headers: auth })).statusCode, 200);
 });

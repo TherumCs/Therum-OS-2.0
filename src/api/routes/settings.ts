@@ -8,16 +8,23 @@ import {
   UploadsInput,
   NotificationsInput,
   BackupSettingsInput,
+  PaymentsSettingsInput,
+  StealthSettingsInput,
+  SecuritySettingsInput,
+  MaintenanceSettingsInput,
   SeoDefaultsInput,
   ImportSettingsInput,
   OnboardingInput,
   SiteSettingsInput,
+  CounterSettingsInput,
+  CommerceSettingsInput,
 } from '../../schemas/settings.schema.js';
 import { applyBackupSchedule } from '../../lib/backupSchedule.js';
 import { settingsService } from '../../services/settings.service.js';
 import { authEventService } from '../../services/authEvent.service.js';
 import { backupService } from '../../services/backup.service.js';
 import { meService } from '../../services/me.service.js';
+import { twoFactorService } from '../../services/twoFactor.service.js';
 import { notificationService } from '../../services/notification.service.js';
 import { requireBundle } from '../../middleware/bundle.js';
 
@@ -87,6 +94,26 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     reply.send(await settingsService.setPerformance(PerformanceInput.parse(req.body)));
   });
 
+  // Commerce — the store's economics, as opposed to Counter's presentation.
+  // Never had an HTTP surface at all, so currency and the margin floor were
+  // both editable only by writing to the settings table directly.
+  app.get('/settings/commerce', { preHandler: app.authenticate }, async (_req, reply) => {
+    reply.send(await settingsService.getCommerce());
+  });
+  app.patch('/settings/commerce', { preHandler: [app.authenticate, requireSettingsWrite] }, async (req, reply) => {
+    reply.send(await settingsService.setCommerce(CommerceSettingsInput.parse(req.body)));
+  });
+
+  // Counter's storefront presentation. The GET is PUBLIC because the shop
+  // pages are public and read it to render themselves — it holds layout
+  // choices, no credentials and nothing about the merchant.
+  app.get('/settings/counter', async (_req, reply) => {
+    reply.send(await settingsService.getCounter());
+  });
+  app.patch('/settings/counter', { preHandler: [app.authenticate, requireSettingsWrite] }, async (req, reply) => {
+    reply.send(await settingsService.setCounter(CounterSettingsInput.parse(req.body)));
+  });
+
   app.get('/settings/editor-defaults', { preHandler: app.authenticate }, async (_req, reply) => {
     reply.send(await settingsService.getEditorDefaults());
   });
@@ -96,6 +123,48 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/settings/uploads', { preHandler: app.authenticate }, async (_req, reply) => {
     reply.send(await settingsService.getUploads());
+  });
+
+  // Counter — payment client config. Publishable keys and the Apple Pay
+  // domain-association file: all values designed to be PUBLIC, so they live
+  // here rather than in the Nexus vault (which holds only real secrets).
+  // Stealth — what the stack tells strangers about itself.
+  app.get('/settings/stealth', { preHandler: [app.authenticate] }, async (_req, reply) => {
+    reply.send(await settingsService.getStealth());
+  });
+
+  app.patch('/settings/stealth', { preHandler: [app.authenticate, requireSettingsWrite] }, async (req, reply) => {
+    reply.send(await settingsService.setStealth(StealthSettingsInput.parse(req.body)));
+  });
+
+  // Security — real controls, plus the blast radius of turning them on.
+  app.get('/settings/security', { preHandler: [app.authenticate] }, async (_req, reply) => {
+    const [security, readiness] = await Promise.all([
+      settingsService.getSecurity(),
+      twoFactorService.enforcementReadiness(),
+    ]);
+    reply.send({ ...security, readiness });
+  });
+
+  app.patch('/settings/security', { preHandler: [app.authenticate, requireSettingsWrite] }, async (req, reply) => {
+    reply.send(await settingsService.setSecurity(SecuritySettingsInput.parse(req.body)));
+  });
+
+  // Maintenance / coming soon — the public site's on-off switch.
+  app.get('/settings/maintenance', { preHandler: [app.authenticate] }, async (_req, reply) => {
+    reply.send(await settingsService.getMaintenance());
+  });
+
+  app.patch('/settings/maintenance', { preHandler: [app.authenticate, requireSettingsWrite] }, async (req, reply) => {
+    reply.send(await settingsService.setMaintenance(MaintenanceSettingsInput.parse(req.body)));
+  });
+
+  app.get('/settings/payments', { preHandler: [app.authenticate] }, async (_req, reply) => {
+    reply.send(await settingsService.getPayments());
+  });
+
+  app.patch('/settings/payments', { preHandler: [app.authenticate, requireSettingsWrite] }, async (req, reply) => {
+    reply.send(await settingsService.setPayments(PaymentsSettingsInput.parse(req.body)));
   });
   app.patch('/settings/uploads', { preHandler: [app.authenticate, requireSettingsWrite] }, async (req, reply) => {
     reply.send(await settingsService.setUploads(UploadsInput.parse(req.body)));
@@ -134,9 +203,19 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     reply.send(await notificationService.sendTest());
   });
 
-  app.get('/settings/activity', { preHandler: app.authenticate }, async (_req, reply) => {
-    const [events, total] = await Promise.all([authEventService.recent(50), authEventService.count()]);
-    reply.send({ events, total });
+  app.get('/settings/activity', { preHandler: app.authenticate }, async (req, reply) => {
+    // `scope` omitted means everything, so an existing caller (and the old
+    // Activity page) keeps behaving exactly as before.
+    const raw = (req.query as { scope?: string }).scope;
+    const scope = raw === 'admin' || raw === 'customer' ? raw : undefined;
+    const [events, total, adminTotal, customerTotal, failures] = await Promise.all([
+      authEventService.recent(50, scope),
+      authEventService.count(scope),
+      authEventService.count('admin'),
+      authEventService.count('customer'),
+      authEventService.failureCounts(60),
+    ]);
+    reply.send({ events, total, counts: { admin: adminTotal, customer: customerTotal }, failures });
   });
 
   app.get('/settings/backup/files', { preHandler: app.authenticate }, async (_req, reply) => {

@@ -34,13 +34,23 @@ after(async () => {
   await disconnectDb();
 });
 
-test('catalog: 76 providers (67 + 9 fulfillment); all four Google services present and oauth-typed', () => {
-  assert.equal(nexusCatalog.length, 76);
+test('catalog: 79 providers (67 + 9 fulfillment + 3 identity); all four Google services present and oauth-typed', () => {
+  assert.equal(nexusCatalog.length, 79);
   for (const id of FAMILY) {
     const p = nexusCatalog.find((x) => x.id === id);
     assert.ok(p, `${id} in catalog`);
     assert.equal(p.authType, 'oauth');
   }
+});
+
+// Sign in with Google is a SEPARATE catalog entry from the Google apps
+// family: same vendor, different OAuth application, and it authenticates
+// SHOPPERS rather than connecting the merchant's own Drive or Calendar.
+// Folding them together would have one set of scopes serving both.
+test('customer sign-in providers are their own identity category', () => {
+  const identity = nexusCatalog.filter((p) => p.category === 'identity').map((p) => p.id);
+  assert.deepEqual(identity.sort(), ['apple-signin', 'facebook-login', 'google-signin']);
+  assert.notEqual(nexusCatalog.find((p) => p.id === 'google-signin'), nexusCatalog.find((p) => p.id === 'google-drive'));
 });
 
 test('oauth providers list includes the whole Google family', () => {
@@ -87,4 +97,34 @@ test('shared-app fallback: app configured under google-drive powers gmail/calend
 test('non-Google providers do not fall back to the Google app', async () => {
   // slack has no app configured; the google-drive row must not leak to it.
   await assert.rejects(() => oauthService.startUrl('slack', 'http://localhost/cb'), /No OAuth app configured/);
+});
+
+// `example` is rendered as the INPUT PLACEHOLDER. A sentence there reads as if
+// it were the value to type — one said "a token from Printful — NOT a ck_/cs_
+// WooCommerce key" and appeared inside the box. Examples must be sample
+// VALUES; guidance belongs in credentialHint or note.
+test('catalog examples are sample values, not sentences', () => {
+  const offenders = [];
+  const check = (who, ex) => {
+    if (!ex) return;
+    if (ex.length > 42 || /—|\bNOT\b/.test(ex)) offenders.push(`${who}: ${ex}`);
+  };
+  for (const p of nexusCatalog) {
+    check(p.id, p.example);
+    for (const f of p.fields ?? []) check(`${p.id}/${f.label}`, f.example);
+  }
+  assert.deepEqual(offenders, [], 'these read as guidance, not as a value');
+});
+
+// A pattern that rejects its own example would block a merchant from entering
+// anything at all, with no way around it.
+test('every catalog example satisfies its own pattern', () => {
+  const broken = [];
+  for (const p of nexusCatalog) {
+    if (p.pattern && p.example && !new RegExp(p.pattern).test(p.example)) broken.push(p.id);
+    for (const f of p.fields ?? []) {
+      if (f.pattern && f.example && !new RegExp(f.pattern).test(f.example)) broken.push(`${p.id}/${f.label}`);
+    }
+  }
+  assert.deepEqual(broken, []);
 });

@@ -27,7 +27,12 @@ export const BASE_PATH = '/tos-admin';
 // `http://localhost:3100/...` instead of `http://localhost:10004/...`.
 export function redirectUrl(req: Request, path: string): URL {
   const proto = req.headers.get('x-forwarded-proto') ?? 'http';
-  const host = req.headers.get('host') ?? 'localhost';
+  // X-Forwarded-Host FIRST. This app is an internal upstream behind the API's
+  // /tos-admin proxy, and `host` can arrive as the internal bind
+  // (127.0.0.1:3100). A provider redirect_uri built from that is an address
+  // the outside world cannot reach: the consent screen either refuses it as
+  // an unregistered URI or sends the merchant somewhere that does not exist.
+  const host = req.headers.get('x-forwarded-host') ?? req.headers.get('host') ?? 'localhost';
   return new URL(path, `${proto}://${host}`);
 }
 

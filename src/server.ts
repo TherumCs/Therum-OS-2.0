@@ -27,6 +27,8 @@ import { editionRoutes } from './api/routes/edition.js';
 import { settingsRoutes } from './api/routes/settings.js';
 import { systemRoutes } from './api/routes/system.js';
 import { meRoutes } from './api/routes/me.js';
+import { wooCompatRoutes } from './api/routes/wooCompat.js';
+import { shopifyCompatRoutes } from './api/routes/shopifyCompat.js';
 import { redirectsRoutes } from './api/routes/redirects.js';
 import { toolsRoutes } from './api/routes/tools.js';
 import { twoFactorRoutes } from './api/routes/twoFactor.js';
@@ -39,11 +41,16 @@ import { milieuRoutes, publicMilieuRoutes } from './api/routes/milieus.js';
 import { clusterRoutes } from './api/routes/clusters.js';
 import { checkoutRoutes } from './api/routes/checkout.js';
 import { cartRoutes } from './api/routes/cart.js';
+import { contactRoutes } from './api/routes/contact.js';
+import { orderTrackingRoutes } from './api/routes/orderTracking.js';
 import { couponRoutes } from './api/routes/coupons.js';
 import { storefrontRoutes } from './api/routes/storefront.js';
 import { siteRoutes } from './api/routes/site.js';
+import { maintenancePage } from './site/maintenanceHtml.js';
+import { settingsService } from './services/settings.service.js';
 import { taxonomyRoutes } from './api/routes/taxonomy.js';
 import { bricksRoutes } from './api/routes/bricks.js';
+import { counterAdminRoutes, counterPublicRoutes, storeKeyRoutes } from './api/routes/counter.js';
 import { reportRoutes } from './api/routes/reports.js';
 import { connectionRoutes } from './api/routes/connections.js';
 import { oauthRoutes } from './api/routes/oauth.js';
@@ -66,6 +73,26 @@ export async function buildServer() {
     // could spoof the header instead. Loopback-only gives per-client IPs via
     // the proxy while keeping direct connections unspoofable.
     trustProxy: ['127.0.0.1', '::1'],
+    /**
+     * `/?rest_route=/wc/v3/…` -> `/wp-json/wc/v3/…`.
+     *
+     * WordPress accepts this query-string form when pretty permalinks are off,
+     * and a number of integration connectors use it exclusively. It has to
+     * happen HERE rather than in an onRequest hook: by the time hooks run the
+     * route is already matched, so rewriting req.raw.url then just leaves the
+     * request on the site root — which answers 200 and makes the partner think
+     * it found a store with no products.
+     */
+    rewriteUrl(req) {
+      const raw = req.url ?? '/';
+      if (!raw.includes('rest_route=')) return raw;
+      const url = new URL(raw, 'http://x');
+      const route = url.searchParams.get('rest_route');
+      if (!route?.startsWith('/')) return raw;
+      url.searchParams.delete('rest_route');
+      const qs = url.searchParams.toString();
+      return `/wp-json${route}${qs ? `?${qs}` : ''}`;
+    },
     logger: {
       level: env.LOG_LEVEL,
       ...(env.NODE_ENV === 'development'
@@ -130,6 +157,20 @@ export async function buildServer() {
       reply.redirect(match.to, match.code);
       return;
     }
+    // Trailing-slash canonicalisation. The ported chrome was authored against
+    // WordPress, whose pretty permalinks end in a slash, so EVERY link in the
+    // header and footer (/shop/, /cart/, /contact/) arrived here as a 404
+    // against routes registered without one. Redirecting from the not-found
+    // handler rather than rewriting up front means live routes are untouched,
+    // saved redirect rules above still win, and each URL keeps exactly one
+    // canonical form instead of answering 200 at two addresses.
+    if (req.method === 'GET' || req.method === 'HEAD') {
+      const [path = '', query] = req.url.split('?');
+      if (path.length > 1 && path.endsWith('/')) {
+        reply.redirect(`${path.replace(/\/+$/, '')}${query ? `?${query}` : ''}`, 301);
+        return;
+      }
+    }
     const referer = req.headers.referer;
     void notFoundMonitorService.record(req.url, req.method, typeof referer === 'string' ? referer : null);
     reply.status(404).send({ error: { code: 'not_found', message: `Route ${req.method}:${req.url} not found` } });
@@ -160,6 +201,38 @@ export async function buildServer() {
   await app.register(settingsRoutes, { prefix: '/api' });
   await app.register(systemRoutes, { prefix: '/api' });
   await app.register(meRoutes, { prefix: '/api' });
+  // Inbound store bridges — partners call these paths verbatim, so they are
+  // registered at the root rather than under /api.
+  // ── Presenting as a WordPress/WooCommerce store ──────────────────────────
+  //
+  // There is no WordPress here and never will be. These two hooks exist
+  // because integration partners do not ask politely whether a store speaks
+  // WooCommerce — they SNIFF for it, in the two ways every WordPress site
+  // happens to answer:
+  //
+  //   1. A `Link: <…/wp-json/>; rel="https://api.w.org/"` header on the site
+  //      root. Connectors fetch the store URL and read this header to find the
+  //      REST base. No header, and the WooCommerce option fails before any
+  //      credential is entered, reporting an invalid store URL.
+  //
+  //   2. `/?rest_route=/wc/v3/…`, the query-string form used when pretty
+  //      permalinks are off — handled by `rewriteUrl` in the factory above.
+  //
+  // Both are cheap and neither exposes anything: the Link header points at an
+  // endpoint that already answers publicly, and the rewrite just reaches the
+  // same routes by another spelling.
+  app.addHook('onSend', async (req, reply) => {
+    // Only on document responses — a Link header on every JSON reply is noise.
+    const type = String(reply.getHeader('content-type') ?? '');
+    if (req.method === 'GET' && type.includes('text/html')) {
+      const proto = (req.headers['x-forwarded-proto'] as string) ?? 'http';
+      const host = req.headers['x-forwarded-host'] ?? req.headers.host;
+      if (host) reply.header('Link', `<${proto}://${host}/wp-json/>; rel="https://api.w.org/"`);
+    }
+  });
+
+  await app.register(wooCompatRoutes);
+  await app.register(shopifyCompatRoutes);
   await app.register(redirectsRoutes, { prefix: '/api' });
   await app.register(toolsRoutes, { prefix: '/api' });
   await app.register(twoFactorRoutes, { prefix: '/api' });
@@ -173,8 +246,13 @@ export async function buildServer() {
   await app.register(clusterRoutes, { prefix: '/api' });
   await app.register(checkoutRoutes, { prefix: '/api' });
   await app.register(cartRoutes, { prefix: '/api' });
+  await app.register(contactRoutes, { prefix: '/api' });
+  await app.register(orderTrackingRoutes, { prefix: '/api' });
   await app.register(couponRoutes, { prefix: '/api' });
   await app.register(taxonomyRoutes, { prefix: '/api' });
+  await app.register(counterAdminRoutes, { prefix: '/api' });
+  await app.register(counterPublicRoutes, { prefix: '/api' });
+  await app.register(storeKeyRoutes, { prefix: '/api' });
   await app.register(reportRoutes, { prefix: '/api' });
   await app.register(bricksRoutes, { prefix: '/api' });
   // Counter C4 — public storefront pages, served un-prefixed from this same
@@ -184,6 +262,40 @@ export async function buildServer() {
   await app.register(adminProxy);
 
   // Base Theme — the default public site frontend (/, /:slug, /blog, /work).
+  // ── Maintenance / Coming soon gate ───────────────────────────────────────
+  //
+  // Runs before the public site, and ONLY the public site: the admin, the API,
+  // uploads and the inbound store bridges stay reachable so you can turn it
+  // back off, and so a partner sync is not silently broken by a marketing
+  // decision.
+  //
+  // Signed-in admins always see the real site — a maintenance mode you cannot
+  // look behind is one you cannot verify the fix through.
+  app.addHook('onRequest', async (req, reply) => {
+    const path = req.url.split('?')[0] ?? '/';
+    const EXEMPT = ['/tos-admin', '/api', '/builder', '/wp-json', '/wc-auth', '/admin/api', '/uploads', '/favicon'];
+    if (EXEMPT.some((prefix) => path.startsWith(prefix))) return;
+
+    const maintenance = await settingsService.getMaintenanceCached();
+    if (maintenance.mode === 'off') return;
+
+    // An admin session cookie is enough — this is a visibility gate, not an
+    // authorisation boundary, and the real admin auth still runs on /tos-admin.
+    if (/(?:^|;\s*)th_session=/.test(req.headers.cookie ?? '')) return;
+
+    const site = await settingsService.getSite();
+    const body = maintenancePage(maintenance, site.siteName || 'Therum OS');
+    // 503 for maintenance so crawlers keep the real pages and return; 200 for
+    // coming-soon because that page IS the site right now.
+    if (maintenance.mode === 'maintenance') {
+      reply.status(503);
+      if (maintenance.retryAfterMinutes > 0) {
+        reply.header('Retry-After', String(maintenance.retryAfterMinutes * 60));
+      }
+    }
+    reply.type('text/html; charset=utf-8').send(body);
+  });
+
   await app.register(siteRoutes);
   await app.register(connectionRoutes, { prefix: '/api' });
   await app.register(oauthRoutes, { prefix: '/api' });

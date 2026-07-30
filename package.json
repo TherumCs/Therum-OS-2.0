@@ -1,6 +1,6 @@
 {
   "name": "@therum/cms-backend",
-  "version": "2.0.0-beta.2",
+  "version": "2.0.0-beta.3",
   "private": true,
   "type": "module",
   "description": "Therum CMS 2.0 — backend API (Fastify + Prisma + PostgreSQL)",
@@ -21,7 +21,7 @@
     "prisma:studio": "prisma studio",
     "seed": "node --env-file=.env dist/seed.js",
     "mint-jwt": "node --env-file=.env scripts/mint-jwt.mjs",
-    "test": "node --env-file=.env --test --test-concurrency=1 test/*.test.mjs"
+    "test": "LOG_LEVEL=fatal node --env-file=.env --test --test-concurrency=1 test/*.test.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1086.0",

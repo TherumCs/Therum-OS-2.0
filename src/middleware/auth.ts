@@ -3,6 +3,8 @@ import fastifyJwt from '@fastify/jwt';
 import { env } from '../lib/env.js';
 import { apiTokenService } from '../services/apiToken.service.js';
 import { roleService } from '../services/role.service.js';
+import { settingsService } from '../services/settings.service.js';
+import { db } from '../lib/db.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -22,6 +24,74 @@ declare module '@fastify/jwt' {
     payload: { sub: string; role: 'admin' | 'custom' | 'pending2fa' };
     user: { sub: string; role: 'admin' | 'custom' | 'pending2fa'; bundles?: string[] };
   }
+}
+
+// Routes an un-enrolled account may still reach while 2FA enforcement is on.
+//
+// Deliberately the shortest list that lets someone climb out of the hole they
+// are in: see the requirement, enrol, confirm, and read enough of their own
+// account for the admin shell to render the prompt. `/auth/2fa/disable` is
+// NOT here — an account that has not enrolled cannot disable anything, and an
+// enrolled one must not be able to opt back out while enforcement is on.
+const ENROLMENT_ALLOWLIST: { method: string; path: string }[] = [
+  { method: 'GET', path: '/api/auth/2fa' },
+  { method: 'POST', path: '/api/auth/2fa/enroll' },
+  { method: 'POST', path: '/api/auth/2fa/confirm' },
+  { method: 'GET', path: '/api/me' },
+  { method: 'GET', path: '/api/settings/appearance' },
+];
+
+function isEnrolmentRoute(method: string, url: string): boolean {
+  const path = (url.split('?')[0] ?? '').replace(/\/+$/, '') || '/';
+  return ENROLMENT_ALLOWLIST.some((r) => r.method === method && r.path === path);
+}
+
+/**
+ * Blocks a session that has not satisfied the 2FA policy.
+ *
+ * Returns true when it has already answered the request.
+ *
+ * Enforced HERE rather than at the login form on purpose. Refusing the login
+ * outright would lock out every existing account the instant the toggle is
+ * flipped — including whoever flipped it. Instead the password still gets you
+ * a session, and that session can reach nothing but enrolment.
+ */
+async function blockedByTwoFactorPolicy(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  userId: string,
+  credential: 'session' | 'api-token',
+): Promise<boolean> {
+  const { requireTwoFactor } = await settingsService.getSecurityCached();
+  if (!requireTwoFactor) return false;
+
+  const user = await db.adminUser.findUnique({ where: { id: userId }, select: { totpEnabled: true } });
+  if (user?.totpEnabled) return false;
+
+  // An API token cannot enrol anything — there is no interactive session
+  // behind it — so the allowlist would be meaningless. It fails with a
+  // message naming the actual cause, because the alternative is an
+  // integration that breaks with a generic 403 and no way to guess why.
+  if (credential === 'api-token') {
+    reply.status(403).send({
+      error: {
+        code: 'two_factor_required',
+        message: 'This API token belongs to an account without two-factor authentication, which this site now requires.',
+      },
+    });
+    return true;
+  }
+
+  if (isEnrolmentRoute(req.method, req.url)) return false;
+
+  reply.status(403).send({
+    error: {
+      code: 'two_factor_required',
+      message: 'This site requires two-factor authentication. Set it up on your account to continue.',
+      enrollPath: '/account',
+    },
+  });
+  return true;
 }
 
 // JWT auth. `app.authenticate` is a preHandler that 401s on a bad/missing token.
@@ -50,6 +120,7 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
       // custom-role user's token must be bundle-gated the same way their
       // browser session is, not silently escalated to full admin.
       const access = await roleService.resolveAccess(result.userId);
+      if (await blockedByTwoFactorPolicy(req, reply, result.userId, 'api-token')) return;
       req.user = { sub: result.userId, role: access.role, bundles: access.bundles };
       return;
     }
@@ -76,6 +147,12 @@ export async function registerAuth(app: FastifyInstance): Promise<void> {
       }
     } catch {
       reply.status(401).send({ error: { code: 'unauthorized', message: 'Authentication required.' } });
+      return;
     }
+    // OUTSIDE the try on purpose: this reads the database, and a database
+    // failure in here must surface as itself, not get swallowed by the catch
+    // above and reported as "Authentication required" — which would send
+    // everyone to the login screen during an unrelated outage.
+    await blockedByTwoFactorPolicy(req, reply, req.user.sub, 'session');
   });
 }

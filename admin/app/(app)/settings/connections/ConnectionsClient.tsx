@@ -6,12 +6,17 @@ import { BASE_PATH } from '../../../../lib/session';
 export interface ConnectionRow {
   id: string;
   name: string;
-  category: 'ai' | 'messaging' | 'ecommerce' | 'payments' | 'apps' | 'fulfillment' | 'custom';
+  category: 'ai' | 'messaging' | 'ecommerce' | 'payments' | 'apps' | 'fulfillment' | 'identity' | 'custom';
   authType: 'apikey' | 'oauth';
   credentialHint?: string;
+  example?: string;
+  note?: string;
+  issuedBy?: 'provider' | 'your-store';
+  connectsVia?: 'api-key' | 'oauth' | 'store-pull-woo' | 'store-pull-shopify';
+  oauthCapable?: boolean;
   // Structured parts for key+secret-style providers (see nexusCatalog.ts) —
   // rendered as one input each, joined with `join` into the vault string.
-  fields?: { label: string; secret?: boolean; optional?: boolean }[];
+  fields?: { label: string; secret?: boolean; optional?: boolean; example?: string }[];
   join?: string;
   connected: boolean;
   maskedPreview: string | null;
@@ -38,18 +43,45 @@ export interface WebhookEntry {
   receivedAt: string;
 }
 
+/**
+ * What this provider actually wants, in one line, on the CARD.
+ *
+ * Every card used to read "API key" regardless of provider, so the grid gave
+ * no way to tell that Gooten needs a Recipe ID and a Partner Billing Key while
+ * Stripe needs one secret key — you had to open each one to find out, and if
+ * you had the wrong value in hand you found out only after it failed.
+ */
+/** Drops the parenthetical guidance from a field label for compact display. */
+function shortLabel(label: string): string {
+  return label.replace(/\s*\(.*\)\s*$/, '').trim();
+}
+
+function credentialSummary(r: ConnectionRow): string {
+  if (r.fields?.length) {
+    const required = r.fields.filter((f) => !f.optional).map((f) => shortLabel(f.label));
+    const optional = r.fields.length - required.length;
+    const labels = (required.length ? required : r.fields.map((f) => shortLabel(f.label))).join(' + ');
+    return optional > 0 && required.length ? `${labels} (+${optional} optional)` : labels;
+  }
+  // Hints can be a full sentence — useful INSIDE the panel, but a paragraph on
+  // a card just makes the grid unreadable, so the card gets the first clause.
+  const hint = r.credentialHint ?? 'API key';
+  return hint.length > 46 ? `${hint.split(/[—,.(]/)[0]!.trim()}…` : hint;
+}
+
 const SIGNATURE_PROVIDERS = ['github', 'stripe', 'slack'];
 
-const CATEGORY_LABELS: Record<ConnectionRow['category'], string> = {
+export const CATEGORY_LABELS: Record<ConnectionRow['category'], string> = {
   ai: 'AI tools',
   messaging: 'Messaging & APIs',
   ecommerce: 'Ecommerce platforms',
   payments: 'Payments',
   fulfillment: 'Fulfillment',
+  identity: 'Customer sign-in',
   apps: 'External apps',
   custom: 'Custom',
 };
-const CATEGORY_ORDER: ConnectionRow['category'][] = ['ai', 'messaging', 'ecommerce', 'payments', 'fulfillment', 'apps', 'custom'];
+const CATEGORY_ORDER: ConnectionRow['category'][] = ['ai', 'messaging', 'ecommerce', 'payments', 'fulfillment', 'identity', 'apps', 'custom'];
 
 // Top-level tabs are the five provider CATEGORIES (one long stacked list
 // buried everything), plus Vault and Activity.
@@ -70,7 +102,7 @@ const ICON_COLORS: Record<string, { bg: string; fg?: string }> = {
   'google-drive': { bg: '#fbbc04', fg: '#000' },
 };
 
-function iconColor(id: string): { bg: string; fg: string } {
+export function iconColor(id: string): { bg: string; fg: string } {
   const known = ICON_COLORS[id];
   if (known) return { bg: known.bg, fg: known.fg ?? '#fff' };
   let h = 0;
@@ -98,7 +130,7 @@ export function ConnectionsClient({
   const [tab, setTabState] = useState<Tab>(() => {
     if (typeof window === 'undefined') return 'ai';
     const t = new URLSearchParams(window.location.search).get('tab');
-    return t && ['ai', 'messaging', 'ecommerce', 'payments', 'fulfillment', 'apps', 'custom', 'vault', 'activity'].includes(t) ? (t as Tab) : 'ai';
+    return t && ['ai', 'messaging', 'ecommerce', 'payments', 'fulfillment', 'identity', 'apps', 'custom', 'vault', 'activity'].includes(t) ? (t as Tab) : 'ai';
   });
   const setTab = (t: Tab) => {
     setTabState(t);
@@ -110,6 +142,9 @@ export function ConnectionsClient({
   // Mutations used to fail with zero feedback (no catch, no !res.ok branch —
   // audit finding #2); every handler now surfaces the backend's message here.
   const [actionError, setActionError] = useState('');
+  // Held in component state ONLY: the secret is returned once and hashed
+  // server-side, so a refresh losing it is correct, not a bug.
+  const [storeKey, setStoreKey] = useState<{ consumerKey: string; consumerSecret: string } | null>(null);
 
   async function surface(res: Response): Promise<boolean> {
     if (res.ok) {
@@ -250,109 +285,46 @@ export function ConnectionsClient({
 
   const needsAttention = connectedRows.filter((r) => r.lastTestOk === false).length;
 
-  return (
-    <div>
-      {actionError && <div className="notice">{actionError}</div>}
-      {/* Page-header status strip (preview V5): mirrors the dashboard card. */}
-      <p style={{ margin: '0 0 var(--th-space-12)', fontSize: 'var(--th-fs-sm)', color: 'var(--th-muted)' }}>
-        <strong style={{ color: 'var(--th-success, #10b981)' }}>{connectedRows.length}</strong> connected
-        {needsAttention > 0 && <> · <strong style={{ color: 'var(--th-danger, #ef4444)' }}>{needsAttention}</strong> action needed</>}
-        {' · '}{rows.length} total
-      </p>
-      <div style={{ display: 'flex', gap: 'var(--th-space-16)', borderBottom: '1px solid var(--th-line)', marginBottom: 'var(--th-space-16)', flexWrap: 'wrap' }}>
-        {([...CATEGORY_ORDER, 'vault', 'activity'] as Tab[]).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            className="ghost"
-            style={{
-              border: 'none',
-              borderRadius: 0,
-              background: 'transparent',
-              padding: 'var(--th-space-8) 0',
-              borderBottom: tab === t ? '2px solid var(--th-accent)' : '2px solid transparent',
-              color: tab === t ? 'var(--th-ink)' : 'var(--th-muted)',
-              fontWeight: tab === t ? 600 : 500,
-            }}
-          >
-            {t === 'vault'
-              ? `Vault (${connectedRows.length})`
-              : t === 'activity'
-                ? 'Activity'
-                : `${CATEGORY_LABELS[t as ConnectionRow['category']]} (${rows.filter((r) => r.category === t).length})`}
-          </button>
-        ))}
-      </div>
+  // The detail view lives INSIDE the card that opens it.
+  //
+  // It used to be a fixed slide-over: opening one covered the grid, so you
+  // lost sight of what you were configuring and of everything else's state.
+  // Expanding in place keeps the card you clicked where your eye already is,
+  // and the surrounding cards stay readable.
+  /**
+   * Issues a store key for a partner that connects by READING this store.
+   *
+   * The secret comes back once and is held in component state only — a
+   * refresh loses it, exactly as it should, because it is never stored
+   * recoverably on the server either.
+   */
+  async function issueStoreKey(label: string): Promise<void> {
+    setActionError('');
+    try {
+      const res = await fetch(`${BASE_PATH}/api/store-keys`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ label, scope: 'read_write' }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error?.message ?? 'Could not create a store key.');
+      setStoreKey({ consumerKey: body.consumerKey, consumerSecret: body.consumerSecret });
+    } catch (e) {
+      setActionError(e instanceof Error ? e.message : String(e));
+    }
+  }
 
-      {CATEGORY_ORDER.filter((cat) => cat === tab).map((cat) => (
-        <div key={cat} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))', gap: 12 }}>
-          {rows
-            .filter((r) => r.category === cat)
-            .map((r) => {
-              const ic = iconColor(r.id);
-              const statusColor = r.connected ? (r.lastTestOk === false ? 'var(--th-danger, #ef4444)' : 'var(--th-success, #10b981)') : 'var(--th-muted)';
-              return (
-                <button
-                  key={r.id}
-                  type="button"
-                  onClick={() => openPanel(r.id)}
-                  style={{
-                    position: 'relative', textAlign: 'left', padding: 18, minHeight: 150,
-                    background: r.connected ? 'linear-gradient(180deg, rgba(16,185,129,.05), var(--th-surface))' : 'var(--th-surface)',
-                    border: r.connected ? '1px solid rgba(16,185,129,.3)' : '1px solid var(--th-line)',
-                    borderRadius: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 6,
-                    transition: 'transform .15s ease, box-shadow .15s ease, border-color .15s ease',
-                    fontFamily: 'inherit', color: 'var(--th-ink)',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 10px 28px rgba(0,0,0,.10)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; }}
-                >
-                  <span style={{ position: 'absolute', top: 14, right: 14, display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, letterSpacing: '.04em', textTransform: 'uppercase', color: statusColor }}>
-                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />
-                    {r.connected ? (r.lastTestOk === false ? 'error' : 'connected') : 'off'}
-                  </span>
-                  <span style={{ width: 40, height: 40, borderRadius: 10, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 14, letterSpacing: '-.02em', background: ic.bg, color: ic.fg, marginBottom: 6 }}>
-                    {r.name.slice(0, 2)}
-                  </span>
-                  <span style={{ fontSize: 14, fontWeight: 600 }}>{r.name}</span>
-                  <span style={{ fontSize: 11, color: 'var(--th-muted)' }}>
-                    {r.connected ? r.maskedPreview : r.authType === 'oauth' ? (oauthApps[r.id] ? 'OAuth ready' : 'OAuth · needs app setup') : 'API key'}
-                  </span>
-                  <span style={{ marginTop: 'auto', paddingTop: 10, borderTop: '1px solid var(--th-line)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, fontWeight: 600 }}>
-                    <span>{r.connected ? 'Manage' : 'Connect'} →</span>
-                    {r.testable && <span style={{ fontSize: 9, color: 'var(--th-muted)', textTransform: 'uppercase', letterSpacing: '.05em' }}>live test</span>}
-                  </span>
-                </button>
-              );
-            })}
-          {/* "+ Add custom" blank card — in every section, per the 1.x preview spec. */}
-          <button
-            type="button"
-            onClick={() => openPanel('__custom__')}
-            style={{
-              minHeight: 150, padding: 18, background: 'transparent', border: '1px dashed var(--th-line)',
-              borderRadius: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column',
-              alignItems: 'center', justifyContent: 'center', gap: 8, color: 'var(--th-muted)', fontFamily: 'inherit',
-            }}
-          >
-            <span style={{ fontSize: 22, lineHeight: 1 }}>+</span>
-            <span style={{ fontSize: 12, fontWeight: 600 }}>Add custom connector</span>
-            <span style={{ fontSize: 10 }}>Any API into the vault</span>
-          </button>
-        </div>
-      ))}
-
-      {/* ── Slide-over panel ─────────────────────────────────────────── */}
-      {openId && (() => {
-        const r = openId === '__custom__' ? null : rows.find((x) => x.id === openId);
-        if (openId !== '__custom__' && !r) return null;
-        const ic = r ? iconColor(r.id) : iconColor('custom');
-        return (
-          <>
-            <div onClick={() => setOpenId(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.28)', zIndex: 60 }} />
-            <div style={{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(400px, 92vw)', background: 'var(--th-surface)', borderLeft: '1px solid var(--th-line)', zIndex: 61, padding: 24, overflowY: 'auto', boxShadow: '-16px 0 48px rgba(0,0,0,.14)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
+  function renderDetail(openId: string) {
+    const r = openId === '__custom__' ? null : rows.find((x) => x.id === openId);
+    if (openId !== '__custom__' && !r) return null;
+    const ic = r ? iconColor(r.id) : iconColor('custom');
+    return (
+      <>
+              {/* Provider header renders ONLY for the custom-connector form.
+                  For a real provider the card directly above already shows the
+                  icon, name and status — repeating them inline just pushes the
+                  fields the user actually came for further down. */}
+              <div style={{ display: r ? 'none' : 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
                 <span style={{ width: 40, height: 40, borderRadius: 10, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, background: ic.bg, color: ic.fg }}>
                   {r ? r.name.slice(0, 2) : '+'}
                 </span>
@@ -386,22 +358,57 @@ export function ConnectionsClient({
               )}
 
               {/* OAuth providers */}
-              {r && r.authType === 'oauth' && !r.connected && (
+              {r && (r.authType === 'oauth' || r.oauthCapable) && !r.connected && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
+                  {/* The button is shown ONLY when an OAuth app actually
+                      exists for this provider. Showing it unconditionally is
+                      what made "Sign in with Square" bounce straight back to
+                      the admin: with no app the backend 409s and the proxy
+                      redirects home, which reads as being dumped at a login
+                      screen. A button that cannot work must not be offered. */}
                   {oauthApps[r.id] ? (
                     <a href={`${BASE_PATH}/api/connections/${r.id}/oauth/start?tab=${r.category}`} className="button" style={{ textAlign: 'center' }}>
-                      Connect with {r.name}
+                      Sign in with {r.name}
                     </a>
                   ) : (
-                    <>
-                      <p style={{ fontSize: 11, color: 'var(--th-muted)', margin: 0 }}>One-time OAuth app setup (this install's own registered app with {r.name}):</p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <p style={{ fontSize: 11, color: 'var(--th-muted)', margin: 0, lineHeight: 1.5 }}>
+                        One-time setup before &ldquo;Sign in with {r.name}&rdquo; can work: create an app in {r.name}&apos;s
+                        developer console and paste its credentials here. Give it this redirect URL:
+                      </p>
+                      <input
+                        readOnly
+                        onFocus={(e) => e.currentTarget.select()}
+                        value={typeof window === 'undefined' ? '' : `${window.location.origin}${BASE_PATH}/api/connections/${r.id}/oauth/callback`}
+                        style={{ fontFamily: 'var(--th-font-mono)', fontSize: 11 }}
+                      />
                       <input type="text" placeholder="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} />
                       <input type="password" placeholder="Client secret" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} />
-                      <button type="button" onClick={() => void saveOAuthApp(r.id)} disabled={busy === r.id || !clientId.trim() || !clientSecret.trim()}>Save OAuth app</button>
-                    </>
+                      <button type="button" onClick={() => void saveOAuthApp(r.id)} disabled={busy === r.id || !clientId.trim() || !clientSecret.trim()}>
+                        Save and enable sign-in
+                      </button>
+                    </div>
                   )}
                   <div style={{ borderTop: '1px solid var(--th-line)', paddingTop: 10, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    <p style={{ fontSize: 11, color: 'var(--th-muted)', margin: 0 }}>Or paste a personal access token:</p>
+                    <p style={{ fontSize: 11, color: 'var(--th-muted)', margin: 0 }}>
+                      Or paste {r.fields && r.fields.length > 1 ? 'the keys' : 'a key'} instead:
+                    </p>
+                    {/* The provider's REAL fields, not a generic token box —
+                        authorizing by web is an alternative to these, not a
+                        reason to stop naming them. */}
+                    {r.fields && r.fields.length > 1 && (
+                      r.fields.map((f, i) => (
+                        <label key={f.label} style={{ fontSize: 11, fontWeight: 600, color: 'var(--th-muted)' }}>
+                          {f.label}{f.optional ? ' (optional)' : ''}
+                          <input
+                            type={f.secret ? 'password' : 'text'}
+                            value={fieldValues[i] ?? ''}
+                            onChange={(e) => setFieldValues((prev) => { const next = [...prev]; next[i] = e.target.value; return next; })}
+                            style={{ width: '100%', marginTop: 4 }}
+                          />
+                        </label>
+                      ))
+                    )}
                     <input type="password" placeholder={r.credentialHint ?? 'Personal access token'} value={credential} onChange={(e) => setCredential(e.target.value)} />
                     <button type="button" onClick={() => void connect(r.id)} disabled={busy === r.id || !credential.trim()}>Connect with token</button>
                   </div>
@@ -411,8 +418,61 @@ export function ConnectionsClient({
               {/* API-key providers, not yet connected. Providers with
                   structured auth (key+secret pairs, token+location, …) render
                   one input per part; single-value providers get one field. */}
-              {r && r.authType !== 'oauth' && !r.connected && (
+              {/* Partner reads THIS store: it needs a key we issue, not one it
+                  issues. Asking for a provider key here is what made these
+                  impossible to connect. */}
+              {r && (r.connectsVia === 'store-pull-woo' || r.connectsVia === 'store-pull-shopify') && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
+                  {/* The step nobody can guess: these partners present a LIST
+                      of platforms (Shopify / Woo / Wix / Etsy …) and you have
+                      to pick WooCommerce. Picking Shopify sends them into
+                      Shopify's own OAuth against a myshopify.com domain, which
+                      no self-hosted store can satisfy — it fails with an error
+                      about the store URL and looks like a credential problem. */}
+                  <p style={{ margin: 0, fontSize: 11, color: 'var(--th-muted)', lineHeight: 1.6 }}>
+                    In {r.name}, choose <strong>WooCommerce</strong> from its list of platforms — not Shopify. Shopify&apos;s
+                    flow requires a myshopify.com domain and cannot be satisfied by a self-hosted store. Then paste the
+                    three values below.
+                  </p>
+                  {!storeKey ? (
+                    <button type="button" onClick={() => void issueStoreKey(`${r.name} store key`)}>
+                      Generate store key for {r.name}
+                    </button>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {([
+                        ['Store URL', typeof window === 'undefined' ? '' : window.location.origin],
+                        ['Consumer key', storeKey.consumerKey],
+                        ['Consumer secret', storeKey.consumerSecret],
+                      ] as [string, string][]).map(([label, value]) => (
+                        <label key={label} style={{ fontSize: 11, fontWeight: 600, color: 'var(--th-muted)' }}>
+                          {label}
+                          <input readOnly value={value} onFocus={(e) => e.currentTarget.select()} style={{ width: '100%', marginTop: 4, fontFamily: 'var(--th-font-mono)', fontSize: 11 }} />
+                        </label>
+                      ))}
+                      <p style={{ margin: 0, fontSize: 10, color: 'var(--th-muted)' }}>
+                        The secret is shown once. Copy it now — it is hashed on the server and cannot be shown again.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {r && r.authType !== 'oauth' && !r.connected && r.connectsVia !== 'store-pull-woo' && r.connectsVia !== 'store-pull-shopify' && !r.oauthCapable && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
+                  {/* Where the values come from, shown BEFORE the boxes. Every
+                      provider used to render one identical "API key" field, so
+                      nothing on screen told you which value it wanted or who
+                      issues it — the two things you need in order to go and
+                      fetch the right thing. */}
+                  {(r.credentialHint || r.issuedBy === 'your-store') && (
+                    <p style={{ margin: 0, fontSize: 11, color: 'var(--th-muted)', lineHeight: 1.5 }}>
+                      {r.issuedBy === 'your-store'
+                        ? `${r.name} reads your store, so these are issued by YOUR store, not by ${r.name}. `
+                        : ''}
+                      {r.credentialHint}
+                    </p>
+                  )}
                   {r.fields ? (
                     r.fields.map((f, i) => (
                       <label key={f.label} style={{ fontSize: 11, fontWeight: 600, color: 'var(--th-muted)' }}>
@@ -421,17 +481,23 @@ export function ConnectionsClient({
                           type={f.secret ? 'password' : 'text'}
                           value={fieldValues[i] ?? ''}
                           onChange={(e) => setFieldValues((prev) => { const next = [...prev]; next[i] = e.target.value; return next; })}
-                          placeholder={f.label}
+                          placeholder=""
                           style={{ width: '100%', marginTop: 4 }}
                           autoFocus={i === 0}
                         />
+                        {f.example && (
+                          <span style={{ display: 'block', marginTop: 3, fontSize: 10, fontWeight: 400, color: 'var(--th-muted)' }}>
+                            e.g. {f.example}
+                          </span>
+                        )}
                       </label>
                     ))
                   ) : (
                     <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--th-muted)' }}>{r.credentialHint ?? 'API key'}
-                      <input type="password" value={credential} onChange={(e) => setCredential(e.target.value)} placeholder={r.credentialHint ?? 'API key'} style={{ width: '100%', marginTop: 4 }} autoFocus />
+                      <input type="password" value={credential} onChange={(e) => setCredential(e.target.value)} placeholder="" style={{ width: '100%', marginTop: 4 }} autoFocus />
                     </label>
                   )}
+                  {r.note && <p style={{ margin: 0, fontSize: 11, color: 'var(--th-muted)', lineHeight: 1.5 }}>{r.note}</p>}
                   <button type="button" onClick={() => void connect(r.id, composed(r))} disabled={busy === r.id || !fieldsReady(r)}>Connect</button>
                   {r.testable && <p style={{ fontSize: 10, color: 'var(--th-muted)', margin: 0 }}>Live test available once connected — verifies the key against {r.name}'s real API.</p>}
                 </div>
@@ -479,10 +545,133 @@ export function ConnectionsClient({
                   </p>
                 </div>
               )}
+      </>
+    );
+  }
+
+  return (
+    <div>
+      {actionError && <div className="notice">{actionError}</div>}
+      {/* Page-header status strip (preview V5): mirrors the dashboard card. */}
+      <p style={{ margin: '0 0 var(--th-space-12)', fontSize: 'var(--th-fs-sm)', color: 'var(--th-muted)' }}>
+        <strong style={{ color: 'var(--th-success, #10b981)' }}>{connectedRows.length}</strong> connected
+        {needsAttention > 0 && <> · <strong style={{ color: 'var(--th-danger, #ef4444)' }}>{needsAttention}</strong> action needed</>}
+        {' · '}{rows.length} total
+      </p>
+      <div style={{ display: 'flex', gap: 'var(--th-space-16)', borderBottom: '1px solid var(--th-line)', marginBottom: 'var(--th-space-16)', flexWrap: 'wrap' }}>
+        {([...CATEGORY_ORDER, 'vault', 'activity'] as Tab[]).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className="ghost"
+            style={{
+              border: 'none',
+              borderRadius: 0,
+              background: 'transparent',
+              padding: 'var(--th-space-8) 0',
+              borderBottom: tab === t ? '2px solid var(--th-accent)' : '2px solid transparent',
+              color: tab === t ? 'var(--th-ink)' : 'var(--th-muted)',
+              fontWeight: tab === t ? 600 : 500,
+            }}
+          >
+            {t === 'vault'
+              ? `Vault (${connectedRows.length})`
+              : t === 'activity'
+                ? 'Activity'
+                : `${CATEGORY_LABELS[t as ConnectionRow['category']]} (${rows.filter((r) => r.category === t).length})`}
+          </button>
+        ))}
+      </div>
+
+      {CATEGORY_ORDER.filter((cat) => cat === tab).map((cat) => (
+        <div key={cat} style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12 }}>
+          {rows
+            .filter((r) => r.category === cat)
+            .map((r) => {
+              const ic = iconColor(r.id);
+              const statusColor = r.connected ? (r.lastTestOk === false ? 'var(--th-danger, #ef4444)' : 'var(--th-success, #10b981)') : 'var(--th-muted)';
+              const expanded = openId === r.id;
+              return (
+                <div
+                  key={r.id}
+                  style={{
+                    // An expanded card takes the full row so the form has room;
+                    // collapsed cards keep their normal grid cell.
+                    gridColumn: expanded ? '1 / -1' : 'auto',
+                    display: 'flex', flexDirection: 'column',
+                  }}
+                >
+                <button
+                  type="button"
+                  onClick={() => (expanded ? setOpenId(null) : openPanel(r.id))}
+                  style={{
+                    position: 'relative', textAlign: 'left', padding: expanded ? '12px 18px' : 18, minHeight: expanded ? 0 : 150,
+                    background: r.connected ? 'linear-gradient(180deg, rgba(16,185,129,.05), var(--th-surface))' : 'var(--th-surface)',
+                    border: r.connected ? '1px solid rgba(16,185,129,.3)' : '1px solid var(--th-line)',
+                    borderRadius: expanded ? '14px 14px 0 0' : 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', gap: 6,
+                    transition: 'transform .15s ease, box-shadow .15s ease, border-color .15s ease',
+                    fontFamily: 'inherit', color: 'var(--th-ink)',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 10px 28px rgba(0,0,0,.10)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = ''; }}
+                >
+                  <span style={{ position: 'absolute', top: 14, right: 14, display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 10, letterSpacing: '.04em', textTransform: 'uppercase', color: statusColor }}>
+                    <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'currentColor' }} />
+                    {r.connected ? (r.lastTestOk === false ? 'error' : 'connected') : 'off'}
+                  </span>
+                  {/* Expanded: one compact row (icon + name + shape). The tall
+                      card above an open form is dead space. */}
+                  <span style={{ display: expanded ? 'flex' : 'block', alignItems: 'center', gap: 10 }}>
+                    <span style={{ width: expanded ? 28 : 40, height: expanded ? 28 : 40, borderRadius: 8, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: expanded ? 11 : 14, letterSpacing: '-.02em', background: ic.bg, color: ic.fg, marginBottom: expanded ? 0 : 6 }}>
+                      {r.name.slice(0, 2)}
+                    </span>
+                    <span style={{ display: expanded ? 'inline' : 'block', fontSize: 14, fontWeight: 600 }}>{r.name}</span>
+                    <span style={{ display: expanded ? 'inline' : 'block', fontSize: 11, color: 'var(--th-muted)' }}>
+                      {r.connected ? r.maskedPreview : r.authType === 'oauth' ? (oauthApps[r.id] ? 'OAuth ready' : 'OAuth · needs app setup') : credentialSummary(r)}
+                    </span>
+                  </span>
+                  <span style={{ display: expanded ? 'none' : 'flex', marginTop: 'auto', paddingTop: 10, borderTop: '1px solid var(--th-line)', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, fontWeight: 600 }}>
+                    <span>{r.connected ? 'Manage' : 'Connect'} {expanded ? '▾' : '→'}</span>
+                    {r.testable && <span style={{ fontSize: 9, color: 'var(--th-muted)', textTransform: 'uppercase', letterSpacing: '.05em' }}>live test</span>}
+                  </span>
+                </button>
+                {expanded && (
+                  <div
+                    style={{
+                      border: '1px solid var(--th-line)', borderTop: 'none',
+                      borderRadius: '0 0 14px 14px', padding: 18,
+                      background: 'var(--th-surface)',
+                    }}
+                  >
+                    {renderDetail(r.id)}
+                  </div>
+                )}
+                </div>
+              );
+            })}
+          {/* "+ Add custom" blank card — in every section, per the 1.x preview spec. */}
+          <button
+            type="button"
+            onClick={() => (openId === '__custom__' ? setOpenId(null) : openPanel('__custom__'))}
+            style={{
+              minHeight: 150, padding: 18, background: 'transparent', border: '1px dashed var(--th-line)',
+              borderRadius: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column',
+              alignItems: 'center', justifyContent: 'center', gap: 8, color: 'var(--th-muted)', fontFamily: 'inherit',
+            }}
+          >
+            <span style={{ fontSize: 22, lineHeight: 1 }}>+</span>
+            <span style={{ fontSize: 12, fontWeight: 600 }}>Add custom connector</span>
+            <span style={{ fontSize: 10 }}>Any API into the vault</span>
+          </button>
+          {openId === '__custom__' && (
+            <div style={{ gridColumn: '1 / -1', border: '1px solid var(--th-line)', borderRadius: 14, padding: 18, background: 'var(--th-surface)' }}>
+              {renderDetail('__custom__')}
             </div>
-          </>
-        );
-      })()}
+          )}
+        </div>
+      ))}
+
 
       {tab === 'vault' && (
         <div className="settings-group">

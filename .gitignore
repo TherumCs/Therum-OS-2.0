@@ -2,6 +2,11 @@ node_modules/
 dist/
 .env
 .env.local
+# Every .env variant, not just the two we happened to have. A file named
+# .env.backup-20260728-172516 was sitting untracked and unignored, one
+# `git add -A` away from publishing live credentials to a GitHub repo.
+.env.*
+!.env.example
 *.log
 .DS_Store
 prisma/*.db
@@ -12,6 +17,7 @@ admin/.next/
 admin/.env.local
 builder/dist/
 .next-test/
+*.tsbuildinfo
 
 # Database backups — real dumps of live content, never committed.
 backups/

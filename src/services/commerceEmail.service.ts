@@ -1,3 +1,4 @@
+import { formatMoney } from '../counter/currency.js';
 import { db } from '../lib/db.js';
 import { logger } from '../lib/logger.js';
 import { notificationService } from './notification.service.js';
@@ -9,8 +10,9 @@ import { settingsService } from './settings.service.js';
 // fire-and-forget from the payment webhook path — a dead SMTP box must
 // never fail or slow a webhook ack.
 
-const money = (minor: number, currency: string): string =>
-  new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(minor / 100);
+// Was hardcoded 'en-US' and a /100 that is wrong for zero-decimal currencies
+// like JPY. formatMoney knows each currency's real minor-unit count.
+const money = (minor: number, currency: string): string => formatMoney(minor, currency);
 
 async function orderWithItems(orderId: string) {
   return db.order.findUnique({

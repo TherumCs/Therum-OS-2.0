@@ -283,8 +283,17 @@ test('C4.1 method strip: registry grouped, availability resolved from connection
   assert.deepEqual(groups.map((g) => g.id), ['card', 'wallets', 'bnpl', 'bank', 'crypto', 'p2p'], '1.x strip group order');
 
   const card = methods.find((m) => m.id === 'card');
-  assert.equal(card.available, true, 'card fulfilled by connected mock');
-  assert.equal(card.provider, 'mock');
+  assert.equal(card.available, true, 'card fulfilled by a connected provider');
+  // Asserts it resolved to SOME connected payment provider, not specifically
+  // 'mock'. This suite runs against the development database: the moment a
+  // real gateway (Square) was connected there, it won the card method and this
+  // assertion failed — a test that only passed while the operator had no
+  // payment provider set up.
+  const connectedPayments = (await db.connection.findMany({ where: { category: 'payments' }, select: { provider: true } })).map((c) => c.provider);
+  assert.ok(
+    [...connectedPayments, 'mock'].includes(card.provider),
+    `card resolved to ${card.provider}, which is not a connected payment provider`,
+  );
 
   const klarna = methods.find((m) => m.id === 'klarna');
   assert.equal(klarna.available, false, 'unconnected provider → setup required');

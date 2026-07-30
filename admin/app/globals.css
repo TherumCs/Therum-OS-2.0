@@ -1319,3 +1319,149 @@ input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: 
 .th-about-sync.ok { color: var(--th-ink-3); }
 .th-about-sync.warn { color: var(--th-wrn, #f59e0b); font-weight: 600; }
 .th-about-credits { font-size: var(--th-fs-sm); color: var(--th-ink-2); line-height: 1.65; margin-top: var(--th-space-8); }
+
+/* ── Batched settings form: sticky save bar + wireframe option pickers ─────
+   The rest of the admin saves on change (settings/SettingsControls.tsx). A
+   page whose choices are visual and compared side by side should not publish
+   every option you pass through on the way to the one you want, so those pages
+   buffer their edits and this bar commits them. See app/(app)/SettingsForm.tsx. */
+.th-savebar { position: sticky; bottom: var(--th-space-16); margin-top: var(--th-space-24);
+  display: flex; align-items: center; gap: var(--th-space-10);
+  padding: var(--th-space-10) var(--th-space-12) var(--th-space-10) var(--th-space-16);
+  background: var(--th-surface); border: 1px solid var(--th-line); border-radius: var(--th-r-lg, 12px);
+  box-shadow: 0 6px 24px rgba(0,0,0,.12); z-index: 20; opacity: 1; }
+/* No entrance animation and no opacity toggle. Both previously left the bar
+   fully interactive at opacity 0 — a Save button that exists, reports unsaved
+   changes and cannot be seen or clicked. It is mounted only when needed, so
+   being plainly visible is the whole behaviour. */
+.th-savebar__msg { flex: 1; font-size: var(--th-fs-xs); color: var(--th-muted); }
+
+.th-picker { padding: var(--th-space-14) 0; border-bottom: 1px solid var(--th-line); }
+.th-picker:last-child { border-bottom: none; }
+.th-picker__head { display: flex; flex-direction: column; gap: var(--th-space-2); margin-bottom: var(--th-space-12); }
+.th-picker__label { font-size: var(--th-fs-sm); font-weight: 600; }
+.th-picker__desc { font-size: var(--th-fs-2xs); color: var(--th-muted); max-width: 62ch; }
+.th-picker__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(126px, 1fr)); gap: var(--th-space-10); }
+.th-opt { display: flex; flex-direction: column; gap: var(--th-space-4); padding: var(--th-space-8);
+  background: var(--th-surface); border: 1px solid var(--th-line); border-radius: 10px; cursor: pointer;
+  text-align: left; font: inherit; color: inherit; transition: border-color .12s ease, box-shadow .12s ease; }
+.th-opt:hover { border-color: var(--th-muted); }
+.th-opt.on { border-color: var(--th-accent-btn); box-shadow: 0 0 0 1px var(--th-accent-btn); }
+ /* The art sits on PAPER, not on a tinted block — a grey backing behind every
+    tile made "Bare" look exactly as boxed as "Boxed", which is the one
+    distinction that chooser exists to draw. */
+.th-opt__art { display: block; aspect-ratio: 4 / 5; background: var(--th-surface);
+  border-radius: 6px; overflow: hidden; padding: var(--th-space-8); }
+.th-opt__name { font-size: var(--th-fs-xs); font-weight: 600; }
+.th-opt__note { font-size: var(--th-fs-2xs); color: var(--th-muted); line-height: 1.35; }
+
+/* Wireframe motion. Each option that DESCRIBES a behaviour demonstrates it —
+   a "Fade" tile that never fades is a label with a picture next to it. Paused
+   until the tile is hovered or selected so a grid of six is not a fairground,
+   and dropped entirely under prefers-reduced-motion. */
+.th-opt__art .wf-fade { opacity: 0; }
+.th-opt:hover .th-opt__art .wf-fade,
+.th-opt.on .th-opt__art .wf-fade { animation: wfFade 2.4s ease-in-out infinite; }
+@keyframes wfFade { 0%,42% { opacity: 0 } 58%,92% { opacity: 1 } 100% { opacity: 0 } }
+
+.th-opt__art .wf-slide { transform: translateX(0); }
+.th-opt:hover .th-opt__art .wf-slide,
+.th-opt.on .th-opt__art .wf-slide { animation: wfSlide 3s ease-in-out infinite; }
+@keyframes wfSlide { 0%,26% { transform: translateX(0) } 40%,66% { transform: translateX(-100px) } 80%,100% { transform: translateX(0) } }
+
+.th-opt__art .wf-dot-1, .th-opt__art .wf-dot-2 { opacity: .45; }
+.th-opt:hover .th-opt__art .wf-dot-1, .th-opt.on .th-opt__art .wf-dot-1 { animation: wfDotA 3s ease-in-out infinite; }
+.th-opt:hover .th-opt__art .wf-dot-2, .th-opt.on .th-opt__art .wf-dot-2 { animation: wfDotB 3s ease-in-out infinite; }
+@keyframes wfDotA { 0%,26% { opacity: 1 } 40%,100% { opacity: .45 } }
+@keyframes wfDotB { 0%,26% { opacity: .45 } 40%,66% { opacity: 1 } 80%,100% { opacity: .45 } }
+
+.th-opt__art .wf-pulse { transform-origin: center; }
+.th-opt:hover .th-opt__art .wf-pulse,
+.th-opt.on .th-opt__art .wf-pulse { animation: wfPulse 1.9s ease-in-out infinite; }
+@keyframes wfPulse { 0%,100% { opacity: .92; transform: scale(1) } 50% { opacity: 1; transform: scale(1.08) } }
+
+.th-opt__art .wf-rise { opacity: 0; transform: translateY(6px); }
+.th-opt:hover .th-opt__art .wf-rise,
+.th-opt.on .th-opt__art .wf-rise { animation: wfRise 2.6s ease-in-out infinite; }
+@keyframes wfRise { 0%,34% { opacity: 0; transform: translateY(6px) } 50%,88% { opacity: 1; transform: translateY(0) } 100% { opacity: 0; transform: translateY(6px) } }
+
+/* The evolve card literally swaps faces, so its tile does too. */
+.th-opt__art .wf-face-a { opacity: 1; }
+.th-opt__art .wf-face-b { opacity: 0; }
+.th-opt:hover .th-opt__art .wf-face-a, .th-opt.on .th-opt__art .wf-face-a { animation: wfFaceA 3.6s ease-in-out infinite; }
+.th-opt:hover .th-opt__art .wf-face-b, .th-opt.on .th-opt__art .wf-face-b { animation: wfFaceB 3.6s ease-in-out infinite; }
+@keyframes wfFaceA { 0%,38% { opacity: 1 } 48%,88% { opacity: 0 } 98%,100% { opacity: 1 } }
+@keyframes wfFaceB { 0%,38% { opacity: 0 } 48%,88% { opacity: 1 } 98%,100% { opacity: 0 } }
+
+@media (prefers-reduced-motion: reduce) {
+  .th-opt__art * { animation: none !important; }
+  .th-opt__art .wf-fade, .th-opt__art .wf-rise, .th-opt__art .wf-face-b { opacity: 1; transform: none; }
+  .th-opt__art .wf-face-a { opacity: 0; }
+}
+
+/* Checkable option sets + preset numbers (app/(app)/FormControls.tsx). */
+.th-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--th-space-6); }
+.th-check { display: flex; gap: var(--th-space-10); align-items: flex-start; padding: var(--th-space-10) var(--th-space-12);
+  border: 1px solid var(--th-line); border-radius: 9px; cursor: pointer; background: var(--th-surface); }
+.th-check:hover { border-color: var(--th-muted); }
+.th-check.on { border-color: var(--th-accent-btn); box-shadow: inset 0 0 0 1px var(--th-accent-btn); }
+.th-check input { margin-top: 2px; flex: 0 0 auto; }
+.th-check__text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.th-check__name { font-size: var(--th-fs-xs); font-weight: 600; }
+.th-check__note { font-size: var(--th-fs-2xs); color: var(--th-muted); line-height: 1.35; }
+
+.th-presets { display: flex; align-items: center; gap: var(--th-space-6); flex-wrap: wrap; }
+.th-preset { min-width: 46px; padding: var(--th-space-8) var(--th-space-10); border: 1px solid var(--th-line);
+  border-radius: 8px; background: var(--th-surface); cursor: pointer; font: inherit; font-size: var(--th-fs-xs);
+  font-weight: 600; color: inherit; }
+.th-preset:hover { border-color: var(--th-muted); }
+.th-preset.on { background: var(--th-accent-btn); border-color: var(--th-accent-btn); color: var(--th-text-inverse); }
+.th-presets__custom { display: inline-flex; align-items: center; gap: var(--th-space-6); margin-left: var(--th-space-6);
+  padding-left: var(--th-space-12); border-left: 1px solid var(--th-line); }
+.th-presets__custom input { width: 84px; padding: var(--th-space-8) var(--th-space-10); border: 1px solid var(--th-line);
+  border-radius: 8px; background: var(--th-surface); color: var(--th-ink); font-size: var(--th-fs-sm); }
+.th-presets__suffix { font-size: var(--th-fs-2xs); color: var(--th-muted); }
+
+/* Hover-lift on the shell tiles, and the staggered reveal on its own tile. */
+.th-opt__art .wf-lift { transform-origin: center; }
+.th-opt:hover .th-opt__art .wf-lift, .th-opt.on .th-opt__art .wf-lift { animation: wfLift 2.4s ease-in-out infinite; }
+@keyframes wfLift { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-4px) } }
+.th-opt__art [class^="wf-stagger-"] { opacity: 0; transform: translateY(7px); }
+.th-opt:hover .th-opt__art .wf-stagger-1, .th-opt.on .th-opt__art .wf-stagger-1 { animation: wfRise 2.8s ease-in-out infinite; }
+.th-opt:hover .th-opt__art .wf-stagger-2, .th-opt.on .th-opt__art .wf-stagger-2 { animation: wfRise 2.8s ease-in-out .14s infinite; }
+.th-opt:hover .th-opt__art .wf-stagger-3, .th-opt.on .th-opt__art .wf-stagger-3 { animation: wfRise 2.8s ease-in-out .28s infinite; }
+@media (prefers-reduced-motion: reduce) { .th-opt__art [class^="wf-stagger-"] { opacity: 1; transform: none; } }
+
+/* Immersive search tile: the page content clears out as the search arrives. */
+.th-opt__art .wf-clear { opacity: 1; }
+.th-opt:hover .th-opt__art .wf-clear, .th-opt.on .th-opt__art .wf-clear { animation: wfClear 2.4s ease-in-out infinite; }
+@keyframes wfClear { 0%,38% { opacity: 1; transform: scale(1) } 54%,92% { opacity: 0; transform: scale(.97) } 100% { opacity: 1; transform: scale(1) } }
+@media (prefers-reduced-motion: reduce) { .th-opt__art .wf-clear { opacity: .3; } }
+
+/* Section tabs (Promotions). Underline rather than pills — these switch a
+   whole panel, so they read as navigation, not as a filter chip. */
+.th-tabs { display: flex; gap: var(--th-space-4); border-bottom: 1px solid var(--th-line); }
+.th-tab { display: inline-flex; align-items: center; gap: var(--th-space-6); padding: var(--th-space-10) var(--th-space-14);
+  background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer; font: inherit;
+  font-size: var(--th-fs-sm); font-weight: 600; color: var(--th-muted); }
+.th-tab:hover { color: var(--th-ink); }
+.th-tab.on { color: var(--th-ink); border-bottom-color: var(--th-accent-btn); }
+.th-tab__count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--th-surface-2, #ececed);
+  color: var(--th-muted); font-size: var(--th-fs-2xs); display: inline-flex; align-items: center; justify-content: center; }
+.th-tab.on .th-tab__count { background: var(--th-accent-btn); color: var(--th-text-inverse); }
+
+/* Image zoom on the hover-style tiles. */
+.th-opt:hover .th-opt__art .wf-zoom, .th-opt.on .th-opt__art .wf-zoom { animation: wfZoom 2.6s ease-in-out infinite; }
+@keyframes wfZoom { 0%,100% { transform: scale(1) } 50% { transform: scale(1.12) } }
+
+/* Colour swatches (FormColor). The row stacks because a swatch strip next to a
+   label crushes on a narrow admin pane. */
+.settings-toggle-row--stack{flex-direction:column;align-items:stretch;gap:12px}
+.th-swatches{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.th-swatch{width:34px;height:34px;border-radius:8px;border:1px solid rgba(0,0,0,.18);
+  padding:0;cursor:pointer;position:relative;flex:0 0 auto}
+.th-swatch.is-on{box-shadow:0 0 0 2px #fff,0 0 0 4px #111}
+.th-swatch--custom{overflow:hidden;background:conic-gradient(#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)}
+.th-swatch--custom input{position:absolute;inset:-4px;width:calc(100% + 8px);height:calc(100% + 8px);
+  opacity:0;cursor:pointer;border:0;padding:0}
+.th-swatch-hex{max-width:120px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:lowercase}

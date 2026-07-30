@@ -12,6 +12,7 @@ import { encryptSecret } from '../dist/lib/crypto.js';
 import { squareGateway } from '../dist/lib/payments/squareGateway.js';
 
 let app;
+let preExistingSquare = [];
 
 const SIG_KEY = 'sq-test-signature-key';
 const NOTIFY_URL = 'https://example.com/api/webhooks/psp/square';
@@ -24,11 +25,18 @@ function signed(body) {
 }
 
 before(async () => {
+  preExistingSquare = await db.connection.findMany({ where: { provider: 'square' } });
   app = await buildServer();
 });
 
 after(async () => {
   await db.connection.deleteMany({ where: { provider: 'square' } });
+  // Same hazard as fulfillment.test.mjs: `square` can be a REAL connection on
+  // the dev database, and deleting it destroys a live payment credential.
+  for (const row of preExistingSquare) {
+    const { id: _id, ...data } = row;
+    await db.connection.create({ data });
+  }
   await db.connectionAuditLog.deleteMany({ where: { provider: 'square' } });
   await app.close();
   await closeQueues();

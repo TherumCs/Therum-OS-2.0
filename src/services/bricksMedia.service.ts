@@ -128,8 +128,28 @@ export const bricksMediaService = {
     const urls = new Set<string>();
     collectDeepUrls(canvas, urls);
 
+    // What the first pass already pulled across, original -> local URL.
+    //
+    // localize() rewrites `props.src`, but the adapter also preserves each
+    // element's raw Bricks settings under `__bricks` for lossless round-trip,
+    // and those still hold the ORIGINAL url. Without this the deep pass finds
+    // that copy, treats it as new, and uploads the same file a second time —
+    // one image in, two assets out, and the same again for every duplicate
+    // src on the page.
+    const alreadyLocal = new Map(report.localized.map((l) => [l.from, l.to]));
+    // Same reasoning for failures: a dead link the first pass already reported
+    // is still sitting in the preserved `__bricks` settings, so without this it
+    // gets reported a second time and one broken image reads as two.
+    const alreadySkipped = new Set(report.skipped.map((sk) => sk.src));
+
     for (const src of urls) {
-      if (src.startsWith('/api/uploads/')) continue;
+      if (src.startsWith('/api/uploads/') || alreadySkipped.has(src)) continue;
+      const known = alreadyLocal.get(src);
+      if (known) {
+        // Rewrite the remaining occurrences to the asset we already have.
+        rewriteDeep(canvas, src, known);
+        continue;
+      }
       let resolved: URL;
       try {
         resolved = new URL(src, baseUrl);
@@ -153,6 +173,7 @@ export const bricksMediaService = {
         }
         const asset = await mediaService.upload({ filename: filenameFor(resolved), mimetype: fetched.mimetype, buffer: fetched.buffer });
         rewriteDeep(canvas, src, asset.url);
+        alreadyLocal.set(src, asset.url);
         report.localized.push({ from: src, to: asset.url, assetId: asset.id });
       } catch (e) {
         report.skipped.push({ src, reason: e instanceof Error ? e.message : String(e) });

@@ -6,6 +6,7 @@ import { buildNav, type StudioNavItem } from '../../lib/nav';
 import { applySidebarLayout, type SidebarLayout } from '../../lib/sidebar-layout';
 import { DEFAULT_APPEARANCE, appearanceDataAttrs, appearanceInlineVars, type Appearance } from '../../lib/appearance';
 import { Sidebar } from './Sidebar';
+import { TwoFactorGate } from './TwoFactorGate';
 import { Topbar } from './Topbar';
 import { DesktopShell } from './DesktopShell';
 
@@ -21,6 +22,7 @@ interface Me {
   sidebarFolded: boolean;
   listPageRowCount: number | null;
   customCss: string;
+  mustEnrollTwoFactor?: boolean;
 }
 interface About {
   version: string;
@@ -67,6 +69,22 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const me = await apiGet<Me>('/api/me').catch(
     (): Me => ({ username: 'admin', sidebarLayout: null, desktopModeEnabled: false, loginLandingPage: null, sidebarFolded: false, listPageRowCount: null, customCss: '' }),
   );
+  // 2FA is required and this account has not enrolled: render enrolment IN
+  // PLACE of the app, on every route.
+  //
+  // Not a redirect. A layout cannot see the current path in Next 16, so a
+  // redirect would either loop on the target page or need a header that isn't
+  // reliably there. Rendering instead makes the rule unconditional — there is
+  // no route that skips it — and it matches what the API already enforces, so
+  // the UI cannot promise access the backend will refuse.
+  if (me.mustEnrollTwoFactor) {
+    const status = await apiGet<{ enabled: boolean; unusedBackupCodes: number }>('/api/auth/2fa').catch(() => ({
+      enabled: false,
+      unusedBackupCodes: 0,
+    }));
+    return <TwoFactorGate username={me.username} status={status} appearance={appearance} />;
+  }
+
   const about = await apiGet<About>('/api/system/about').catch((): About => ({ version: '2.0.0', database: 'PostgreSQL' }));
   // The sidebar shows the SITE's identity (as 1.9.44 did), not the CMS
   // product name — this admin can run any site.
@@ -87,11 +105,16 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   const portfolioActive = studioApps.some((a) => a.id === 'case-studies' && a.enabled);
 
   const defaultNav = buildNav(commerceActive, portfolioActive, studioNavItems);
-  // Store is the only currently-gated curated section (Portfolio stays out
+  // Counter is the only currently-gated curated section (Portfolio stays out
   // until a portfolio-flavored content type exists — see buildNav above);
   // ports therum_curated_section_ids()'s role of forcing gated sections back
   // even if the user's saved layout deleted them.
-  const curatedIds = [...(commerceActive ? ['store'] : []), ...(portfolioActive ? ['portfolio'] : [])];
+  //
+  // 'store' stays in the list alongside 'counter': the section was renamed,
+  // and a saved sidebar layout from before the rename still refers to it by
+  // the old id. Keeping both means an existing user's layout does not quietly
+  // lose the section on upgrade.
+  const curatedIds = [...(commerceActive ? ['counter', 'store'] : []), ...(portfolioActive ? ['portfolio'] : [])];
   const sections = applySidebarLayout(defaultNav, me.sidebarLayout, curatedIds);
   // 1.9.44 shows $home_host (the site's own domain) here. 2.0 now serves the
   // public site on this same origin, so that IS the site's host — but the

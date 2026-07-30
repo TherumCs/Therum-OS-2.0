@@ -42,12 +42,25 @@ export function buildNav(commerceActive: boolean, portfolioActive: boolean, stud
   const sections: NavSection[] = [];
 
   if (commerceActive) {
+    // Named for the engine, not the generic noun — this stack's storefront IS
+    // Counter, the same way the connections surface is Nexus and the customer
+    // groups are Milieus. "Store" was the only section still calling its
+    // engine by a category name.
+    //
+    // Customization and Payments moved OUT of Settings and in here: both are
+    // about running this store, and a merchant changing a product card should
+    // not have to go looking under the same roof as SMTP and backups.
     sections.push({
-      id: 'store',
-      label: 'Store',
+      id: 'counter',
+      label: 'Counter',
       items: [
         { href: '/products', label: 'Products', icon: 'widgets' },
         { href: '/orders', label: 'Orders', icon: 'import' },
+        { href: '/promotions', label: 'Promotions', icon: 'studio' },
+        { href: '/customization', label: 'Customization', icon: 'palette' },
+        // A mini-Nexus scoped to the store: who takes the money, who ships,
+        // where products sync from. The full vault stays under Studio.
+        { href: '/connections', label: 'Connections', icon: 'db' },
       ],
     });
   }

@@ -1,10 +1,12 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { db } from '../../lib/db.js';
 import { contentService } from '../../services/content.service.js';
-import { settingsService } from '../../services/settings.service.js';
+import { settingsService, type SiteSettings } from '../../services/settings.service.js';
 import { capabilityService } from '../../services/capability.service.js';
 import { dockMarkup, dockScript, dockStyles } from '../../site/adminDock.js';
+import { walletPayments } from '../../counter/walletPayments.js';
 import { sitePage, type NavItem } from '../../site/siteHtml.js';
+import type { HeaderCartConfig } from '../../site/headerCart.js';
 import { esc } from '../../site/storefrontHtml.js';
 
 // Base Theme routes — the default public frontend. Published content only
@@ -32,9 +34,13 @@ export interface ChromeCtx {
   dock?: { markup: string; styles: string; script: string };
   /** Settings > Performance, applied to the delivered HTML. */
   perf?: { lazyImages: boolean; minHtml: boolean; minCss: boolean };
+  /** Settings > Security — false removes the platform credit. */
+  showPlatformCredit?: boolean;
   chromeHeader?: string;
   chromeFooter?: string;
   chromeCssUrl?: string;
+  /** Settings > Counter — how the header's icons behave. */
+  headerIcons?: HeaderCartConfig;
 }
 
 // WP Bridge chrome: published content rendered as the site header/footer
@@ -98,7 +104,7 @@ async function buildDock(req: FastifyRequest, current: string): Promise<{ markup
   };
 }
 
-async function buildNav(current: string, req?: FastifyRequest): Promise<{ siteName: string; tagline: string; homepageSlug: string | null; nav: NavItem[]; chrome: ChromeCtx }> {
+export async function buildNav(current: string, req?: FastifyRequest): Promise<{ siteName: string; tagline: string; homepageSlug: string | null; nav: NavItem[]; chrome: ChromeCtx; site: SiteSettings }> {
   const site = await settingsService.getSite();
   const chrome = await loadChrome(site);
   // The admin dock rides along in `chrome` because every sitePage() call site
@@ -107,11 +113,21 @@ async function buildNav(current: string, req?: FastifyRequest): Promise<{ siteNa
   // visitor gets byte-identical HTML.
   const dock = req ? await buildDock(req, current) : undefined;
   if (dock) (chrome as ChromeCtx & { dock?: unknown }).dock = dock;
+  const stealth = await settingsService.getStealth();
+  (chrome as ChromeCtx & { showPlatformCredit?: boolean }).showPlatformCredit = !stealth.hidePlatformCredit;
   const perf = await settingsService.getPerformance();
   (chrome as ChromeCtx & { perf?: unknown }).perf = {
     lazyImages: perf.lazyImages,
     minHtml: perf.minHtml,
     minCss: perf.minCss,
+  };
+  const counterSettings = await settingsService.getCounter();
+  chrome.headerIcons = {
+    cartStyle: counterSettings.cartStyle,
+    cartSidebarReveal: counterSettings.cartSidebarReveal,
+    cartSidebarGround: counterSettings.cartSidebarGround,
+    searchStyle: counterSettings.searchStyle,
+    wishlistEnabled: counterSettings.wishlistEnabled,
   };
   const [pages, postCount, workCount, commerce] = await Promise.all([
     db.content.findMany({ where: { type: 'page', status: 'published' }, select: { slug: true, title: true }, orderBy: { createdAt: 'asc' }, take: 6 }),
@@ -126,6 +142,7 @@ async function buildNav(current: string, req?: FastifyRequest): Promise<{ siteNa
       siteName: site.siteName,
       tagline: site.tagline,
       homepageSlug: site.homepageSlug,
+      site,
       chrome,
       nav: site.menu.map((m) => ({ href: m.href, label: m.label, current: current === m.href || (m.href !== '/' && current.startsWith(m.href)) })),
     };
@@ -139,19 +156,55 @@ async function buildNav(current: string, req?: FastifyRequest): Promise<{ siteNa
   if (postCount > 0) nav.push({ href: '/blog', label: 'Blog', current: current.startsWith('/blog') });
   if (workCount > 0) nav.push({ href: '/work', label: 'Work', current: current.startsWith('/work') });
   if (commerce) nav.push({ href: '/shop', label: 'Shop' });
-  return { siteName: site.siteName, tagline: site.tagline, homepageSlug: site.homepageSlug, chrome, nav };
+  return { siteName: site.siteName, tagline: site.tagline, homepageSlug: site.homepageSlug, chrome, nav, site };
 }
 
-function bareOrArticle(ctx: { chrome: ChromeCtx }, r: { title: string; html: string; publishedAt: Date | string | null; type: string }, showMeta: boolean): string {
+/**
+ * Whether to print the H1 above a page's content.
+ *
+ * Two levels, because they answer different questions. The SITE setting is the
+ * default for a whole install; a PAGE can override it either way via
+ * `meta.hideTitle`. A designed or ported layout usually opens with its own
+ * headline, and the CMS stacking a second one on top is the actual complaint —
+ * but that is a per-page fact, so a site-wide switch alone would be too blunt.
+ */
+function showTitle(site: { showPageTitles?: boolean }, meta: unknown): boolean {
+  const pageOverride = (meta as { hideTitle?: unknown } | null)?.hideTitle;
+  if (typeof pageOverride === 'boolean') return !pageOverride;
+  return site.showPageTitles !== false;
+}
+
+/**
+ * Page-scoped CSS from `content.meta.css`, validated on the way out.
+ *
+ * `meta` is free-form JSON that an import or an API caller can write anything
+ * into, and this string lands inside a <style> tag — so a `</style>` in it
+ * would break out into markup. Rejected rather than escaped: CSS has no
+ * legitimate use for that sequence, and silently mangling a stylesheet is
+ * worse than not applying it.
+ */
+function pageCssOf(meta: unknown): string | undefined {
+  const css = (meta as { css?: unknown } | null)?.css;
+  if (typeof css !== 'string' || !css.trim()) return undefined;
+  if (/<\/style/i.test(css)) return undefined;
+  return css.slice(0, 200_000);
+}
+
+function bareOrArticle(
+  ctx: { chrome: ChromeCtx },
+  r: { title: string; html: string; publishedAt: Date | string | null; type: string; meta?: unknown },
+  showMeta: boolean,
+  withTitle = true,
+): string {
   // Ported full-bleed layouts carry their own headings/spacing — no article shell.
   if (ctx.chrome.chromeHeader || ctx.chrome.chromeFooter) return r.html;
-  return contentBody(r, showMeta);
+  return contentBody(r, showMeta, withTitle);
 }
 
-function contentBody(r: { title: string; html: string; publishedAt: Date | string | null; type: string }, showMeta: boolean): string {
+function contentBody(r: { title: string; html: string; publishedAt: Date | string | null; type: string }, showMeta: boolean, withTitle = true): string {
   return `
   <article>
-    <h1 class="page-title">${esc(r.title)}</h1>
+    ${withTitle ? `<h1 class="page-title">${esc(r.title)}</h1>` : ''}
     ${showMeta && r.publishedAt ? `<p class="page-meta">${esc(fmtDate(r.publishedAt))}</p>` : ''}
     <div class="prose">${r.html}</div>
   </article>`;
@@ -179,6 +232,15 @@ async function indexCards(type: 'post' | 'case_study', base: string): Promise<st
 }
 
 export async function siteRoutes(app: FastifyInstance): Promise<void> {
+  // Apple Pay domain verification. Apple fetches this exact path over HTTPS on
+  // the host serving checkout and will not render the button if it 404s — the
+  // single most common reason "Apple Pay just doesn't show up". Served from
+  // Settings > Payments so it can be pasted in rather than deployed.
+  app.get('/.well-known/apple-developer-merchantid-domain-association', async (_req, reply) => {
+    const body = await walletPayments.appleDomainAssociation();
+    reply.type('text/plain').send(body);
+  });
+
 
   const notFound = async (reply: FastifyReply, path: string, req?: FastifyRequest): Promise<void> => {
     const ctx = await buildNav(path, req);
@@ -203,7 +265,7 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
           headExtra: headExtraFor(r),
           siteName: ctx.siteName,
           nav: ctx.nav,
-          body: bareOrArticle(ctx, r, false),
+          body: bareOrArticle(ctx, r, false, showTitle(ctx.site, r.meta)), pageCss: pageCssOf(r.meta),
         }));
       } catch {
         // configured homepage unpublished/deleted — fall through to landing
@@ -240,7 +302,7 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
       const r = await contentService.renderBySlug(slug, `${originOf(req)}/blog`);
       if (r.type !== 'post') return notFound(reply, `/blog/${slug}`, req);
       const ctx = await buildNav('/blog', req);
-      send(reply, sitePage({ ...ctx.chrome, title: `${r.title} — ${ctx.siteName}`, headExtra: headExtraFor(r), siteName: ctx.siteName, nav: ctx.nav, body: bareOrArticle(ctx, r, true) }));
+      send(reply, sitePage({ ...ctx.chrome, title: `${r.title} — ${ctx.siteName}`, headExtra: headExtraFor(r), siteName: ctx.siteName, nav: ctx.nav, body: bareOrArticle(ctx, r, true, showTitle(ctx.site, r.meta)), pageCss: pageCssOf(r.meta) }));
     } catch {
       return notFound(reply, `/blog/${slug}`, req);
     }
@@ -258,7 +320,7 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
       const r = await contentService.renderBySlug(slug, `${originOf(req)}/work`);
       if (r.type !== 'case_study') return notFound(reply, `/work/${slug}`, req);
       const ctx = await buildNav('/work', req);
-      send(reply, sitePage({ ...ctx.chrome, title: `${r.title} — ${ctx.siteName}`, headExtra: headExtraFor(r), siteName: ctx.siteName, nav: ctx.nav, body: bareOrArticle(ctx, r, true) }));
+      send(reply, sitePage({ ...ctx.chrome, title: `${r.title} — ${ctx.siteName}`, headExtra: headExtraFor(r), siteName: ctx.siteName, nav: ctx.nav, body: bareOrArticle(ctx, r, true, showTitle(ctx.site, r.meta)), pageCss: pageCssOf(r.meta) }));
     } catch {
       return notFound(reply, `/work/${slug}`, req);
     }
@@ -278,7 +340,7 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
       const r = await contentService.renderBySlug(slug, originOf(req));
       if (r.type !== 'page') return notFound(reply, `/${slug}`, req);
       const ctx = await buildNav(`/${slug}`, req);
-      send(reply, sitePage({ ...ctx.chrome, title: `${r.title} — ${ctx.siteName}`, headExtra: headExtraFor(r), siteName: ctx.siteName, nav: ctx.nav, body: bareOrArticle(ctx, r, false) }));
+      send(reply, sitePage({ ...ctx.chrome, title: `${r.title} — ${ctx.siteName}`, headExtra: headExtraFor(r), siteName: ctx.siteName, nav: ctx.nav, body: bareOrArticle(ctx, r, false, showTitle(ctx.site, r.meta)), pageCss: pageCssOf(r.meta) }));
     } catch {
       return notFound(reply, `/${slug}`, req);
     }

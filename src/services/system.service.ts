@@ -39,11 +39,48 @@ async function checkRedis(): Promise<HealthCheck> {
 }
 
 function checkJwtSecret(): HealthCheck {
-  const insecureDefault = env.JWT_SECRET.startsWith('dev-only-change-me');
-  if (insecureDefault) {
+  const secret = env.JWT_SECRET;
+  if (secret.startsWith('dev-only-change-me')) {
     return { id: 'jwt-secret', label: 'JWT secret', status: 'error', detail: 'Still set to the dev placeholder — replace before any real deployment.' };
   }
+  // Length alone is not strength: the shipped placeholder was 71 characters,
+  // most of them zeroes, and passed a length check comfortably. Counting
+  // DISTINCT characters catches padded and repeated values, which is the
+  // shape a hand-written "long" secret usually takes.
+  const distinct = new Set(secret).size;
+  if (distinct < 16) {
+    return {
+      id: 'jwt-secret',
+      label: 'JWT secret',
+      status: 'error',
+      detail: `Only ${distinct} distinct characters — this looks padded rather than random. Generate one with: openssl rand -base64 48`,
+    };
+  }
   return { id: 'jwt-secret', label: 'JWT secret', status: 'ok', detail: 'A real secret is configured.' };
+}
+
+// Nexus credentials are encrypted with CREDENTIAL_KEY. Without it they fall
+// back to a key derived from JWT_SECRET, which means the signing key can no
+// longer be rotated without destroying every stored credential — worth
+// surfacing while the vault is still small enough to re-enter by hand.
+function checkCredentialKey(): HealthCheck {
+  if (!env.CREDENTIAL_KEY) {
+    return {
+      id: 'credential-key',
+      label: 'Credential encryption key',
+      status: 'warn',
+      detail: 'Not set — connection secrets are encrypted with a key derived from JWT_SECRET, so the two cannot be rotated independently.',
+    };
+  }
+  if (env.CREDENTIAL_KEY === env.JWT_SECRET) {
+    return {
+      id: 'credential-key',
+      label: 'Credential encryption key',
+      status: 'error',
+      detail: 'Identical to JWT_SECRET — set it to a different value, or rotating one breaks the other.',
+    };
+  }
+  return { id: 'credential-key', label: 'Credential encryption key', status: 'ok', detail: 'Set, and distinct from the signing secret.' };
 }
 
 function checkCors(): HealthCheck {
@@ -87,7 +124,7 @@ function readSiblingVersion(dir: 'admin' | 'builder'): string {
 
 export const systemService = {
   async health(): Promise<{ status: CheckStatus; checks: HealthCheck[] }> {
-    const checks = await Promise.all([checkDatabase(), checkRedis(), Promise.resolve(checkJwtSecret()), Promise.resolve(checkCors()), Promise.resolve(checkNodeEnv()), Promise.resolve(checkWebhookSecret())]);
+    const checks = await Promise.all([checkDatabase(), checkRedis(), Promise.resolve(checkJwtSecret()), Promise.resolve(checkCredentialKey()), Promise.resolve(checkCors()), Promise.resolve(checkNodeEnv()), Promise.resolve(checkWebhookSecret())]);
     const status: CheckStatus = checks.some((c) => c.status === 'error') ? 'error' : checks.some((c) => c.status === 'warn') ? 'warn' : 'ok';
     return { status, checks };
   },

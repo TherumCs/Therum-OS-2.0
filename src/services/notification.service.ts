@@ -10,7 +10,7 @@ async function sendEmail(subject: string, body: string): Promise<void> {
 // Customer-facing sends (Counter C6: receipts, refund notices) reuse the
 // same per-call transport + timeouts, addressed to the given recipient
 // instead of the admin. Silently a no-op until SMTP is configured.
-async function sendEmailTo(to: string, subject: string, body: string): Promise<void> {
+export async function sendEmailTo(to: string, subject: string, body: string): Promise<void> {
   const n = await settingsService.getNotifications();
   if (!n.emailEnabled || !n.smtpHost) return;
   const transport = nodemailer.createTransport({

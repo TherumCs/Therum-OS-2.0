@@ -13,7 +13,16 @@ async function asJson(res: Response): Promise<{ ok: boolean; body: unknown }> {
   return { ok: res.ok, body: await res.json().catch(() => null) };
 }
 
-export function TwoFactorPanel({ initialStatus }: { initialStatus: Status }) {
+export function TwoFactorPanel({
+  initialStatus,
+  // Set by the enforcement gate, which is rendered INSTEAD of the admin and
+  // therefore cannot notice that enrolment just succeeded — the decision was
+  // made on the server, before this component existed. A reload re-runs it.
+  reloadWhenDone = false,
+}: {
+  initialStatus: Status;
+  reloadWhenDone?: boolean;
+}) {
   const [status, setStatus] = useState(initialStatus);
   const [stage, setStage] = useState<Stage>('idle');
   const [secret, setSecret] = useState('');
@@ -81,8 +90,11 @@ export function TwoFactorPanel({ initialStatus }: { initialStatus: Status }) {
             </span>
           ))}
         </div>
-        <button style={{ marginTop: 'var(--th-space-14)' }} onClick={() => setStage('idle')}>
-          Done — I&apos;ve saved these
+        <button
+          style={{ marginTop: 'var(--th-space-14)' }}
+          onClick={() => (reloadWhenDone ? window.location.reload() : setStage('idle'))}
+        >
+          {reloadWhenDone ? "Done — I've saved these, continue" : "Done — I've saved these"}
         </button>
       </div>
     );

@@ -1,3 +1,10 @@
+import { BANNER_RUNTIME, BANNER_STYLES } from './bannerRuntime.js';
+import { PRODUCT_GRID_FALLBACK_CSS } from './productGrid.js';
+import { CHECKOUT_FLOW_CSS } from './checkoutFlow.js';
+import { SHOP_TOOLBAR_CSS } from './shopToolbar.js';
+import { HEADER_CART_CSS, headerCartRuntime, HEADER_CART_DEFAULTS, type HeaderCartConfig } from './headerCart.js';
+import { WISHLIST_CSS, WISHLIST_RUNTIME } from './wishlist.js';
+import { ACCOUNT_CSS } from './accountPage.js';
 // Counter C4 — storefront HTML layer. Server-rendered, zero client
 // framework: pages are plain HTML strings + a small vanilla-JS cart runtime
 // (below) that talks to the existing /api/cart + /api/checkout routes.
@@ -213,10 +220,15 @@ async function addToCart(variantId,qty=1,btn){
   }
 }
 document.addEventListener('DOMContentLoaded',refreshCount);
-// Card media: hover plays the product video when one exists; otherwise the
-// arrows flip through the stills. Arrows are tap-targets too — that IS the
-// mobile story (no hover on touch). Buttons live inside the card <a>, so
-// they must swallow the click or every tap navigates.
+// Card media. The gallery arrows flip the stills; a motion card plays its
+// video on hover. Which of those a card HAS is decided server-side by the card
+// style (see productGrid.ts) — this script only drives whatever is present.
+//
+// It used to look for .card, a class the theme-shaped card does not carry.
+// m.closest('.card') returned null and the addEventListener on it threw,
+// which killed the hover-video binding AND every card after it in the loop —
+// so the arrows never showed and the video never played. The card root is
+// resolved from the real markup now, and skipped rather than thrown on.
 document.addEventListener('DOMContentLoaded',function(){
   var canHover=window.matchMedia('(hover: hover)').matches;
   document.querySelectorAll('.card-media').forEach(function(m){
@@ -224,7 +236,11 @@ document.addEventListener('DOMContentLoaded',function(){
     var img=m.querySelector('.card-still');
     var video=m.querySelector('.card-video');
     var dots=m.querySelectorAll('.card-dots .dot');
+    var card=m.closest('.c-product-grid__item')||m.closest('.card')||m;
     var idx=0;
+    // Arrows are tap-targets too — that IS the mobile story (no hover on
+    // touch). They live inside the card <a>, so they must swallow the click
+    // or every tap navigates.
     m.querySelectorAll('.card-nav').forEach(function(btn){
       btn.addEventListener('click',function(e){
         e.preventDefault();e.stopPropagation();
@@ -235,7 +251,6 @@ document.addEventListener('DOMContentLoaded',function(){
       });
     });
     if(video&&canHover){
-      var card=m.closest('.card');
       card.addEventListener('mouseenter',function(){
         m.classList.add('playing');
         video.play().catch(function(){});
@@ -249,28 +264,68 @@ document.addEventListener('DOMContentLoaded',function(){
 });
 `;
 
-export function layout(title: string, body: string, extraScript = ''): string {
+export interface StoreChrome {
+  /** Pre-rendered site header markup (the ported theme's own header). */
+  header?: string;
+  footer?: string;
+  /** The ported theme stylesheet, so the chrome is styled like the rest of the site. */
+  cssUrl?: string;
+  /** Settings > Counter — how the ported header's icons behave. */
+  headerIcons?: HeaderCartConfig;
+}
+
+/**
+ * Store pages inside the SITE's chrome.
+ *
+ * The storefront used to render its own header ("Therum Store") and footer,
+ * so a shopper who clicked through from the homepage arrived at what looked
+ * like a different website — different logo, different nav, no way back into
+ * the content pages. The store is part of the site, not a neighbouring app.
+ *
+ * The storefront's own CSS and runtime still load: they carry the cart, the
+ * filters and the product-card behaviour, none of which the site chrome knows
+ * about. Only the frame is replaced.
+ */
+export function layout(title: string, body: string, extraScript = '', chrome?: StoreChrome): string {
+  const header = chrome?.header
+    ? `<div id="brx-header">${chrome.header}</div>`
+    : `<header class="site"><div class="wrap">
+  <a class="brand" href="/shop"><span class="dot"></span>Therum Store</a>
+  <nav class="main">
+    <a href="/shop">Shop</a>
+    <a class="cartlink" href="/cart">Cart <span id="cart-count" class="empty">0</span></a>
+  </nav>
+</div></header>`;
+  const footer = chrome?.footer
+    ? `<div id="brx-footer">${chrome.footer}</div>`
+    : `<footer class="site"><div class="wrap">Powered by Counter · Therum OS</div></footer>`;
+  const themeCss = chrome?.cssUrl ? `<link rel="stylesheet" href="${esc(chrome.cssUrl)}">` : '';
+  // Only the ported header carries the cart/search/wishlist hooks; the
+  // fallback chrome above has its own plain cart link and needs none of it.
+  const headerIcons = chrome?.header ? chrome.headerIcons ?? HEADER_CART_DEFAULTS : null;
+  return layoutInner(title, body, extraScript, header, footer, themeCss, headerIcons);
+}
+
+function layoutInner(title: string, body: string, extraScript: string, header: string, footer: string, themeCss: string, headerIcons: HeaderCartConfig | null = null): string {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title>
-<style>${CSS}</style>
+${themeCss}
+<style>${CSS}${BANNER_STYLES}${PRODUCT_GRID_FALLBACK_CSS}${CHECKOUT_FLOW_CSS}${SHOP_TOOLBAR_CSS}${WISHLIST_CSS}${ACCOUNT_CSS}${headerIcons ? HEADER_CART_CSS : ''}</style>
 </head>
 <body>
-<header class="site"><div class="wrap">
-  <a class="brand" href="/shop"><span class="dot"></span>Therum Store</a>
-  <nav class="main">
-    <a href="/shop">Shop</a>
-    <a class="cartlink" href="/cart">Cart <span id="cart-count" class="empty">0</span></a>
-  </nav>
-</div></header>
-<main><div class="wrap">
+<div id="th-shell">
+${header}
+<main${themeCss ? ' id="brx-content"' : ''}><div class="wrap">
 ${body}
 </div></main>
-<footer class="site"><div class="wrap">Powered by Counter · Therum OS</div></footer>
-<script>${RUNTIME}${extraScript}</script>
+${footer}
+</div>
+<script>${RUNTIME}${BANNER_RUNTIME}${WISHLIST_RUNTIME}${extraScript}</script>
+${headerIcons ? `<script>${headerCartRuntime(headerIcons)}</script>` : ''}
 </body>
 </html>`;
 }

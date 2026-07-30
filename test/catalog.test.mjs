@@ -116,7 +116,7 @@ test('shop cards show category names and product images', async () => {
   assert.match(res.body, /cattest Apparel/, 'card category line');
 });
 
-test('MEDIA: video entries accepted; cards emit hover-video + arrows; product page plays video', async () => {
+test('MEDIA: video entries accepted; each card style emits ONLY its own behaviour; product page plays video', async () => {
   // Give the tee a video + second still through the real API surface.
   const upd = await app.inject({ method: 'PATCH', url: `/api/products/${tee.id}`, headers: auth(), payload: {
     images: [
@@ -126,12 +126,28 @@ test('MEDIA: video entries accepted; cards emit hover-video + arrows; product pa
   } });
   assert.equal(upd.statusCode, 200, 'video gallery entry accepted by schema');
 
-  const shop = await app.inject({ method: 'GET', url: '/shop?category=cattest-apparel' });
-  assert.match(shop.body, /card-video/, 'card carries the hover video element');
-  assert.match(shop.body, /preload="none"/, 'video never downloads until hover');
-  assert.match(shop.body, /card-nav prev/, 'arrows present with multiple stills');
-  assert.match(shop.body, /card-dots/, 'dot indicators present');
-  assert.match(shop.headers['content-security-policy'], /media-src 'self' https:/, 'CSP allows hosted media');
+  // ONE behaviour per card, chosen in Settings > Counter — a hover video and
+  // hover arrows competing over the same image is what used to be emitted, and
+  // in practice neither worked. Each style is asserted on its own.
+  const { settingsService } = await import('../dist/services/settings.service.js');
+  const savedCounter = await settingsService.getCounter();
+
+  await settingsService.setCounter({ cardMedia: 'motion' });
+  const motion = await app.inject({ method: 'GET', url: '/shop?category=cattest-apparel' });
+  // Matched as an ELEMENT, not a bare class name — the injected stylesheet
+  // mentions .card-video too, so a loose match passes on any page.
+  assert.match(motion.body, /<video[^>]*card-video/, 'motion card carries the hover video element');
+  assert.match(motion.body, /preload="none"/, 'video never downloads until hover');
+  assert.doesNotMatch(motion.body, /<button[^>]*card-nav prev/, 'motion card does NOT also draw gallery arrows');
+  assert.match(motion.headers['content-security-policy'], /media-src 'self' https:/, 'CSP allows hosted media');
+
+  await settingsService.setCounter({ cardMedia: 'gallery' });
+  const gallery = await app.inject({ method: 'GET', url: '/shop?category=cattest-apparel' });
+  assert.match(gallery.body, /<button[^>]*card-nav prev/, 'arrows present with multiple stills');
+  assert.match(gallery.body, /card-dots/, 'dot indicators present');
+  assert.doesNotMatch(gallery.body, /<video[^>]*card-video/, 'gallery card does NOT also load a video');
+
+  await settingsService.setCounter(savedCounter);
 
   const pageRes = await app.inject({ method: 'GET', url: '/product/cattest-tee' });
   assert.match(pageRes.body, /play-badge/, 'video thumb badged in the strip');

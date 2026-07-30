@@ -168,7 +168,7 @@ export const contentService = {
     const item = await this.getBySlug(slug);
     const url = `${origin}/${item.slug}`;
     const { resolvedSeo, metaTags, jsonLd } = await this._resolveSeoFor(item, origin, url);
-    return { title: item.title, slug: item.slug, html: this._toHtml(item), seo: item.seo, resolvedSeo, metaTags, jsonLd, type: item.type, status: item.status, publishedAt: item.publishedAt };
+    return { title: item.title, slug: item.slug, html: this._toHtml(item), seo: item.seo, resolvedSeo, metaTags, jsonLd, type: item.type, status: item.status, publishedAt: item.publishedAt, meta: item.meta };
   },
 
   // Admin preview: same render, any status — lets an editor see a draft
@@ -177,6 +177,6 @@ export const contentService = {
     const item = await this.get(id);
     const url = `${origin}/${item.slug}`;
     const { resolvedSeo, metaTags, jsonLd } = await this._resolveSeoFor(item, origin, url);
-    return { title: item.title, slug: item.slug, html: this._toHtml(item), seo: item.seo, resolvedSeo, metaTags, jsonLd, type: item.type, status: item.status, publishedAt: item.publishedAt };
+    return { title: item.title, slug: item.slug, html: this._toHtml(item), seo: item.seo, resolvedSeo, metaTags, jsonLd, type: item.type, status: item.status, publishedAt: item.publishedAt, meta: item.meta };
   },
 };

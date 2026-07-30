@@ -87,4 +87,40 @@ export const twoFactorService = {
     const codes = Array.isArray(user.backupCodes) ? (user.backupCodes as unknown as BackupCode[]) : [];
     return { enabled: user.totpEnabled, unusedBackupCodes: codes.filter((c) => !c.usedAt).length };
   },
+
+  /**
+   * What switching enforcement on would actually do to this install.
+   *
+   * Shown BEFORE the toggle, not discovered after. The API-token count is the
+   * part that surprises people: a token issued by an account without 2FA
+   * stops working the moment enforcement is on, and an integration failing
+   * silently at 3am is a worse outcome than the toggle being one click slower.
+   */
+  async enforcementReadiness(): Promise<{
+    total: number;
+    enrolled: number;
+    withoutTwoFactor: { id: string; username: string; apiTokens: number }[];
+    affectedApiTokens: number;
+  }> {
+    const users = await db.adminUser.findMany({
+      select: {
+        id: true,
+        username: true,
+        totpEnabled: true,
+        // Revoked tokens cannot be used, so counting them would overstate
+        // the damage and make this warning easy to dismiss.
+        _count: { select: { apiTokens: { where: { revokedAt: null } } } },
+      },
+      orderBy: { username: 'asc' },
+    });
+    const without = users
+      .filter((u) => !u.totpEnabled)
+      .map((u) => ({ id: u.id, username: u.username, apiTokens: u._count.apiTokens }));
+    return {
+      total: users.length,
+      enrolled: users.filter((u) => u.totpEnabled).length,
+      withoutTwoFactor: without,
+      affectedApiTokens: without.reduce((n, u) => n + u.apiTokens, 0),
+    };
+  },
 };

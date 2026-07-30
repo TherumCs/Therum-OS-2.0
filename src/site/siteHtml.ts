@@ -1,3 +1,5 @@
+import { BANNER_RUNTIME, BANNER_STYLES } from './bannerRuntime.js';
+import { HEADER_CART_CSS, headerCartRuntime, HEADER_CART_DEFAULTS, type HeaderCartConfig } from './headerCart.js';
 // Base Theme — the default public frontend shell. Deliberately minimal
 // (Bam: "default theme so stuff is just popping up"; the full theme system
 // is on the future-buildout list). Same real-1.9.44 token values as the
@@ -26,6 +28,9 @@ nav.main{display:flex;gap:22px;font-size:14px;color:var(--tx2);align-items:cente
 nav.main a:hover{color:var(--tx)}
 nav.main a.current{color:var(--tx);font-weight:600}
 main{padding:48px 0 90px}
+/* Ported layouts manage their own top spacing — the Base Theme's 48px sat
+   under the nav as an unexplained white gap above the hero. */
+main#brx-content{padding-top:0}
 .page-title{font-size:32px;font-weight:700;letter-spacing:-0.02em;line-height:1.2;margin-bottom:10px;text-wrap:balance}
 .page-meta{color:var(--tx3);font-size:13px;margin-bottom:32px}
 .tagline{color:var(--tx2);font-size:16px;margin-bottom:36px}
@@ -56,6 +61,55 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 footer.site .wrap{max-width:1080px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}
 `;
 
+/**
+ * Shared layout for the PORTED DOCUMENT pages — FAQ, About, and the policy
+ * set (privacy, cookies, terms, returns, accessibility).
+ *
+ * These came from Elementor, which keeps each element's styling in a
+ * generated stylesheet keyed to that element's id. The port carried the ids
+ * and not the stylesheet, so the pages arrived structurally correct and
+ * completely unstyled — every heading pinned to the viewport edge.
+ *
+ * I tried porting the reference's computed styles element by element and it
+ * does not hold up: width in the reference comes from ancestors that the
+ * conversion flattened, so per-element widths either do nothing or shrink each
+ * heading to its own text. These pages are DOCUMENTS, though — a centred
+ * column with a type scale is what they actually are, and one stylesheet that
+ * says so beats seven brittle snapshots.
+ *
+ * A page that needs a real designed layout (contact) still carries its own
+ * meta.css, which is injected after this and wins.
+ */
+export const PORTED_DOC_CSS = `
+#brx-content .brxe-container,#brx-content .brxe-block,#brx-content .brxe-section{
+  width:100%;max-width:100%}
+/* The column. Everything in these pages lives inside it. */
+#brx-content > .brxe-container,#brx-content > .brxe-section,
+#brx-content > .brxe-block{
+  max-width:1180px;margin-left:auto;margin-right:auto;padding-left:40px;padding-right:40px}
+/* Nested containers must not re-pad — the column already has its gutters. */
+#brx-content .brxe-container .brxe-container{padding-left:0;padding-right:0}
+#brx-content h1,#brx-content h2,#brx-content h3,#brx-content h4{
+  line-height:1.1;margin:0 0 .4em;letter-spacing:-.01em}
+#brx-content h1{font-size:clamp(38px,5vw,64px)}
+#brx-content h2{font-size:clamp(24px,3vw,34px);margin-top:1.6em}
+#brx-content h3{font-size:clamp(18px,2vw,22px);margin-top:1.4em}
+#brx-content p,#brx-content li{font-size:16px;line-height:1.75;margin:0 0 1em}
+#brx-content ul,#brx-content ol{margin:0 0 1.2em 1.3em}
+/* Underline PROSE links only. A blanket rule underlined every accordion
+   title and swallowed the +/- toggles, which are links too. */
+#brx-content .brxe-text a,#brx-content p a,#brx-content li a{
+  text-decoration:underline;text-underline-offset:3px}
+#brx-content .brxe-text{max-width:78ch}
+/* The FAQ accordions: the theme ships the toggle, not the spacing. */
+#brx-content .brxe-accordion,#brx-content [class*="accordion"]{width:100%}
+#brx-content img{max-width:100%;height:auto}
+@media(max-width:767px){
+  #brx-content > .brxe-container,#brx-content > .brxe-section,
+  #brx-content > .brxe-block{padding-left:20px;padding-right:20px}
+}
+`;
+
 export interface NavItem {
   href: string;
   label: string;
@@ -78,6 +132,26 @@ export interface SitePage {
   dock?: { markup: string; styles: string; script: string };
   /** Settings > Performance, applied to the delivered HTML. */
   perf?: { lazyImages: boolean; minHtml: boolean; minCss: boolean };
+  /** False removes the "Powered by Therum OS" credit — see Settings > Security. */
+  showPlatformCredit?: boolean;
+  /**
+   * Settings > Counter. Only meaningful with ported chrome, which is what
+   * carries the header's cart/search/wishlist hooks.
+   */
+  headerIcons?: HeaderCartConfig;
+  /**
+   * Page-scoped CSS, from `content.meta.css`.
+   *
+   * The ported pages came from Elementor, which puts each element's styling in
+   * a generated stylesheet keyed to that element's id. The chrome stylesheet
+   * covers the header and footer; everything inside a page needs its own, or
+   * the markup arrives with the right ids and no rules to match them — which
+   * is exactly why the contact page rendered as unstyled stacked text.
+   *
+   * Injected AFTER the chrome stylesheet so a page can override it, and it is
+   * inert on any page that has none.
+   */
+  pageCss?: string;
 }
 
 export function sitePage(p: SitePage): string {
@@ -91,7 +165,7 @@ export function sitePage(p: SitePage): string {
 </div></header>`;
   const footer = p.chromeFooter
     ? `<div id="brx-footer">${p.chromeFooter}</div>`
-    : `<footer class="site"><div class="wrap"><span>© ${new Date().getFullYear()} ${esc(p.siteName)}</span><span>Powered by Therum OS</span></div></footer>`;
+    : `<footer class="site"><div class="wrap"><span>© ${new Date().getFullYear()} ${esc(p.siteName)}</span>${p.showPlatformCredit === false ? '' : '<span>Powered by Therum OS</span>'}</div></footer>`;
   const main = hasChrome ? `<main id="brx-content">${p.body}</main>` : `<main><div class="wrap">
 ${p.body}
 </div></main>`;
@@ -102,15 +176,20 @@ ${p.body}
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(p.title)}</title>
 ${p.headExtra ?? ''}
-<style>${CSS}</style>
+<style>${CSS}${BANNER_STYLES}${hasChrome ? HEADER_CART_CSS + PORTED_DOC_CSS : ''}</style>
 ${p.dock ? `<style>${p.dock.styles}</style>` : ''}
 ${p.chromeCssUrl ? `<link rel="stylesheet" href="${esc(p.chromeCssUrl)}">` : ''}
+${p.pageCss ? `<style>${p.pageCss}</style>` : ''}
 </head>
 <body class="home">
+<div id="th-shell">
 ${header}
 ${main}
 ${footer}
+</div>
 ${p.dock ? `${p.dock.markup}\n<script>${p.dock.script}</script>` : ''}
+<script>${BANNER_RUNTIME}</script>
+${hasChrome ? `<script>${headerCartRuntime(p.headerIcons ?? HEADER_CART_DEFAULTS)}</script>` : ''}
 </body>
 </html>`;
   return applyPerf(html, p.perf);

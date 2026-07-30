@@ -13,6 +13,14 @@ before(async () => {
   app = await buildServer();
   const { redis } = await import('../dist/lib/redis.js');
   await redis.del('ratelimit:cart-new:127.0.0.1');
+  // Fixtures are created IDEMPOTENTLY. These slugs are unique, and any run
+  // that dies before its cleanup leaves them behind — with plain create() the
+  // next run then fails on a collision it did not cause, which is a suite that
+  // breaks for whoever runs it next rather than for whoever broke it.
+  await db.order.deleteMany({ where: { items: { some: { variant: { is: { product: { slug: { startsWith: 'sftest-' } } } } } } } }).catch(() => {});
+  await db.product.deleteMany({ where: { slug: { startsWith: 'sftest-' } } }).catch(() => {});
+  await db.vendor.deleteMany({ where: { name: 'sftest Vendor' } }).catch(() => {});
+
   vendor = await db.vendor.create({ data: { name: 'sftest Vendor' } });
   product = await db.product.create({
     data: {
@@ -25,8 +33,20 @@ before(async () => {
 });
 
 after(async () => {
-  if (order?.orderId) {
-    await db.order.delete({ where: { id: order.orderId } }).catch(() => {});
+  // Delete by what the rows ACTUALLY reference, not by a variable that may
+  // never have been assigned. The old version skipped the order whenever
+  // `order.orderId` was unset — the order then held a foreign key to the test
+  // variant, the product delete failed, the fixtures survived, and the NEXT
+  // run died on a unique-slug collision it did not cause. A cleanup that only
+  // works on the happy path is how a suite starts failing for everyone.
+  const orders = await db.order.findMany({
+    where: { items: { some: { variant: { is: { product: { slug: { startsWith: 'sftest-' } } } } } } },
+    select: { id: true },
+  });
+  for (const o of orders) {
+    await db.refund.deleteMany({ where: { orderId: o.id } }).catch(() => {});
+    await db.orderItem.deleteMany({ where: { orderId: o.id } }).catch(() => {});
+    await db.order.delete({ where: { id: o.id } }).catch(() => {});
   }
   await db.product.deleteMany({ where: { slug: { startsWith: 'sftest-' } } });
   await db.vendor.deleteMany({ where: { name: 'sftest Vendor' } });
@@ -60,13 +80,25 @@ test('/product/:slug renders detail; draft and unknown slugs 404', async () => {
   assert.equal(ghost.statusCode, 404);
 });
 
-test('/cart and /checkout render shells (client-side hydrated)', async () => {
+test('/cart and /checkout are ONE flow, served at both URLs', async () => {
+  // They used to be two separate documents with their own roots. They are now
+  // the same shell in two modes, so both URLs must serve the identical
+  // container — the runtime decides which step opens.
   const cart = await app.inject({ method: 'GET', url: '/cart' });
   assert.equal(cart.statusCode, 200);
-  assert.match(cart.body, /cart-root/);
+  assert.match(cart.body, /id="co-flow"/);
+  assert.match(cart.body, /id="co-step-cart"/);
+  assert.match(cart.body, /id="co-step-pay"/);
+
   const co = await app.inject({ method: 'GET', url: '/checkout' });
   assert.equal(co.statusCode, 200);
-  assert.match(co.body, /co-root/);
+  assert.match(co.body, /id="co-flow"/);
+
+  // The summary is server-rendered, not injected later: the total must be on
+  // screen the moment the page paints, not after a round trip.
+  assert.match(cart.body, /id="co-total"/);
+  // And the mobile action bar ships with it.
+  assert.match(cart.body, /id="co-cta"/);
 });
 
 test('/order-received/ authenticates by access token; wrong/missing token 404s', async () => {

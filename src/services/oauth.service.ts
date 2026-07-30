@@ -25,6 +25,34 @@ const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
   gmail: { ...GOOGLE_AUTH, scope: 'https://www.googleapis.com/auth/gmail.readonly' },
   'google-calendar': { ...GOOGLE_AUTH, scope: 'https://www.googleapis.com/auth/calendar.readonly' },
   'google-sheets': { ...GOOGLE_AUTH, scope: 'https://www.googleapis.com/auth/spreadsheets.readonly' },
+
+  // ── Authorize-by-web, as an ALTERNATIVE to pasting keys ──────────────────
+  //
+  // These providers are `authType: 'apikey'` in the catalog and stay that way:
+  // OAuth is offered ALONGSIDE the key fields, not instead of them. Both paths
+  // end in the same vault entry, so nothing downstream has to care which was
+  // used — and a merchant who already has a key is not forced through a
+  // consent screen to keep it working.
+  //
+  // Only providers whose OAuth works for a SELF-HOSTED store are here.
+  // Shopify and Zendesk are deliberately absent: their authorize URLs are
+  // per-shop/per-subdomain (`{shop}.myshopify.com`, `{subdomain}.zendesk.com`)
+  // and cannot be a fixed endpoint.
+  square: { authorizeUrl: 'https://connect.squareup.com/oauth2/authorize', tokenUrl: 'https://connect.squareup.com/oauth2/token', scope: 'MERCHANT_PROFILE_READ PAYMENTS_WRITE ORDERS_WRITE ITEMS_READ', tokenField: 'access_token' },
+  stripe: { authorizeUrl: 'https://connect.stripe.com/oauth/authorize', tokenUrl: 'https://connect.stripe.com/oauth/token', scope: 'read_write', tokenField: 'access_token' },
+  printful: { authorizeUrl: 'https://www.printful.com/oauth/authorize', tokenUrl: 'https://api.printful.com/oauth/token', scope: 'orders/read orders/write products/read', tokenField: 'access_token' },
+  etsy: { authorizeUrl: 'https://www.etsy.com/oauth/connect', tokenUrl: 'https://api.etsy.com/v3/public/oauth/token', scope: 'listings_r transactions_r', tokenField: 'access_token' },
+  mailchimp: { authorizeUrl: 'https://login.mailchimp.com/oauth2/authorize', tokenUrl: 'https://login.mailchimp.com/oauth2/token', scope: '', tokenField: 'access_token' },
+  hubspot: { authorizeUrl: 'https://app.hubspot.com/oauth/authorize', tokenUrl: 'https://api.hubapi.com/oauth/v1/token', scope: 'crm.objects.contacts.read', tokenField: 'access_token' },
+  zoom: { authorizeUrl: 'https://zoom.us/oauth/authorize', tokenUrl: 'https://zoom.us/oauth/token', scope: '', tokenField: 'access_token' },
+  intercom: { authorizeUrl: 'https://app.intercom.com/oauth', tokenUrl: 'https://api.intercom.io/auth/eagle/token', scope: '', tokenField: 'access_token' },
+  calendly: { authorizeUrl: 'https://auth.calendly.com/oauth/authorize', tokenUrl: 'https://auth.calendly.com/oauth/token', scope: 'default', tokenField: 'access_token' },
+  dropbox: { authorizeUrl: 'https://www.dropbox.com/oauth2/authorize', tokenUrl: 'https://api.dropboxapi.com/oauth2/token', scope: 'files.metadata.read', tokenField: 'access_token' },
+  notion: { authorizeUrl: 'https://api.notion.com/v1/oauth/authorize', tokenUrl: 'https://api.notion.com/v1/oauth/token', scope: '', tokenField: 'access_token' },
+  airtable: { authorizeUrl: 'https://airtable.com/oauth2/v1/authorize', tokenUrl: 'https://airtable.com/oauth2/v1/token', scope: 'data.records:read schema.bases:read', tokenField: 'access_token' },
+  asana: { authorizeUrl: 'https://app.asana.com/-/oauth_authorize', tokenUrl: 'https://app.asana.com/-/oauth_token', scope: 'default', tokenField: 'access_token' },
+  linear: { authorizeUrl: 'https://linear.app/oauth/authorize', tokenUrl: 'https://api.linear.app/oauth/token', scope: 'read', tokenField: 'access_token' },
+  figma: { authorizeUrl: 'https://www.figma.com/oauth', tokenUrl: 'https://api.figma.com/v1/oauth/token', scope: 'file_read', tokenField: 'access_token' },
 };
 
 const GOOGLE_FAMILY = new Set(['google-drive', 'gmail', 'google-calendar', 'google-sheets']);
@@ -74,10 +102,43 @@ export const oauthService = {
     return provider in OAUTH_PROVIDERS;
   },
 
+  /**
+   * Platform-shipped OAuth apps.
+   *
+   * The point of "Authorize with X" is that the merchant clicks once and lands
+   * on the provider's own consent screen — the way signing in to Claude works.
+   * Making them first register a developer app and paste a client id and
+   * secret defeats that entirely: it is strictly more work than pasting an API
+   * key, which is what the button was meant to replace.
+   *
+   * So the app credentials belong to THIS PLATFORM, supplied once via the
+   * OAUTH_APPS environment variable, and every install inherits them. A
+   * per-install app registered in the panel still wins if one exists, which is
+   * what a self-hoster with their own developer account wants.
+   *
+   * Shape: {"square":{"clientId":"…","clientSecret":"…"}, …}
+   */
+  platformApp(provider: string): { clientId: string; clientSecret: string } | null {
+    if (!env.OAUTH_APPS) return null;
+    try {
+      const parsed = JSON.parse(env.OAUTH_APPS) as Record<string, { clientId?: string; clientSecret?: string }>;
+      const app = parsed[provider];
+      if (app?.clientId && app?.clientSecret) return { clientId: app.clientId, clientSecret: app.clientSecret };
+    } catch {
+      // A malformed env var must not take the whole connections page down —
+      // it degrades to "no platform app", which the UI already handles.
+    }
+    return null;
+  },
+
   async getApp(provider: string): Promise<{ clientId: string; clientSecret: string } | null> {
     for (const candidate of await googleAppFallback(provider)) {
       const row = await db.oAuthAppCredential.findUnique({ where: { provider: candidate } });
       if (row) return { clientId: row.clientId, clientSecret: decryptSecret(row.clientSecretEncrypted) };
+    }
+    {
+      const shipped = this.platformApp(provider);
+      if (shipped) return shipped;
     }
     return null;
   },

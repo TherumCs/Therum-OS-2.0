@@ -29,8 +29,14 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: 'permissions', label: 'Permissions', description: 'Role capabilities.', icon: 'users' },
   { id: 'performance', label: 'Performance', description: 'Cache, lazy load, defer JS.', icon: 'gauge' },
   { id: 'editor-defaults', label: 'Editor Defaults', description: 'Content builder preferences.', icon: 'edit2' },
+  // Counter's own settings (Customization) and Payments both live under the
+  // Counter section in the sidebar, not here — they are about running the
+  // STORE, and a merchant changing a product card should not have to go
+  // looking under the same roof as SMTP and backups. /settings/counter and
+  // /settings/payments still resolve; they redirect to the new homes.
   { id: 'uploads', label: 'Uploads', description: 'File types, max size, processing.', icon: 'media' },
   { id: 'redirects', label: 'Redirects', description: '301/302 redirects + 404 monitor.', icon: 'externalLink' },
+  { id: 'maintenance', label: 'Maintenance', description: 'Maintenance + coming soon holding page.', icon: 'shield' },
   { id: 'notifications', label: 'Notifications', description: 'Email, Slack, webhooks.', icon: 'bell' },
   { id: 'activity', label: 'Activity', description: 'Audit trail of changes.', icon: 'clock' },
   { id: 'updates', label: 'Updates', description: 'Versions and update behaviour.', icon: 'import' },

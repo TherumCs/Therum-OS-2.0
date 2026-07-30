@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { cartService } from '../../services/cart.service.js';
 import { requireCapability } from '../../middleware/capability.js';
 import { checkRateLimit } from '../../lib/rateLimit.js';
+import { resolveCustomer } from '../../counter/customerSession.js';
 import { TooManyRequestsError } from '../../lib/errors.js';
 
 const TOKEN = z.string().length(32);
@@ -51,11 +52,18 @@ export async function cartRoutes(app: FastifyInstance): Promise<void> {
       const rl = await checkRateLimit(`cart-new:${req.ip}`, 30, 3600);
       if (!rl.allowed) throw new TooManyRequestsError('Too many new carts from this address — slow down.', rl.retryAfterSeconds);
     }
-    reply.status(input.cartToken ? 200 : 201).send(await cartService.addItem(input.cartToken ?? null, input.variantId, input.quantity));
+    const customer = await resolveCustomer(req);
+    reply.status(input.cartToken ? 200 : 201).send(
+      await cartService.addItem(input.cartToken ?? null, input.variantId, input.quantity, customer?.id ?? null),
+    );
   });
 
   app.get('/cart', async (req, reply) => {
-    reply.send(await cartService.get(headerToken(req)));
+    // Reading the cart is also where a shopper who just signed in gets their
+    // member pricing — the session is resolved on every read, not only on the
+    // routes that mutate.
+    const customer = await resolveCustomer(req);
+    reply.send(await cartService.get(headerToken(req), customer?.id ?? null));
   });
 
   app.patch('/cart/items/:variantId', async (req, reply) => {
@@ -80,7 +88,10 @@ export async function cartRoutes(app: FastifyInstance): Promise<void> {
     // only validity probe, so an unbounded one is a code-enumeration oracle.
     const rl = await checkRateLimit(`cart-coupon:${req.ip}`, 20, 600);
     if (!rl.allowed) throw new TooManyRequestsError('Too many coupon attempts — slow down.', rl.retryAfterSeconds);
-    reply.send(await cartService.applyCoupon(cartToken, code));
+    // A group-restricted code needs to know who is asking, and that has to be
+    // the SESSION — see coupon.service.ts validate().
+    const customer = await resolveCustomer(req);
+    reply.send(await cartService.applyCoupon(cartToken, code, customer?.id ?? null));
   });
 
   app.delete('/cart/coupon', async (req, reply) => {
@@ -92,6 +103,11 @@ export async function cartRoutes(app: FastifyInstance): Promise<void> {
   // receipt. Double-submit safe: the cart token is the order idempotency key.
   app.post('/cart/checkout', async (req, reply) => {
     const input = CheckoutInput.parse(req.body);
-    reply.status(201).send(await cartService.checkout(input.cartToken, input.email));
+    // A signed-in shopper's order belongs to their account, so it shows up in
+    // their order history and earns any membership pricing. Resolved from the
+    // SESSION, never from input.email — see cartService.checkout. Optional:
+    // guest checkout stays exactly as it was.
+    const customer = await resolveCustomer(req);
+    reply.status(201).send(await cartService.checkout(input.cartToken, input.email, customer?.id));
   });
 }

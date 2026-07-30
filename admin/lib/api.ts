@@ -3,7 +3,18 @@ import { cookies, headers } from 'next/headers';
 import { COOKIE_NAME } from './session';
 
 const API = process.env.API_URL ?? 'http://localhost:4100';
-const SECRET = process.env.JWT_SECRET ?? 'dev-only-change-me-0000000000000000000000000000000000000000000000000000';
+// NO fallback value. This previously defaulted to the shipped dev placeholder,
+// which meant a deployment that simply forgot JWT_SECRET would mint admin
+// tokens signed with a secret published in this repository — and would do it
+// silently, looking completely healthy. Failing here is the only safe
+// behaviour; lib/session.ts already refuses for the same reason.
+function signingSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    throw new Error('JWT_SECRET must be set — see admin/.env.example (it must match the backend).');
+  }
+  return secret;
+}
 
 // Synthetic fallback token for the rare context with no real session (build
 // time, or a route outside the auth gate) — its `sub` is not a real AdminUser
@@ -13,7 +24,7 @@ function mintFallbackToken(): string {
   const b64 = (o: object): string => Buffer.from(JSON.stringify(o)).toString('base64url');
   const now = Math.floor(Date.now() / 1000);
   const data = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: 'admin-ui', role: 'admin', iat: now, exp: now + 3600 })}`;
-  return `${data}.${createHmac('sha256', SECRET).update(data).digest('base64url')}`;
+  return `${data}.${createHmac('sha256', signingSecret()).update(data).digest('base64url')}`;
 }
 
 // Forward the real logged-in admin's own session token (same JWT the backend

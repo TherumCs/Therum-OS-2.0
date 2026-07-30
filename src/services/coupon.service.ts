@@ -32,9 +32,10 @@ function discountAmount(type: 'percent' | 'fixed', amount: number, subtotal: num
 }
 
 async function validate(
-  coupon: { id: string; status: string; startsAt: Date | null; expiresAt: Date | null; usageLimit: number | null; usageCount: number; usageLimitPerUser: number | null; minimumAmount: number | null; maximumAmount: number | null },
+  coupon: { id: string; status: string; startsAt: Date | null; expiresAt: Date | null; usageLimit: number | null; usageCount: number; usageLimitPerUser: number | null; minimumAmount: number | null; maximumAmount: number | null; milieuId: string | null },
   subtotal: number,
   email: string | null,
+  customerId: string | null = null,
 ): Promise<void> {
   const now = new Date();
   if (coupon.status !== 'active') throw new ValidationError('Coupon is not active.', 'code');
@@ -52,12 +53,35 @@ async function validate(
   if (coupon.maximumAmount !== null && subtotal > coupon.maximumAmount) {
     throw new ValidationError('Cart exceeds this coupon’s maximum — not applicable.', 'code');
   }
+  // Group-restricted code. Checked against a VERIFIED customer session, never
+  // the typed checkout email — audit H-1 exists precisely because an
+  // unverified email must not unlock another account's benefits, and a
+  // members-only discount you can claim by typing a member's address is that
+  // hole with a discount attached.
+  if (coupon.milieuId) {
+    if (!customerId) {
+      throw new ValidationError('Sign in to use this code — it is for members only.', 'code');
+    }
+    const member = await db.milieuMembership.findFirst({
+      where: {
+        customerId,
+        milieuId: coupon.milieuId,
+        pendingAt: null, // awaiting approval = not a member yet
+        OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      },
+      select: { id: true },
+    });
+    if (!member) throw new ValidationError('This code is for members of a group you are not in.', 'code');
+  }
 }
 
 export const couponService = {
   // ── admin CRUD ──
   async list() {
-    return db.coupon.findMany({ orderBy: { createdAt: 'desc' }, include: { _count: { select: { redemptions: true } } } });
+    return db.coupon.findMany({
+      orderBy: { createdAt: 'desc' },
+      include: { _count: { select: { redemptions: true } }, milieu: { select: { id: true, name: true } } },
+    });
   },
 
   async create(input: CreateCouponInput) {
@@ -92,12 +116,16 @@ export const couponService = {
   // the code doesn't exist or exists-but-unusable (audit F7 — a 404-vs-422
   // split is a code-enumeration + config-leak oracle). Codes are normalized
   // to uppercase so 'save10' and 'SAVE10' are the same coupon (audit F8).
-  async quote(code: string, subtotal: number, email: string | null): Promise<CouponQuote> {
+  async quote(code: string, subtotal: number, email: string | null, customerId: string | null = null): Promise<CouponQuote> {
     const coupon = await db.coupon.findUnique({ where: { code: normalizeCode(code) } });
     if (!coupon) throw new ValidationError('That coupon code is not valid.', 'code');
     try {
-      await validate(coupon, subtotal, email);
+      await validate(coupon, subtotal, email, customerId);
     } catch {
+      // Flattened on purpose (audit F7): a distinct "members only" message
+      // would confirm the code EXISTS, which is the enumeration oracle this
+      // uniform error was added to close. validate()'s specific messages stay
+      // for any caller that is already past that check.
       throw new ValidationError('That coupon code is not valid.', 'code');
     }
     const amount = discountAmount(coupon.type, coupon.amount, subtotal);
@@ -106,9 +134,9 @@ export const couponService = {
 
   // Soft quote (recalc path): returns null instead of throwing when the
   // stored coupon has gone invalid (1.x silently drops it on recalc).
-  async quoteOrNull(code: string, subtotal: number, email: string | null): Promise<CouponQuote | null> {
+  async quoteOrNull(code: string, subtotal: number, email: string | null, customerId: string | null = null): Promise<CouponQuote | null> {
     try {
-      return await this.quote(code, subtotal, email);
+      return await this.quote(code, subtotal, email, customerId);
     } catch {
       return null;
     }

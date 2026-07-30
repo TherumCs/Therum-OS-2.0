@@ -1,3 +1,4 @@
+import { CURRENCY_CODES } from '../counter/currency.js';
 import { z } from 'zod';
 import { sortFields } from './listing.js';
 
@@ -11,7 +12,10 @@ export const CreateOrderInput = z.object({
   // Two-decimal currencies only for now — zero-decimal (JPY/KRW/…) needs
   // explicit minor-unit normalization at each gateway before it's allowed
   // in (audit M-4). Expand deliberately, not by accepting any 3 letters.
-  currency: z.enum(['USD', 'EUR', 'GBP', 'CAD', 'AUD']).default('USD'),
+  // Derived from the currency catalog rather than a second hand-maintained
+  // list — the two had already drifted (the catalog supports 18, this allowed
+  // 5), so a store set to JPY could not create an order in its own currency.
+  currency: z.enum(CURRENCY_CODES).default('USD'),
   // Optional client-supplied idempotency key — re-POST with the same key
   // returns the original order instead of creating a duplicate.
   idempotencyKey: z.string().max(200).optional(),

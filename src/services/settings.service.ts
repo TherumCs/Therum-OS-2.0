@@ -1,3 +1,5 @@
+import { isSupported } from '../counter/currency.js';
+import { ValidationError } from '../lib/errors.js';
 import { Prisma } from '@prisma/client';
 import { db } from '../lib/db.js';
 import type {
@@ -9,6 +11,12 @@ import type {
   UploadsInput,
   NotificationsInput,
   BackupSettingsInput,
+  CommerceSettingsInput,
+  CounterSettingsInput,
+  PaymentsSettingsInput,
+  StealthSettingsInput,
+  SecuritySettingsInput,
+  MaintenanceSettingsInput,
   SeoDefaultsInput,
   OnboardingInput,
 } from '../schemas/settings.schema.js';
@@ -253,6 +261,188 @@ export interface Uploads {
   allowArchives: boolean;
   allowCode: boolean;
 }
+export interface Commerce {
+  currency: string;
+  locale: string | null;
+  /** Minimum margin over cost that any discount must leave. 0 = no floor. */
+  minMarginPct: number;
+}
+
+/** Counter's own storefront presentation — see CounterSettingsInput. */
+export interface CounterSettings {
+  cartStyle: 'mini' | 'sidebar';
+  cartSidebarReveal: 'overlay' | 'push';
+  cartSidebarGround: string;
+  cardShell: 'bare' | 'boxed' | 'elevated';
+  cardMedia: 'still' | 'fade' | 'gallery' | 'motion';
+  cardMediaSecondary: 'still' | 'fade' | 'gallery' | 'motion';
+  cardPreset: 'editorial' | 'retail' | 'detailed' | 'sneaker' | 'data';
+  cardAction: 'none' | 'below' | 'overlay' | 'dual' | 'icons';
+  cardEvolve: boolean;
+  cardAlign: 'start' | 'center' | 'end';
+  cardRadius: 'sharp' | 'soft' | 'round' | 'pill' | 'squircle';
+  cardRatio: 'square' | 'portrait' | 'tall' | 'landscape' | 'natural';
+  cardFit: 'cover' | 'contain';
+  cardShadow: 'none' | 'soft' | 'strong';
+  cardHover: 'none' | 'lift' | 'zoom' | 'both';
+  cardGap: 'tight' | 'normal' | 'roomy';
+  cardReveal: 'none' | 'fade' | 'rise' | 'stagger';
+  cardSubtitle: boolean;
+  cardBadges: boolean;
+  memberPricing: 'off' | 'net' | 'was-now';
+  memberPriceLabel: string;
+  contactTopics: { id: string; label: string; email: string; fields: string[]; blurb?: string }[];
+  toolbarEnabled: boolean;
+  toolbarStyle: 'bar' | 'minimal';
+  toolbarSearch: boolean;
+  toolbarFilters: boolean;
+  toolbarSort: boolean;
+  toolbarView: boolean;
+  toolbarCount: boolean;
+  toolbarColumns: number;
+  toolbarPageSize: number;
+  toolbarSearchPlaceholder: string;
+  toolbarFilterFields: ('category' | 'tags' | 'color' | 'size' | 'brand' | 'price' | 'availability')[];
+  toolbarSorts: ('new' | 'oldest' | 'name' | 'name-desc' | 'price-asc' | 'price-desc' | 'best-selling')[];
+  toolbarDefaultSort: 'new' | 'oldest' | 'name' | 'name-desc' | 'price-asc' | 'price-desc' | 'best-selling';
+  searchStyle: 'takeover' | 'inline' | 'immersive';
+  wishlistEnabled: boolean;
+  wishlistOnCards: boolean;
+}
+export interface Payments {
+  stripePublishableKey: string;
+  squareApplicationId: string;
+  environment: 'live' | 'sandbox';
+  appleDomainAssociation: string;
+}
+export interface Stealth {
+  hidePlatformCredit: boolean;
+  hideVersion: boolean;
+  adminKnock: string;
+}
+const STEALTH_KEY = 'stealth';
+const SECURITY_KEY = 'security';
+const MAINTENANCE_KEY = 'maintenance';
+const STEALTH_DEFAULTS: Stealth = { hidePlatformCredit: false, hideVersion: false, adminKnock: '' };
+
+export interface Security {
+  requireTwoFactor: boolean;
+}
+// Off by default. Turning it on is a deliberate act with a real consequence
+// for every existing account, so it must never arrive by upgrade.
+const SECURITY_DEFAULTS: Security = { requireTwoFactor: false };
+
+export interface Maintenance {
+  mode: 'off' | 'maintenance' | 'coming-soon';
+  heading: string;
+  message: string;
+  buttonLabel: string;
+  buttonHref: string;
+  backgroundImage: string;
+  retryAfterMinutes: number;
+}
+const MAINTENANCE_DEFAULTS: Maintenance = {
+  mode: 'off',
+  heading: 'We will be back shortly',
+  message: 'The site is down for scheduled maintenance. Thanks for your patience.',
+  buttonLabel: '',
+  buttonHref: '',
+  backgroundImage: '',
+  retryAfterMinutes: 60,
+};
+// Consulted on EVERY public request, so it is cached like the security flag —
+// an uncached settings read here is one extra query per page view forever.
+let maintenanceCache: { value: Maintenance; at: number } | null = null;
+
+let securityCache: { value: Security; at: number } | null = null;
+const SECURITY_CACHE_MS = 15_000;
+
+const PAYMENTS_KEY = 'payments';
+const PAYMENTS_DEFAULTS: Payments = {
+  stripePublishableKey: '',
+  squareApplicationId: '',
+  environment: 'live',
+  appleDomainAssociation: '',
+};
+
+const COMMERCE_KEY = 'commerce';
+// Off by default: a store that has not recorded costs would otherwise have
+// every discount silently clamped by a number it never set.
+const COMMERCE_DEFAULTS: Commerce = { currency: 'USD', locale: null, minMarginPct: 0 };
+
+const COUNTER_KEY = 'counter';
+const COUNTER_DEFAULTS: CounterSettings = {
+  // Sidebar + push: the ported header already ships `c-header__cart--sidebar`
+  // and a `js-cart-sidebar-open` hook, so that is the presentation this site's
+  // markup was built for, and push is what Bam asked the drawer to do.
+  cartStyle: 'sidebar',
+  cartSidebarReveal: 'push',
+  cartSidebarGround: '#0a0a0a',
+  // Bare + editorial: the reference Bam led with, and the one that cannot look
+  // wrong on a store whose products have no ratings, sizes or was-prices yet.
+  cardShell: 'bare',
+  cardPreset: 'editorial',
+  // 'fade' rather than 'gallery' or 'motion': it is the one behaviour that
+  // cannot fail — every product has a second image far more often than it has
+  // a video, and a cross-fade has nothing to click.
+  cardMedia: 'fade',
+  // Still, because it is the one behaviour EVERY product can support — a
+  // fallback that can itself fall back is not a fallback.
+  cardMediaSecondary: 'still',
+  // Not 'overlay'. A button floating on the product covers the thing the
+  // shopper is looking at, and it was the first thing Bam called out.
+  cardAction: 'none',
+  // On by default the moment a card HAS an add-to-cart: sending someone to a
+  // product page to pick a size they could have picked here is the friction
+  // the whole card was built to remove.
+  cardEvolve: true,
+  cardAlign: 'start',
+  cardRadius: 'sharp',
+  cardRatio: 'square',
+  cardFit: 'cover',
+  cardShadow: 'soft',
+  cardHover: 'none',
+  cardGap: 'normal',
+  cardReveal: 'none',
+  cardSubtitle: true,
+  cardBadges: true,
+  memberPricing: 'net',
+  memberPriceLabel: 'Your price',
+  // Real routing, from the mailbox list Bam supplied.
+  //
+  // General / My order / Returns map to purpose-built inboxes. Modelling,
+  // Press, Partnerships and Careers have NO matching address on that list, so
+  // they land on info@ — the general-inquiries box — rather than being pointed
+  // at a named person's inbox (bam@, bryant@, mira@) on my own judgement, or
+  // at an alias that does not exist yet. Give each one its own address and
+  // this is a settings change.
+  contactTopics: [
+    { id: 'general', label: 'General', email: 'info@sidemoney.co', fields: [], blurb: 'Anything that does not fit the others.' },
+    { id: 'order', label: 'My order', email: 'orders@sidemoney.co', fields: ['order'], blurb: 'Where it is, changing it, something wrong with it.' },
+    { id: 'returns', label: 'Returns', email: 'support@sidemoney.co', fields: ['order'], blurb: 'Sending something back or exchanging it.' },
+    { id: 'modelling', label: 'Modelling', email: 'info@sidemoney.co', fields: ['instagram', 'portfolio'], blurb: 'Casting and test shoots.' },
+    { id: 'press', label: 'Press', email: 'info@sidemoney.co', fields: ['company'], blurb: 'Interviews, samples, features.' },
+    { id: 'partnerships', label: 'Partnerships', email: 'info@sidemoney.co', fields: ['company', 'budget'], blurb: 'Collaborations, wholesale, brand work.' },
+    { id: 'careers', label: 'Careers', email: 'info@sidemoney.co', fields: ['portfolio', 'instagram'], blurb: 'Applying for something on the careers page.' },
+  ],
+  toolbarEnabled: true,
+  toolbarStyle: 'bar',
+  toolbarSearch: true,
+  toolbarFilters: true,
+  toolbarSort: true,
+  toolbarView: true,
+  toolbarCount: true,
+  toolbarColumns: 4,
+  toolbarPageSize: 24,
+  toolbarSearchPlaceholder: '',
+  toolbarFilterFields: ['category', 'tags', 'color', 'size'],
+  toolbarSorts: ['new', 'name', 'price-asc', 'price-desc'],
+  toolbarDefaultSort: 'new',
+  searchStyle: 'takeover',
+  wishlistEnabled: true,
+  wishlistOnCards: true,
+};
+
 const UPLOADS_KEY = 'uploads';
 const UPLOADS_DEFAULTS: Uploads = {
   autoRename: false,
@@ -363,9 +553,10 @@ export interface SiteSettings {
   chromeHeaderSlug: string | null;
   chromeFooterSlug: string | null;
   chromeCssUrl: string | null;
+  showPageTitles: boolean;
 }
 const SITE_KEY = 'site';
-const SITE_DEFAULTS: SiteSettings = { siteName: 'Therum Site', tagline: '', homepageSlug: null, menu: null, chromeHeaderSlug: null, chromeFooterSlug: null, chromeCssUrl: null };
+const SITE_DEFAULTS: SiteSettings = { siteName: 'Therum Site', tagline: '', homepageSlug: null, menu: null, chromeHeaderSlug: null, chromeFooterSlug: null, chromeCssUrl: null, showPageTitles: true };
 
 export const settingsService = {
   // Site identity + Base Theme wiring (public frontend, C-site).
@@ -422,6 +613,103 @@ export const settingsService = {
   async setEditorDefaults(input: EditorDefaultsInput): Promise<EditorDefaults> {
     const next = { ...(await this.getEditorDefaults()), ...input };
     await write(EDITOR_KEY, next);
+    return next;
+  },
+
+  // ─── Counter: store currency ─────────────────────────────────────────────
+  async getCommerce(): Promise<Commerce> {
+    return read(COMMERCE_KEY, COMMERCE_DEFAULTS);
+  },
+  async setCommerce(input: CommerceSettingsInput): Promise<Commerce> {
+    // Reject an unsupported code here rather than at checkout — a store whose
+    // currency setting is nonsense should fail while someone is looking at it.
+    if (input.currency && !isSupported(input.currency)) {
+      throw new ValidationError(`${input.currency} is not a currency this store supports.`, 'currency');
+    }
+    const next = { ...(await this.getCommerce()), ...input };
+    if (next.currency) next.currency = next.currency.toUpperCase();
+    await write(COMMERCE_KEY, next);
+    return next;
+  },
+
+  // ─── Counter: storefront presentation ────────────────────────────────────
+  async getCounter(): Promise<CounterSettings> {
+    const stored = await read(COUNTER_KEY, COUNTER_DEFAULTS);
+    // 'evolve' used to be a cardAction of its own. It is a MODIFIER now — any
+    // add-to-cart can flip into a picker — so a stored 'evolve' maps to the
+    // two-button card it actually was, with the modifier on. Read-time rather
+    // than a migration: settings are one JSON blob, so the alternative is a
+    // one-off script that has to be remembered for every install.
+    const action = stored.cardAction as string;
+    if (action === 'evolve') {
+      return { ...stored, cardAction: 'dual', cardEvolve: true };
+    }
+    return stored;
+  },
+  async setCounter(input: CounterSettingsInput): Promise<CounterSettings> {
+    const next = { ...(await this.getCounter()), ...input };
+    await write(COUNTER_KEY, next);
+    return next;
+  },
+
+  async getStealth(): Promise<Stealth> {
+    return read(STEALTH_KEY, STEALTH_DEFAULTS);
+  },
+  async setStealth(input: StealthSettingsInput): Promise<Stealth> {
+    const next = { ...(await this.getStealth()), ...input };
+    await write(STEALTH_KEY, next);
+    return next;
+  },
+
+  async getMaintenance(): Promise<Maintenance> {
+    return read(MAINTENANCE_KEY, MAINTENANCE_DEFAULTS);
+  },
+  async getMaintenanceCached(): Promise<Maintenance> {
+    if (maintenanceCache && Date.now() - maintenanceCache.at < SECURITY_CACHE_MS) return maintenanceCache.value;
+    const value = await read(MAINTENANCE_KEY, MAINTENANCE_DEFAULTS);
+    maintenanceCache = { value, at: Date.now() };
+    return value;
+  },
+  async setMaintenance(input: MaintenanceSettingsInput): Promise<Maintenance> {
+    const next = { ...(await this.getMaintenance()), ...input };
+    await write(MAINTENANCE_KEY, next);
+    // Cleared on write so switching the site back ON is instant. Waiting out a
+    // TTL while the site shows a maintenance page is the exact moment nobody
+    // has patience for.
+    maintenanceCache = null;
+    return next;
+  },
+
+  async getSecurity(): Promise<Security> {
+    return read(SECURITY_KEY, SECURITY_DEFAULTS);
+  },
+  /**
+   * Cached read for the auth middleware, which consults this on EVERY
+   * authenticated request — an uncached settings row there is one extra query
+   * per request forever, for a value that changes perhaps twice in an
+   * install's life. The cache is cleared on write, so a deliberate change
+   * still takes effect on the very next request; the TTL only bounds staleness
+   * if another process does the writing.
+   */
+  async getSecurityCached(): Promise<Security> {
+    if (securityCache && Date.now() - securityCache.at < SECURITY_CACHE_MS) return securityCache.value;
+    const value = await read(SECURITY_KEY, SECURITY_DEFAULTS);
+    securityCache = { value, at: Date.now() };
+    return value;
+  },
+  async setSecurity(input: SecuritySettingsInput): Promise<Security> {
+    const next = { ...(await this.getSecurity()), ...input };
+    await write(SECURITY_KEY, next);
+    securityCache = null;
+    return next;
+  },
+
+  async getPayments(): Promise<Payments> {
+    return read(PAYMENTS_KEY, PAYMENTS_DEFAULTS);
+  },
+  async setPayments(input: PaymentsSettingsInput): Promise<Payments> {
+    const next = { ...(await this.getPayments()), ...input };
+    await write(PAYMENTS_KEY, next);
     return next;
   },
 

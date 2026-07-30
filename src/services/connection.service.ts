@@ -1,7 +1,8 @@
 import { db } from '../lib/db.js';
 import { NotFoundError, ConflictError } from '../lib/errors.js';
 import { encryptSecret, decryptSecret, maskSecret } from '../lib/crypto.js';
-import { nexusCatalog, findProvider } from '../lib/nexusCatalog.js';
+import { nexusCatalog, findProvider, type CatalogProvider } from '../lib/nexusCatalog.js';
+import { oauthService } from './oauth.service.js';
 import { verifyGithubSignature, verifyStripeSignature, verifySlackSignature } from '../lib/webhookSignatures.js';
 
 // The only providers with a real, wired signature scheme (see
@@ -39,6 +40,18 @@ function basicAuthHeader(user: string, pass: string): string {
 
 // "FIRST:SECOND" — see CatalogProvider.credentialHint for which providers
 // need this instead of a plain single value.
+/**
+ * First field of a pipe-joined credential.
+ *
+ * Providers whose catalog entry declares `fields` with `join: '|'` store every
+ * part in one vault string. A tester that passes the WHOLE string as a bearer
+ * token would send "token|storeId" and get a 401 that looks like a bad key —
+ * so anything that only needs the first part must ask for it explicitly.
+ */
+function firstField(c: string): string {
+  return c.split('|')[0] ?? c;
+}
+
 function splitCredential(c: string): [string, string] | null {
   const idx = c.indexOf(':');
   if (idx === -1) return null;
@@ -51,6 +64,48 @@ function splitCredential(c: string): [string, string] | null {
 // API using the stored credential. Only providers listed here get a
 // working "test credential" button; every other catalog entry is
 // credential storage only, honestly (testable: false in list()), not faked.
+/**
+ * Rejects a credential whose SHAPE is wrong, before it is ever stored.
+ *
+ * There was no validation at all, so any text saved into any field. A store
+ * NAME went into a Store ID box, sat there encrypted looking connected, and
+ * surfaced later as an unexplained 401 from the provider. Catching it at the
+ * point of typing turns a mystery into one sentence.
+ *
+ * Patterns are deliberately loose — a prefix or an obvious format, never an
+ * attempt to validate the whole secret. A pattern strict enough to reject a
+ * VALID credential is far worse than no pattern, because the merchant cannot
+ * work around it.
+ */
+function validateCredential(provider: CatalogProvider, credential: string): void {
+  if (provider.fields?.length) {
+    const parts = credential.split(provider.join ?? '|');
+    provider.fields.forEach((field, i) => {
+      const value = (parts[i] ?? '').trim();
+      if (!value) {
+        if (!field.optional) throw new ConflictError(`${field.label} is required.`, 'credential');
+        return;
+      }
+      if (field.pattern && !new RegExp(field.pattern).test(value)) {
+        throw new ConflictError(
+          `${field.label} does not look right${field.example ? ` — expected something like ${field.example}` : ''}.`,
+          'credential',
+        );
+      }
+    });
+    return;
+  }
+  if (provider.pattern && !new RegExp(provider.pattern).test(credential.trim())) {
+    throw new ConflictError(
+      `That does not look like a ${provider.name} credential${provider.example ? ` — expected something like ${provider.example}` : ''}.`,
+      'credential',
+    );
+  }
+}
+
+// Providers that can ALSO be connected by authorizing in a browser.
+const OAUTH_CAPABLE = new Set(oauthService.providers());
+
 const TESTERS: Record<string, Tester> = {
   // AI tools
   openai: (c) => bearerGet('https://api.openai.com/v1/models', c),
@@ -82,15 +137,32 @@ const TESTERS: Record<string, Tester> = {
   // per-store domain, not just a key) — real work, not done this pass.
 
   // Fulfillment (POD)
-  printful: (c) => bearerGet('https://api.printful.com/stores', c),
-  printify: (c) => bearerGet('https://api.printify.com/v1/shops.json', c),
+  // Printful accepts either shape, so the tester tries both rather than
+  // declaring a working credential invalid: a key+secret pair authenticates
+  // as Basic, a lone private token as Bearer. Reporting "invalid key" for a
+  // credential that is actually fine is the worst outcome here — it sends the
+  // merchant back to regenerate something that was never the problem.
+  printful: async (c) => {
+    // Accepts EITHER shape, because Printful presents both depending on which
+    // screen you connect from: a key+secret pair authenticates as Basic, a
+    // lone private token as Bearer. Trying only one and reporting 401 tells
+    // the merchant their credential is broken when it is simply the other
+    // kind — which is exactly the loop this connection got stuck in.
+    const [first, second] = c.split('|');
+    if (first && second) {
+      const basic = await get('https://api.printful.com/stores', { Authorization: basicAuthHeader(first, second) });
+      if (basic.ok) return basic;
+    }
+    return bearerGet('https://api.printful.com/stores', first ?? c);
+  },
+  printify: (c) => bearerGet('https://api.printify.com/v1/shops.json', firstField(c)),
 
   // Payments
   stripe: (c) => bearerGet('https://api.stripe.com/v1/balance', c),
   square: (c) => bearerGet('https://connect.squareup.com/v2/locations', c),
-  'coinbase-commerce': (c) => get('https://api.commerce.coinbase.com/charges', { 'X-CC-Api-Key': c }),
+  'coinbase-commerce': (c) => get('https://api.commerce.coinbase.com/charges', { 'X-CC-Api-Key': firstField(c) }),
   whop: (c) => bearerGet('https://api.whop.com/api/v2/me', c),
-  wise: (c) => bearerGet('https://api.wise.com/v1/profiles', c),
+  wise: (c) => bearerGet('https://api.wise.com/v1/profiles', firstField(c)),
   paypal: async (c) => {
     const parts = splitCredential(c);
     if (!parts) return { ok: false, detail: 'Expected "Client ID:Secret".' };
@@ -205,6 +277,10 @@ export const connectionService = {
         lastTestedAt: row?.lastTestedAt ?? null,
         lastTestOk: row?.lastTestOk ?? null,
         testable: Boolean(TESTERS[p.id]) || p.id.startsWith('custom-'),
+        // Authorize-by-web is offered ALONGSIDE the key fields wherever the
+        // provider really supports it, so the panel can show both routes to
+        // the same vault entry rather than forcing a choice at catalog level.
+        oauthCapable: OAUTH_CAPABLE.has(p.id),
       };
     });
   },
@@ -213,6 +289,7 @@ export const connectionService = {
     const provider = findProvider(providerId);
     if (!provider) throw new NotFoundError('Unknown provider', 'providerId');
     if (!credential.trim()) throw new ConflictError('Credential is required.', 'credential');
+    validateCredential(provider, credential);
     const encrypted = encryptSecret(credential);
     const masked = maskSecret(credential);
     await db.connection.upsert({

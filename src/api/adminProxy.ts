@@ -1,6 +1,7 @@
 import { connect } from 'node:net';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { env } from '../lib/env.js';
+import { settingsService } from '../services/settings.service.js';
 
 // Admin reverse proxy — the whole product answers on ONE origin.
 //
@@ -52,6 +53,27 @@ const HOP_BY_HOP = new Set([
 // part of Fastify's base route-options type, hence the cast.
 const NO_HELMET = { helmet: false } as unknown as { config: Record<string, unknown> };
 
+// Settings > Stealth > adminKnock. When set, the admin path answers a plain
+// 404 to anyone who does not present it — identical to a route that does not
+// exist. Deliberately NOT a 401: a 401 confirms there IS an admin here, which
+// is the exact fact the knock is hiding.
+//
+// The knock is a scanner filter, NOT authentication. Anyone who gets past it
+// still faces the real login. Its job is to keep this install out of the
+// automated sweeps that fingerprint a platform and fire known exploits.
+//
+// Presented either as ?k=<knock> (which sets a cookie so it is a one-time
+// step per browser) or the th_knock cookie thereafter.
+const KNOCK_COOKIE = 'th_knock';
+
+function knockSatisfied(req: FastifyRequest, expected: string): boolean {
+  if (!expected) return true; // not configured — no gate
+  const url = new URL(req.url, 'http://x');
+  if (url.searchParams.get('k') === expected) return true;
+  const cookie = new RegExp(`(?:^|;\\s*)${KNOCK_COOKIE}=([^;]+)`).exec(req.headers.cookie ?? '')?.[1];
+  return cookie ? decodeURIComponent(cookie) === expected : false;
+}
+
 export async function adminProxy(app: FastifyInstance): Promise<void> {
   const target = `http://127.0.0.1:${env.ADMIN_UPSTREAM_PORT}`;
 
@@ -70,6 +92,33 @@ export async function adminProxy(app: FastifyInstance): Promise<void> {
   });
 
   const handler = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
+    const stealth = await settingsService.getStealth();
+    if (!knockSatisfied(req, stealth.adminKnock)) {
+      // Must look like any other missing URL. Two earlier attempts were worse:
+      // a JSON 404 was itself a fingerprint (the site answers unknown paths
+      // with HTML, so JSON said "this prefix is special"), and
+      // reply.callNotFound() resolves to THIS plugin's 404 handler, which
+      // returned an empty 200 — no gate at all.
+      //
+      // So: 404 with the site's content type and a plain body. Status and
+      // content-type now match a genuine miss. The body still differs from
+      // the themed 404 page, so a determined operator comparing bodies could
+      // still tell — this filters scanners, it does not defeat a human.
+      reply.status(404).type('text/html; charset=utf-8').send(
+        '<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><title>Not found</title></head>' +
+          '<body><h1>Not found</h1></body></html>',
+      );
+      return;
+    }
+    // Remember a correct knock so it is not needed on every asset request.
+    if (stealth.adminKnock) {
+      const url = new URL(req.url, 'http://x');
+      if (url.searchParams.get('k') === stealth.adminKnock) {
+        reply.header('set-cookie',
+          `${KNOCK_COOKIE}=${encodeURIComponent(stealth.adminKnock)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=31536000`);
+      }
+    }
+
     const url = target + req.url;
 
     const headers: Record<string, string> = {};
@@ -127,6 +176,11 @@ export async function adminProxy(app: FastifyInstance): Promise<void> {
     res.headers.forEach((value, key) => {
       const k = key.toLowerCase();
       if (HOP_BY_HOP.has(k) || k === 'content-encoding') return;
+      // Next advertises itself on every admin response. Naming your framework
+      // and its version to an unauthenticated scanner is free reconnaissance —
+      // it tells them exactly which CVEs to try. Not a vulnerability on its
+      // own; it just removes a rung from someone else's ladder.
+      if (k === 'x-powered-by') return;
       // set-cookie can repeat; undici exposes them via getSetCookie().
       if (k === 'set-cookie') return;
       reply.header(key, value);

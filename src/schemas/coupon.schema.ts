@@ -15,6 +15,8 @@ export const CreateCouponInput = z.object({
   expiresAt: z.coerce.date().nullable().default(null),
   status: z.enum(['active', 'inactive']).default('active'),
   description: z.string().max(280).nullable().default(null),
+  /** Restrict to members of one milieu. Null = anyone with the code. */
+  milieuId: z.string().nullable().default(null),
 }).refine((v) => v.type !== 'percent' || v.amount <= 100, { message: 'percent amount must be 1–100', path: ['amount'] });
 
 // Update: plainly-optional, NO defaults (the CreateX.partial() footgun —
@@ -33,6 +35,7 @@ export const UpdateCouponInput = z.object({
   expiresAt: z.coerce.date().nullable().optional(),
   status: z.enum(['active', 'inactive']).optional(),
   description: z.string().max(280).nullable().optional(),
+  milieuId: z.string().nullable().optional(),
 });
 
 export const ApplyCouponInput = z.object({

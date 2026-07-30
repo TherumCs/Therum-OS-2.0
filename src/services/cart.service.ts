@@ -2,7 +2,11 @@ import { randomBytes } from 'node:crypto';
 import { db } from '../lib/db.js';
 import { redis } from '../lib/redis.js';
 import { orderService } from './order.service.js';
+import { contextFor, defaultPipeline } from '../counter/totalsPipeline.js';
+import { settingsService } from './settings.service.js';
 import { couponService } from './coupon.service.js';
+import { milieuService } from './milieu.service.js';
+import { capabilityService } from './capability.service.js';
 import { NotFoundError, ValidationError, ConflictError } from '../lib/errors.js';
 
 // Counter C2 — the unified cart/checkout session (1.x's core
@@ -30,6 +34,13 @@ interface CartState {
   items: CartLine[];
   couponCode?: string | null;
   customerEmail?: string | null;
+  /**
+   * Written ONLY from a verified customer session (never from a typed email),
+   * so a group-restricted coupon survives the recalc that runs on every cart
+   * read. Distinct from customerEmail for exactly the reason audit H-1 gives:
+   * one is proof of identity, the other is a receipt address.
+   */
+  customerId?: string | null;
   createdAt: string;
 }
 
@@ -37,6 +48,10 @@ export interface CartTotals {
   lines: {
     variantId: string;
     productName: string;
+    /** For the line's link back to the PDP. */
+    productSlug: string;
+    /** Primary product image, so a cart line can show what was bought. */
+    image: string | null;
     sku: string | null;
     color: string | null;
     size: string | null;
@@ -51,6 +66,19 @@ export interface CartTotals {
   // C3 (coupons) and C5+ (shipping/tax providers) land in these slots — the
   // pipeline shape is stable now so the storefront doesn't churn later.
   coupon: { amount: number; code: string } | null;
+  /**
+   * Why a coupon is not in play, when the shopper might reasonably expect one
+   * to be. Present so the cart can SAY it rather than silently dropping a code
+   * the shopper typed.
+   */
+  couponBlocked: string | null;
+  /**
+   * Set when a discount was reduced to keep the order above the margin floor
+   * (Settings > Commerce > minMarginPct). The merchant needs to know their
+   * 40% only paid out as 31% on this basket; the shopper is simply told the
+   * amount that applied.
+   */
+  discountClamped: { requested: number; applied: number } | null;
   shipping: number;
   tax: number;
   total: number;
@@ -83,7 +111,7 @@ async function computeTotals(state: CartState): Promise<CartTotals> {
   const variants = variantIds.length
     ? await db.productVariant.findMany({
         where: { id: { in: variantIds } },
-        include: { product: { select: { name: true, status: true } } },
+        include: { product: { select: { name: true, slug: true, image: true, status: true } } },
       })
     : [];
   const byId = new Map(variants.map((v) => [v.id, v]));
@@ -95,6 +123,8 @@ async function computeTotals(state: CartState): Promise<CartTotals> {
       return {
         variantId: i.variantId,
         productName: v.product.name,
+        productSlug: v.product.slug,
+        image: v.product.image,
         sku: v.sku,
         color: v.color,
         size: v.size,
@@ -106,40 +136,125 @@ async function computeTotals(state: CartState): Promise<CartTotals> {
     });
 
   const subtotal = lines.reduce((s, l) => s + l.lineTotal, 0);
+  const commerce = await settingsService.getCommerce();
 
-  // Member discount is a LOGGED-IN customer benefit and deliberately does
-  // NOT apply from a typed storefront email (audit H-1/M-2): an anonymous
-  // cart supplying an arbitrary address must not inherit another customer's
-  // membership, and returning the discount for a guessed email is a
-  // membership/PII enumeration oracle. Storefront customer auth is a future
-  // milestone; until it lands the storefront prices at list price and the
-  // member discount flows only through the authenticated admin order path
-  // (order.service create with a real, deliberately-set customerId).
-  const discount: CartTotals['discount'] = null;
+  // Member discount. Still deliberately NOT derived from a typed storefront
+  // email (audit H-1/M-2): an anonymous cart supplying an arbitrary address
+  // must not inherit another customer's membership, and returning a discount
+  // for a guessed email is a membership/PII enumeration oracle.
+  //
+  // What changed is that there is now a way to know: state.customerId is
+  // written ONLY from a verified customer session. That is the proof the rule
+  // was waiting for, so the benefit finally reaches the storefront cart
+  // instead of appearing for the first time on the order.
+  let discount: CartTotals['discount'] = null;
+  if (state.customerId && (await capabilityService.isEnabled('memberships'))) {
+    const m = await milieuService.discountFor(state.customerId);
+    if (m) {
+      discount = {
+        amount: Math.round(subtotal * (m.pct / 100)),
+        label: `${m.milieuName} (${m.pct}%)`,
+      };
+    }
+  }
 
   // Coupon (C3): quoted live from the stored code every recalc; a coupon
   // that has gone invalid mid-session (limit hit elsewhere, expired) is
   // dropped silently (1.x recalc rule) via quoteOrNull.
+  //
+  // MEMBER PRICE IS A FLOOR, NOT A CANDIDATE. Bam's rule: "if you're getting
+  // my special member price, there is no stacking of coupons — that's the
+  // cheapest I can get it for." So a member's coupon is not quoted at all,
+  // rather than quoted and then beaten. The pipeline's own rule is
+  // best-single-wins, which would have let a LARGER coupon replace the member
+  // price — the opposite of a floor.
   let coupon: CartTotals['coupon'] = null;
-  if (state.couponCode) {
-    const q = await couponService.quoteOrNull(state.couponCode, subtotal, state.customerEmail ?? null);
+  let couponBlocked: string | null = null;
+  if (state.couponCode && discount) {
+    couponBlocked = 'Your member price is already applied — codes do not stack on top of it.';
+  } else if (state.couponCode) {
+    const q = await couponService.quoteOrNull(state.couponCode, subtotal, state.customerEmail ?? null, state.customerId ?? null);
     if (q) coupon = { amount: q.amount, code: q.code };
   }
 
-  const shipping = 0; // provider interface lands with the fleet milestone
-  const tax = 0; // provider interface lands with the fleet milestone
-  // Best-single-wins (doctrine — coupon and member discount do NOT stack).
-  const memberAmount = discount ? (discount as { amount: number }).amount : 0;
-  const couponAmount = coupon?.amount ?? 0;
-  const appliedDiscount = Math.max(memberAmount, couponAmount);
-  const total = subtotal - appliedDiscount + shipping + tax;
+  // Totals go through Counter's pipeline rather than inline arithmetic here.
+  // Same numbers, but the ORDER of operations (discount before shipping and
+  // tax; best-single-wins, no stacking) now lives in one declared list that
+  // checkout and every other caller share — see src/counter/totalsPipeline.ts.
+  // It also rounds per step, so the total is the sum of the figures actually
+  // shown to the customer instead of drifting a penny off them.
+  // ── MARGIN FLOOR ────────────────────────────────────────────────────────
+  //
+  // A percentage off RETAIL says nothing about whether the sale still makes
+  // money. 40% off is comfortable on a 4x markup and under water on a 1.6x
+  // one, and which is which is per product — Bam's point exactly: "that
+  // percentage is based on the price I get the product for."
+  //
+  // So the discount is clamped against each line's own COST. Lines with no
+  // cost recorded are excluded from the floor rather than assumed free:
+  // guessing a cost is worse than not guarding.
+  let maxDiscount = Number.POSITIVE_INFINITY;
+  if (commerce.minMarginPct > 0) {
+    const priced = lines
+      .map((l) => ({ line: l, cost: byId.get(l.variantId)?.cost ?? null }))
+      .filter((x): x is { line: (typeof lines)[number]; cost: number } => typeof x.cost === 'number' && x.cost > 0);
+    if (priced.length === lines.length && priced.length > 0) {
+      // Every line has a cost, so a floor for the whole basket is meaningful.
+      const floor = priced.reduce(
+        (sum, x) => sum + Math.ceil(x.cost * x.line.quantity * (1 + commerce.minMarginPct / 100)),
+        0,
+      );
+      maxDiscount = Math.max(0, subtotal - floor);
+    }
+  }
 
-  return { lines, subtotal, discount, coupon, shipping, tax, total };
+  const candidates: { amount: number; label: string }[] = [];
+  if (discount) candidates.push(discount);
+  if (coupon) candidates.push({ amount: coupon.amount, label: coupon.code });
+
+  // Clamp before the pipeline runs, so the figure shown IS the figure applied.
+  let discountClamped: CartTotals['discountClamped'] = null;
+  if (Number.isFinite(maxDiscount)) {
+    for (const c of candidates) {
+      if (c.amount > maxDiscount) {
+        discountClamped = { requested: c.amount, applied: maxDiscount };
+        c.amount = maxDiscount;
+      }
+    }
+    if (discount && discount.amount > maxDiscount) discount = { ...discount, amount: maxDiscount };
+    if (coupon && coupon.amount > maxDiscount) coupon = { ...coupon, amount: maxDiscount };
+  }
+
+  const storeCurrency = commerce.currency;
+  const ctx = contextFor(
+    lines.map((l, i) => ({
+      itemId: String(i),
+      productId: l.variantId,
+      variantId: l.variantId,
+      quantity: l.quantity,
+      unitPrice: l.unitPrice,
+      lineTotal: l.lineTotal,
+    })),
+    storeCurrency,
+  );
+  await defaultPipeline(candidates).run(ctx);
+
+  return {
+    lines,
+    subtotal: ctx.subtotal,
+    discount,
+    coupon,
+    couponBlocked,
+    discountClamped,
+    shipping: ctx.shipping,
+    tax: ctx.tax,
+    total: ctx.total,
+  };
 }
 
 export const cartService = {
   // Lazy create: first add-to-cart with no token mints the session.
-  async addItem(token: string | null, variantId: string, quantity: number) {
+  async addItem(token: string | null, variantId: string, quantity: number, customerId: string | null = null) {
     const variant = await db.productVariant.findUnique({
       where: { id: variantId },
       include: { product: { select: { status: true } } },
@@ -152,6 +267,7 @@ export const cartService = {
     const state: CartState = token
       ? await load(token)
       : { id: randomBytes(16).toString('hex'), items: [], createdAt: new Date().toISOString() };
+    if (customerId) state.customerId = customerId;
 
     const existing = state.items.find((i) => i.variantId === variantId);
     if (existing) {
@@ -178,8 +294,14 @@ export const cartService = {
     return { token: state.id, totals: await computeTotals(state) };
   },
 
-  async get(token: string) {
+  /**
+   * `customerId` is supplied by the route from a verified session, so a cart
+   * started while signed out picks up member pricing the moment its owner
+   * signs in — rather than only at the next coupon or checkout.
+   */
+  async get(token: string, customerId: string | null = null) {
     const state = await load(token);
+    if (customerId && state.customerId !== customerId) state.customerId = customerId;
     await save(state); // sliding TTL — an active cart doesn't expire mid-shop
     return { token: state.id, customerEmail: state.customerEmail ?? null, totals: await computeTotals(state) };
   },
@@ -196,10 +318,23 @@ export const cartService = {
 
   // Apply a coupon code — hard-validates (throws the reason if invalid), then
   // stores the code on the session. Recalc re-quotes it live every read.
-  async applyCoupon(token: string, code: string) {
+  async applyCoupon(token: string, code: string, customerId: string | null = null) {
     const state = await load(token);
+    // Remember WHO applied it, so the recalc on every later cart read can
+    // re-check a group restriction without the session being present again.
+    if (customerId) state.customerId = customerId;
     const totals = await computeTotals(state);
-    await couponService.quote(code, totals.subtotal, state.customerEmail ?? null); // throws if invalid
+    // Refused BEFORE the code is looked up. Two reasons: the shopper should be
+    // told why rather than watching a valid code do nothing, and checking
+    // membership first means this cannot be used to probe whether a code
+    // exists (the uniform "not valid" in coupon.service exists for that).
+    if (totals.discount) {
+      throw new ValidationError(
+        'Your member price is already applied — codes do not stack on top of it.',
+        'code',
+      );
+    }
+    await couponService.quote(code, totals.subtotal, state.customerEmail ?? null, state.customerId ?? null); // throws if invalid
     state.couponCode = code;
     await save(state);
     return { token: state.id, totals: await computeTotals(state) };
@@ -221,7 +356,14 @@ export const cartService = {
   // token — all existing machinery), then clears the session. The cart token
   // doubles as the order idempotency key: a double-submitted checkout
   // returns the SAME order instead of reserving stock twice.
-  async checkout(token: string, email?: string) {
+  /**
+   * `customerId` is only ever supplied by the route after resolving a real
+   * customer SESSION — never from the typed checkout email. That distinction
+   * is the whole of audit H-1: an unverified email must not bind an order to
+   * an account (or inherit its member pricing), but a verified session is
+   * exactly the proof that rule was waiting for.
+   */
+  async checkout(token: string, email?: string, customerId?: string) {
     const state = await load(token);
     if (state.items.length === 0) throw new ValidationError('Cart is empty.', 'cart');
     if (email) state.customerEmail = email;
@@ -242,11 +384,13 @@ export const cartService = {
     // actually reserved, and the reservation can't be won twice.
     //
     // Guest order (audit H-1): the unverified email is the receipt contact
-    // only — never resolved to or bound to a customer account.
+    // only — never resolved to or bound to a customer account. `customerId`
+    // is the separate, verified path (see the signature).
     const baseOrder = await orderService.create({
-      currency: 'USD',
+      currency: (await settingsService.getCommerce()).currency,
       idempotencyKey: `cart_${state.id}`,
       guestEmail: state.customerEmail ?? undefined,
+      ...(customerId ? { customerId } : {}),
       items: state.items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
     });
 
@@ -255,7 +399,7 @@ export const cartService = {
     // at the boundary) simply means the order stays at full price — the
     // customer is never given a discount that wasn't counted.
     if (totals.coupon && state.couponCode) {
-      const q = await couponService.quoteOrNull(state.couponCode, totals.subtotal, state.customerEmail ?? null);
+      const q = await couponService.quoteOrNull(state.couponCode, totals.subtotal, state.customerEmail ?? null, customerId ?? state.customerId ?? null);
       if (q) {
         const reserved = await couponService.reserveForOrder(baseOrder.id, q.couponId, q.amount, state.customerEmail ?? null);
         if (reserved) {

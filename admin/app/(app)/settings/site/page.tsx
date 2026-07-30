@@ -1,5 +1,5 @@
 import { apiGet } from '../../../../lib/api';
-import { Field, SelectField, TextInput } from '../SettingsControls';
+import { Field, SelectField, TextInput, Toggle } from '../SettingsControls';
 import { MenuEditor } from './MenuEditor';
 
 export const dynamic = 'force-dynamic';
@@ -9,6 +9,7 @@ interface SiteSettings {
   tagline: string;
   homepageSlug: string | null;
   menu: { label: string; href: string }[] | null;
+  showPageTitles?: boolean;
 }
 interface ContentItem {
   id: string;
@@ -56,6 +57,20 @@ export default async function SiteSettingsPage() {
             options={[['', 'Auto landing (latest work + posts)'], ...pages.map((p): [string, string] => [p.slug, p.title])]}
           />
         </Field>
+      </div>
+
+      <div className="settings-group">
+        <h3 className="settings-group-title">Page titles</h3>
+        <div className="settings-toggle-row">
+          <div className="settings-toggle-row-text">
+            <span className="settings-toggle-row-label">Show the page title above content</span>
+            <span className="settings-toggle-row-desc">
+              Designed and ported layouts usually open with their own headline, so the CMS adding an H1 puts two titles
+              on the page. This is the site-wide default — any single page can override it from its own settings.
+            </span>
+          </div>
+          <Toggle domain="site" field="showPageTitles" initial={site.showPageTitles !== false} />
+        </div>
       </div>
 
       <div className="settings-group">

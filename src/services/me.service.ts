@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { db } from '../lib/db.js';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
+import { settingsService } from './settings.service.js';
 import type { DashboardLayoutInput, SidebarLayoutInput, BehaviorInput } from '../schemas/settings.schema.js';
 
 // Custom CSS is scoped to one user's own admin view only, but still gets
@@ -51,6 +52,7 @@ export const meService = {
         sidebarFolded: true,
         listPageRowCount: true,
         customCss: true,
+        totpEnabled: true,
       },
     });
     if (!user) throw new NotFoundError('Admin user not found', 'id');
@@ -72,6 +74,12 @@ export const meService = {
       sidebarFolded: user.sidebarFolded,
       listPageRowCount: user.listPageRowCount,
       customCss: user.customCss ?? '',
+      twoFactorEnabled: user.totpEnabled,
+      // The admin shell reads this to send an un-enrolled user straight to
+      // enrolment. Without it the shell renders normally and every other
+      // request 403s, which looks like the app is broken rather than like a
+      // policy the user has to satisfy.
+      mustEnrollTwoFactor: !user.totpEnabled && (await settingsService.getSecurityCached()).requireTwoFactor,
     };
   },
 
