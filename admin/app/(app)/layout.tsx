@@ -5,6 +5,7 @@ import { apiGet } from '../../lib/api';
 import { buildNav, type StudioNavItem } from '../../lib/nav';
 import { applySidebarLayout, type SidebarLayout } from '../../lib/sidebar-layout';
 import { DEFAULT_APPEARANCE, appearanceDataAttrs, appearanceInlineVars, type Appearance } from '../../lib/appearance';
+import { ViewTransitions } from './ViewTransitions';
 import { Sidebar } from './Sidebar';
 import { TwoFactorGate } from './TwoFactorGate';
 import { Topbar } from './Topbar';
@@ -143,6 +144,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   if (me.desktopModeEnabled) {
     return (
       <div id="th-shell" data-desktop-mode="1" {...dataAttrs} style={inlineVars as CSSProperties}>
+      <ViewTransitions />
         <DesktopShell
           sections={sections}
           username={me.username}
@@ -157,6 +159,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div id="th-shell" {...dataAttrs} style={inlineVars as CSSProperties}>
+      <ViewTransitions />
       {/* Gated by Appearance > Workspace > Keyboard shortcuts. */}
       <CommandPalette enabled={appearance.keyboardShortcuts} />
       <aside id="th-sb">

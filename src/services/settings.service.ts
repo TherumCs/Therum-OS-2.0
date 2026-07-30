@@ -74,7 +74,7 @@ export interface Appearance {
   // Motion
   motionEnabled: boolean;
   transitionSpeed: 'fast' | 'default' | 'slow';
-  pageTransitions: boolean;
+  pageTransitions: 'off' | 'fade' | 'slide' | 'scale' | 'morph';
   hoverLift: boolean;
 
   // Content defaults
@@ -148,7 +148,7 @@ const APPEARANCE_DEFAULTS: Appearance = {
 
   motionEnabled: true,
   transitionSpeed: 'default',
-  pageTransitions: false,
+  pageTransitions: 'morph',
   hoverLift: true,
 
   cardLayout: 'comfortable',

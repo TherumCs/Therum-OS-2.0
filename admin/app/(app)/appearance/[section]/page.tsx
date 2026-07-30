@@ -253,7 +253,13 @@ const SECTIONS: Record<string, { title: string; sub: string; render: (a: Appeara
             initial={a.transitionSpeed}
             options={[['fast', 'Fast'], ['default', 'Default'], ['slow', 'Slow']]}
           />
-          <Switch label="Page transitions" help="Cross-fade between admin screens." field="pageTransitions" initial={a.pageTransitions} />
+          <Segmented
+            label="Page transition"
+            help="How one screen becomes the next. Morph carries shared elements across; Off is instant."
+            field="pageTransitions"
+            initial={a.pageTransitions}
+            options={[['off', 'Off'], ['fade', 'Fade'], ['slide', 'Slide'], ['scale', 'Scale'], ['morph', 'Morph']]}
+          />
           <Switch label="Card hover lift" field="hoverLift" initial={a.hoverLift} />
       </>
     ),

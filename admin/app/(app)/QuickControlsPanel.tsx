@@ -366,9 +366,9 @@ export function QuickControlsPanel({
                     <Field label="Transition speed">
                       <SelectField domain="appearance" field="transitionSpeed" initial={appearance.transitionSpeed} options={[['fast', 'Fast'], ['default', 'Default'], ['slow', 'Slow']]} />
                     </Field>
-                    <ToggleRow label="Page transitions" help="A subtle fade-in when content loads.">
-                      <Toggle domain="appearance" field="pageTransitions" initial={appearance.pageTransitions} />
-                    </ToggleRow>
+                    <Field label="Page transition">
+                      <SelectField domain="appearance" field="pageTransitions" initial={appearance.pageTransitions} options={[['off', 'Off'], ['fade', 'Fade'], ['slide', 'Slide'], ['scale', 'Scale'], ['morph', 'Morph']]} />
+                    </Field>
                     <ToggleRow label="Hover lift" help="The dock's icon-hover lift effect.">
                       <Toggle domain="appearance" field="hoverLift" initial={appearance.hoverLift} />
                     </ToggleRow>

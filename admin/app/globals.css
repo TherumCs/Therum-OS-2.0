@@ -1479,3 +1479,188 @@ input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: 
    buttons in a table trains you to ignore the colour. */
 .th-btn-danger { color: var(--th-danger, #c0392b); }
 .th-btn-danger:hover { background: var(--th-danger, #c0392b); color: #fff; border-color: var(--th-danger, #c0392b); }
+
+/* ══════════════════════════════════════════════════════════════════════
+   APPEARANCE — the settings that had no CSS behind them
+   ══════════════════════════════════════════════════════════════════════
+   Twenty-two of the forty appearance attributes were being written onto
+   #th-shell and then matched by nothing at all: corner radius, contrast, text
+   size, content width, shadows, motion, spacing, and the rest. The controls
+   saved, the attribute appeared in the DOM, and the page looked identical —
+   which is why it read as "none of Appearance works".
+
+   Everything below overrides TOKENS rather than styling components, so one
+   rule reaches every card, button and input that already uses the token.
+   Following the emitter's convention (see appearanceDataAttrs), defaults are
+   never emitted, so only the non-default values need a selector. */
+
+/* ── Shape ─────────────────────────────────────────────────────────── */
+#th-shell[data-corner-radius='sharp'] { --th-r: 0px; --radius-sm: 0px; --radius-md: 0px; --radius-lg: 0px; --radius-pill: 0px; }
+#th-shell[data-corner-radius='round'] { --th-r: 16px; --radius-sm: 10px; --radius-md: 16px; --radius-lg: 22px; }
+
+#th-shell[data-border-weight='thin']  { --th-bw: 0.5px; }
+#th-shell[data-border-weight='thick'] { --th-bw: 2px; }
+#th-shell[data-border-weight] :is(.th-card, .th-panel, table, input, select, textarea, .th-btn) { border-width: var(--th-bw); }
+
+/* ── Type ──────────────────────────────────────────────────────────── */
+#th-shell[data-base-size='sm'] { --th-fs-2xs: 10px; --th-fs-xs: 11px; --th-fs-sm: 13px; --th-fs-md: 14px; --th-fs-lg: 16px; font-size: 13px; }
+#th-shell[data-base-size='lg'] { --th-fs-2xs: 12px; --th-fs-xs: 13px; --th-fs-sm: 15px; --th-fs-md: 17px; --th-fs-lg: 20px; font-size: 16px; }
+
+#th-shell[data-letter-spacing='tight'] { letter-spacing: -0.01em; }
+#th-shell[data-letter-spacing='wide']  { letter-spacing: 0.02em; }
+
+#th-shell[data-line-height='compact'] { line-height: 1.35; }
+#th-shell[data-line-height='relaxed'] { line-height: 1.75; }
+
+#th-shell[data-underline-links='on'] a:not(.th-btn):not(.th-tab) { text-decoration: underline; text-underline-offset: 2px; }
+
+/* ── Colour ────────────────────────────────────────────────────────── */
+/* High contrast darkens text and firms up every hairline — the borders are
+   what actually make a dense admin readable, not the type colour. */
+#th-shell[data-contrast='high'] {
+  --th-ink: #000; --th-ink-2: #1a1a1a; --th-muted: #4a4a4a;
+  --th-line: rgba(0, 0, 0, 0.34);
+}
+#th-shell[data-color-mode='dark'][data-contrast='high'] {
+  --th-ink: #fff; --th-ink-2: #f0f0f0; --th-muted: #c4c4c4;
+  --th-line: rgba(255, 255, 255, 0.38);
+}
+#th-shell[data-intensity='subtle'] { --th-accent: color-mix(in srgb, var(--th-accent) 62%, var(--th-muted)); }
+#th-shell[data-intensity='vivid']  { --th-accent: color-mix(in srgb, var(--th-accent) 100%, #fff 0%); filter: saturate(1.18); }
+
+#th-shell[data-background='subtle-gradient'] {
+  background-image: linear-gradient(180deg, color-mix(in srgb, var(--th-accent) 5%, transparent), transparent 46%);
+  background-attachment: fixed;
+}
+
+/* ── Depth ─────────────────────────────────────────────────────────── */
+#th-shell[data-shadow-style='none']       { --th-shadow: none; }
+#th-shell[data-shadow-style='pronounced'] { --th-shadow: 0 10px 30px rgba(0,0,0,.16), 0 2px 6px rgba(0,0,0,.10); }
+#th-shell[data-shadow-style] :is(.th-card, .th-panel, .th-savebar) { box-shadow: var(--th-shadow); }
+
+#th-shell[data-card-style='flat']   :is(.th-card, .th-panel) { box-shadow: none; border: 1px solid var(--th-line); }
+#th-shell[data-card-style='shadow'] :is(.th-card, .th-panel) { box-shadow: var(--th-shadow, 0 1px 3px rgba(0,0,0,.08)); }
+#th-shell[data-card-style='glass']  :is(.th-card, .th-panel) {
+  background: color-mix(in srgb, var(--th-surface) 72%, transparent);
+  backdrop-filter: blur(var(--th-blur, 12px));
+  border: 1px solid color-mix(in srgb, var(--th-line) 70%, transparent);
+}
+
+#th-shell[data-blur-strength='light'] { --th-blur: 6px; }
+#th-shell[data-blur-strength='heavy'] { --th-blur: 22px; }
+
+/* Accessibility: transparency is a preference, and a real one for some people. */
+#th-shell[data-reduce-transparency='on'] :is(.th-card, .th-panel, .th-modal, .th-sheet) {
+  backdrop-filter: none !important;
+  background: var(--th-surface) !important;
+}
+
+/* ── Layout ────────────────────────────────────────────────────────── */
+#th-shell[data-content-width='normal'] main > * { max-width: 1180px; margin-inline: auto; }
+#th-shell[data-content-width='narrow'] main > * { max-width: 900px;  margin-inline: auto; }
+
+#th-shell[data-card-grid-gap='compact']  .th-grid { gap: var(--th-space-8); }
+#th-shell[data-card-grid-gap='spacious'] .th-grid { gap: var(--th-space-32); }
+
+#th-shell[data-card-layout='compact'] :is(.th-card, .th-panel) { padding: var(--th-space-10); }
+
+/* Larger click targets — the whole point is the CONTROL height, so it drives
+   the token every control already derives from. */
+#th-shell[data-larger-targets='on'] { --th-ctl-h: 44px; }
+#th-shell[data-larger-targets='on'] :is(.th-btn, button, input, select) { min-height: var(--th-ctl-h); }
+
+#th-shell[data-always-focus='on'] :is(a, button, input, select, textarea):focus {
+  outline: 2px solid var(--th-accent-btn, #3858e9);
+  outline-offset: 2px;
+}
+
+/* A build-time aid, not a theme: outlines every layout box. */
+#th-shell[data-debug-overlays='on'] * { outline: 1px solid color-mix(in srgb, #e83b3b 35%, transparent); }
+
+/* ── Motion ────────────────────────────────────────────────────────────
+   One duration token drives everything, so "fast" or "slow" is a single
+   change rather than a hunt through every component. */
+#th-shell { --th-dur: 220ms; --th-ease: cubic-bezier(.32, .72, 0, 1); }
+#th-shell[data-transition-speed='fast'] { --th-dur: 120ms; }
+#th-shell[data-transition-speed='slow'] { --th-dur: 380ms; }
+
+#th-shell :is(a, button, .th-btn, .th-card, .th-panel, .th-tab, input, select, .th-swatch) {
+  transition:
+    background-color var(--th-dur) var(--th-ease),
+    border-color var(--th-dur) var(--th-ease),
+    color var(--th-dur) var(--th-ease),
+    box-shadow var(--th-dur) var(--th-ease),
+    transform var(--th-dur) var(--th-ease),
+    opacity var(--th-dur) var(--th-ease);
+}
+
+#th-shell[data-hover-lift]:not([data-hover-lift='off']) :is(.th-card, .th-panel):hover,
+#th-shell:not([data-hover-lift]) :is(.th-card, .th-panel):hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .12);
+}
+#th-shell[data-hover-lift='off'] :is(.th-card, .th-panel):hover { transform: none; }
+
+/* Motion off means OFF — including the view transitions below. Written with
+   !important because it has to beat every component's own transition, and a
+   person who turned motion off did not mean "mostly". */
+#th-shell[data-motion='off'],
+#th-shell[data-motion='off'] * {
+  transition: none !important;
+  animation: none !important;
+}
+#th-shell[data-motion='off'] { view-transition-name: none; }
+
+/* The OS-level preference wins outright. Someone who set reduce-motion in
+   their system did not come here to negotiate it. */
+@media (prefers-reduced-motion: reduce) {
+  #th-shell, #th-shell * { transition: none !important; animation: none !important; }
+  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
+}
+
+/* ── Page transitions ──────────────────────────────────────────────────
+   One screen BECOMING the next, rather than one vanishing and another
+   appearing. The instant swap is what made client-side navigation read as a
+   page reload even though nothing was reloading.
+
+   ViewTransitions.tsx decides when; these decide what it looks like. The
+   easing is the same expressive curve used for the cart shift — a fast start
+   that settles, which is what reads as physical rather than linear. */
+::view-transition-old(root),
+::view-transition-new(root) { animation-duration: var(--th-dur, 220ms); animation-timing-function: var(--th-ease, cubic-bezier(.32,.72,0,1)); }
+
+/* FADE — the quietest. Old and new cross-dissolve. */
+#th-shell[data-page-transition='fade'] { view-transition-name: none; }
+[data-page-transition='fade']::view-transition-old(root) { animation: th-vt-out-fade var(--th-dur, 220ms) both; }
+[data-page-transition='fade']::view-transition-new(root) { animation: th-vt-in-fade var(--th-dur, 220ms) both; }
+
+/* SLIDE — content moves in from the side, so navigation has a direction. */
+[data-page-transition='slide']::view-transition-old(root) { animation: th-vt-out-slide var(--th-dur, 220ms) var(--th-ease) both; }
+[data-page-transition='slide']::view-transition-new(root) { animation: th-vt-in-slide var(--th-dur, 220ms) var(--th-ease) both; }
+
+/* SCALE — the new screen settles forward out of the old one. */
+[data-page-transition='scale']::view-transition-old(root) { animation: th-vt-out-scale var(--th-dur, 220ms) var(--th-ease) both; }
+[data-page-transition='scale']::view-transition-new(root) { animation: th-vt-in-scale var(--th-dur, 220ms) var(--th-ease) both; }
+
+/* MORPH — the default, and the one worth having. Anything carrying a
+   view-transition-name is tracked ACROSS the navigation, so a card you click
+   travels to become the header of the page it opens instead of disappearing
+   and being redrawn somewhere else. */
+[data-page-transition='morph']::view-transition-old(root) { animation: th-vt-out-morph var(--th-dur, 220ms) var(--th-ease) both; }
+[data-page-transition='morph']::view-transition-new(root) { animation: th-vt-in-morph var(--th-dur, 220ms) var(--th-ease) both; }
+[data-page-transition='morph'] ::view-transition-group(*) {
+  animation-duration: var(--th-dur, 220ms);
+  animation-timing-function: var(--th-ease, cubic-bezier(.32,.72,0,1));
+}
+
+@keyframes th-vt-out-fade  { to   { opacity: 0 } }
+@keyframes th-vt-in-fade   { from { opacity: 0 } }
+@keyframes th-vt-out-slide { to   { opacity: 0; transform: translateX(-2%) } }
+@keyframes th-vt-in-slide  { from { opacity: 0; transform: translateX(3%) } }
+@keyframes th-vt-out-scale { to   { opacity: 0; transform: scale(.985) } }
+@keyframes th-vt-in-scale  { from { opacity: 0; transform: scale(1.012) } }
+@keyframes th-vt-out-morph { to   { opacity: 0; transform: scale(.99) translateY(4px) } }
+@keyframes th-vt-in-morph  { from { opacity: 0; transform: scale(1.006) translateY(-6px) } }
+
+/* The old on/off rule this replaces, kept working for the fade case. */
+[data-page-transition] #th-content { animation: th-content-fade-in var(--th-dur, 220ms) var(--th-ease) both; }

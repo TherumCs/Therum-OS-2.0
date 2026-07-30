@@ -47,7 +47,7 @@ export interface Appearance {
 
   motionEnabled: boolean;
   transitionSpeed: 'fast' | 'default' | 'slow';
-  pageTransitions: boolean;
+  pageTransitions: 'off' | 'fade' | 'slide' | 'scale' | 'morph';
   hoverLift: boolean;
 
   cardLayout: 'compact' | 'comfortable';
@@ -114,7 +114,7 @@ export const DEFAULT_APPEARANCE: Appearance = {
 
   motionEnabled: true,
   transitionSpeed: 'default',
-  pageTransitions: false,
+  pageTransitions: 'morph',
   hoverLift: true,
 
   cardLayout: 'comfortable',
@@ -156,6 +156,14 @@ export const DEFAULT_APPEARANCE: Appearance = {
 // attribute and an explicit default-value attribute render identically) or
 // `undefined` for booleans/enums where the non-default case is the only one
 // that needs a selector at all.
+
+/** Accepts the old boolean and the new style name; returns a style or nothing. */
+export function pageTransitionStyle(v: unknown): string | undefined {
+  if (v === true) return 'fade';
+  if (v === false || v === 'off' || v == null) return undefined;
+  return ['fade', 'slide', 'scale', 'morph'].includes(String(v)) ? String(v) : undefined;
+}
+
 export function appearanceDataAttrs(a: Appearance): Record<string, string | undefined> {
   return {
     'data-density': a.density,
@@ -180,7 +188,14 @@ export function appearanceDataAttrs(a: Appearance): Record<string, string | unde
     'data-card-layout': a.cardLayout === 'comfortable' ? undefined : a.cardLayout,
 
     'data-motion': a.motionEnabled ? undefined : 'off',
-    'data-page-transitions': a.pageTransitions ? 'on' : undefined,
+    // The VALUE is the style now, not just on/off — see the view-transition
+    // block in globals.css.
+    //
+    // Coerced HERE as well as in the schema: the schema transform runs on
+    // input, so a row written before this change still reads back as the
+    // boolean `true` and rendered `data-page-transition="true"`, which matches
+    // no selector at all.
+    'data-page-transition': pageTransitionStyle(a.pageTransitions),
     'data-hover-lift': a.hoverLift ? undefined : 'off',
     'data-reduce-transparency': a.reduceTransparency ? 'on' : undefined,
     'data-underline-links': a.underlineLinks ? 'on' : undefined,

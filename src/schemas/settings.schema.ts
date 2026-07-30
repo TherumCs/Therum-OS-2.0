@@ -34,7 +34,13 @@ export const AppearanceInput = z.object({
 
   motionEnabled: z.boolean().optional(),
   transitionSpeed: z.enum(['fast', 'default', 'slow']).optional(),
-  pageTransitions: z.boolean().optional(),
+  // Was a boolean. Old stored rows are coerced rather than rejected: `true`
+  // becomes the fade it used to be, `false` becomes off. A settings row that
+  // fails to parse takes the whole admin down with it.
+  pageTransitions: z.union([
+    z.enum(['off', 'fade', 'slide', 'scale', 'morph']),
+    z.boolean().transform((b) => (b ? 'fade' as const : 'off' as const)),
+  ]).optional(),
   hoverLift: z.boolean().optional(),
 
   cardLayout: z.enum(['compact', 'comfortable']).optional(),
