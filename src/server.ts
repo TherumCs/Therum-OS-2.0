@@ -101,7 +101,22 @@ export async function buildServer() {
     },
   });
 
-  await app.register(helmet);
+  // Helmet's default CSP is img-src 'self' data:, which blocks any product
+  // image hosted anywhere else — and a merchant's catalogue images legitimately
+  // live on a CDN or a supplier's domain. The product editor previews those, so
+  // with the default every thumbnail in it rendered as a broken image.
+  //
+  // Only img-src is widened, and only to https (never http, never a wildcard
+  // for scripts): an image cannot execute, so this costs nothing that matters,
+  // while script-src stays 'self'.
+  await app.register(helmet, {
+    contentSecurityPolicy: {
+      useDefaults: true,
+      directives: {
+        'img-src': ["'self'", 'data:', 'blob:', 'https:'],
+      },
+    },
+  });
   // Hard ceiling only — the REAL limit is Settings > Uploads > maxUploadMb,
   // enforced in lib/uploadPolicy.ts. This has to sit at or above the schema's
   // own maximum (2048 MB), otherwise multipart rejects a file with a generic

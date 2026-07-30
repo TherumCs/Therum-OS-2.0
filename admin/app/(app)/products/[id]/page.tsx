@@ -1,5 +1,6 @@
 import { apiGet } from '../../../../lib/api';
-import { ProductEditor, type EditorProduct } from './ProductEditor';
+import { type EditorProduct } from './ProductEditor';
+import { ProductStudio } from './ProductStudio';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,5 +17,5 @@ export default async function ProductEditPage({ params }: { params: Promise<{ id
     apiGet<Term[]>('/api/catalog/categories'),
     apiGet<Term[]>('/api/catalog/tags'),
   ]);
-  return <ProductEditor initial={product} allCategories={categories} allTags={tags} />;
+  return <ProductStudio initial={product} allCategories={categories} allTags={tags} />;
 }
