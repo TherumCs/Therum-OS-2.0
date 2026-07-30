@@ -20,8 +20,12 @@ export const taxonomyService = {
   async createCategory(input: { name: string; slug?: string; parentId?: string | null }) {
     const slug = input.slug ?? slugify(input.name);
     if (!slug) throw new ValidationError('Category needs a usable slug', 'name');
-    const clash = await db.productCategory.findUnique({ where: { slug }, select: { id: true } });
-    if (clash) throw new ConflictError('A category with this slug already exists', 'slug');
+    // Clash check is SCOPED TO THE SIBLINGS. A store may have Mens > T-Shirts
+    // and Womens > T-Shirts, both plain "t-shirts" — that is the whole point of
+    // parent-scoped slugs. Only two children of the SAME parent collide.
+    const parentId = input.parentId ?? null;
+    const clash = await db.productCategory.findFirst({ where: { slug, parentId }, select: { id: true } });
+    if (clash) throw new ConflictError('A category with this slug already exists here', 'slug');
     if (input.parentId) {
       const parent = await db.productCategory.findUnique({ where: { id: input.parentId }, select: { id: true } });
       if (!parent) throw new NotFoundError('Parent category not found', 'parentId');
@@ -42,9 +46,17 @@ export const taxonomyService = {
         cursor = row?.parentId ?? null;
       }
     }
-    if (input.slug && input.slug !== current.slug) {
-      const clash = await db.productCategory.findUnique({ where: { slug: input.slug }, select: { id: true } });
-      if (clash) throw new ConflictError('A category with this slug already exists', 'slug');
+    // Re-parenting changes which siblings a slug has to be unique among, so
+    // the check runs whenever EITHER the slug or the parent moves — checking
+    // only on a slug change would let a move collide silently.
+    const nextSlug = input.slug ?? current.slug;
+    const nextParent = input.parentId !== undefined ? input.parentId : current.parentId;
+    if (nextSlug !== current.slug || nextParent !== current.parentId) {
+      const clash = await db.productCategory.findFirst({
+        where: { slug: nextSlug, parentId: nextParent ?? null, id: { not: id } },
+        select: { id: true },
+      });
+      if (clash) throw new ConflictError('A category with this slug already exists here', 'slug');
     }
     return db.productCategory.update({ where: { id }, data: input });
   },

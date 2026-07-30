@@ -103,15 +103,31 @@ model Product {
 // ─── Catalog taxonomy (Woo parity: hierarchical categories, flat tags) ──
 
 model ProductCategory {
-  id       String  @id @default(cuid())
-  name     String
-  slug     String  @unique
+  id   String @id @default(cuid())
+  name String
+  // NOT globally unique — unique WITHIN ITS PARENT.
+  //
+  // A global unique slug is the WooCommerce problem: you can have one
+  // "t-shirts" in the whole store, so the second one becomes t-shirts-1 or has
+  // to be renamed womens-t-shirts. Scoped to the parent, Mens > T-Shirts and
+  // Womens > T-Shirts are both plain "t-shirts" and their URLs stay clean:
+  // /c/mens/t-shirts and /c/womens/t-shirts.
+  //
+  // Because a slug alone no longer identifies a category, everything resolves
+  // by PATH — see src/counter/categoryTree.ts.
+  slug     String
   parentId String? @map("parent_id")
 
   parent   ProductCategory?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
   children ProductCategory[] @relation("CategoryTree")
   products Product[]
 
+  // Siblings cannot share a slug. NOTE this does NOT cover TOP-LEVEL
+  // categories: Postgres treats NULLs as distinct, so every parent_id IS NULL
+  // row escapes this constraint. A partial unique index in the migration covers
+  // those, and taxonomy.service checks it in application code too.
+  @@unique([parentId, slug])
+  @@index([parentId])
   @@map("product_categories")
 }
 

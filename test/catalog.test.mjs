@@ -81,9 +81,19 @@ test('shop: search matches name AND description; category/tag/color/size filters
   assert.match(byDesc.body, /cattest Tee/, 'description text searchable');
   assert.doesNotMatch(byDesc.body, /cattest Mug/);
 
+  // A PARENT ROLLS UP ITS CHILDREN. cattest-drinkware is a child of
+  // cattest-apparel, so filtering on the parent includes the Mug filed under
+  // the child. This used to exclude it, which is the classic empty-category
+  // problem: a shopper clicks "Mens", every product is filed one level down,
+  // and the page is blank.
   const byCat = await app.inject({ method: 'GET', url: '/shop?category=cattest-apparel' });
   assert.match(byCat.body, /cattest Tee/);
-  assert.doesNotMatch(byCat.body, /cattest Mug/, 'category filter excludes others');
+  assert.match(byCat.body, /cattest Mug/, 'parent category includes its children');
+
+  // The child itself stays precise — it shows only its own.
+  const byChild = await app.inject({ method: 'GET', url: '/shop?category=cattest-drinkware' });
+  assert.match(byChild.body, /cattest Mug/);
+  assert.doesNotMatch(byChild.body, /cattest Tee/, 'child category excludes the parent\'s other products');
 
   const byTag = await app.inject({ method: 'GET', url: '/shop?tag=cattest-summer' });
   assert.match(byTag.body, /cattest Tee/);

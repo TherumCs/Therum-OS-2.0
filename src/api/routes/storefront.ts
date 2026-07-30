@@ -4,6 +4,7 @@ import { db } from '../../lib/db.js';
 import { capabilityService } from '../../services/capability.service.js';
 import { layout, closedPage, esc, money, type StoreChrome, type SeoMeta } from '../../site/storefrontHtml.js';
 import { buildNav } from './site.js';
+import { resolveCategoryPath, resolveCategoryFilter, categoryAndDescendantIds, categoryFacets } from '../../counter/categoryTree.js';
 import { settingsService } from '../../services/settings.service.js';
 import { productGrid, CARD_EVOLVE_RUNTIME, CARD_REVEAL_RUNTIME, type CardPreset } from '../../site/productGrid.js';
 import { resolveCustomer } from '../../counter/customerSession.js';
@@ -205,6 +206,12 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     const presetTagOff = preset.tag !== undefined && tagParam === ALL;
     const category = presetCatOff ? '' : (catParam && catParam !== ALL ? catParam : preset.category ?? '');
     const tag = presetTagOff ? '' : (tagParam && tagParam !== ALL ? tagParam : preset.tag ?? '');
+    // `category` is a PATH now ("mens" or "mens/accessories/hats"), resolved to
+    // the category plus everything under it. An unresolvable path filters to
+    // nothing rather than falling back to "no filter" — a typo in the URL must
+    // not quietly return the entire catalogue as if it matched.
+    const catNode = category ? await resolveCategoryFilter(category) : null;
+    const categoryIds = category ? (catNode ? await categoryAndDescendantIds(catNode.id) : []) : null;
     const color = (query.color ?? '').trim().slice(0, 40);
     const size = (query.size ?? '').trim().slice(0, 40);
     // Sort is validated against the known set rather than passed through — an
@@ -239,7 +246,11 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
       where: {
         status: 'active',
         ...(q ? { OR: [{ name: { contains: q, mode: 'insensitive' } }, { description: { contains: q, mode: 'insensitive' } }] } : {}),
-        ...(category ? { categories: { some: { slug: category } } } : {}),
+        // Resolved to ids, not matched on slug: a slug is only unique within
+        // its parent now, so `slug: 't-shirts'` would pull Mens AND Womens.
+        // The set includes descendants, so /c/mens lists what is filed under
+        // Mens > T-Shirts too.
+        ...(categoryIds ? { categories: { some: { id: { in: categoryIds } } } } : {}),
         ...(tag ? { tags: { some: { slug: tag } } } : {}),
         ...(color ? { variants: { some: { color: { equals: color, mode: 'insensitive' } } } } : {}),
         ...(size ? { variants: { some: { size: { equals: size, mode: 'insensitive' } } } } : {}),
@@ -284,9 +295,9 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     // Scoped to the CATEGORY, deliberately not to the other active filters:
     // collapsing the colour list because a size is selected makes the filters
     // feel broken rather than helpful.
-    const scope = { status: 'active' as const, ...(category ? { categories: { some: { slug: category } } } : {}), ...(tag ? { tags: { some: { slug: tag } } } : {}) };
+    const scope = { status: 'active' as const, ...(categoryIds ? { categories: { some: { id: { in: categoryIds } } } } : {}), ...(tag ? { tags: { some: { slug: tag } } } : {}) };
     const [cats, tags, variantAttrs] = await Promise.all([
-      db.productCategory.findMany({ where: { products: { some: { status: 'active' } } }, select: { name: true, slug: true }, orderBy: { name: 'asc' } }),
+      categoryFacets(),
       db.productTag.findMany({ where: { products: { some: scope } }, select: { name: true, slug: true }, orderBy: { name: 'asc' } }),
       db.productVariant.findMany({ where: { product: scope }, select: { color: true, size: true } }),
     ]);
@@ -461,7 +472,11 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
         : null,
       // Only the filters the merchant switched on, in the declared order.
       groups: [
-        filterOn('category') ? { label: 'Category', options: cats.map((c) => opt(c.name, qs({ category: category === c.slug ? '' : c.slug }), category === c.slug)) } : null,
+        // Breadcrumb label and full PATH, not the bare name and slug. Two
+        // categories can now legitimately both be called "T-Shirts", so a flat
+        // name list shows the same word twice with no way to tell them apart,
+        // and a bare slug no longer identifies which one was clicked.
+        filterOn('category') ? { label: 'Category', options: cats.map((c) => opt(c.label, qs({ category: category === c.path ? '' : c.path }), category === c.path)) } : null,
         filterOn('tags') ? { label: 'Tags', options: tags.map((t) => opt(t.name, qs({ tag: tag === t.slug ? '' : t.slug }), tag === t.slug)) } : null,
         filterOn('color') ? { label: 'Color', options: colors.length > 1 ? colors.map((c) => opt(c, qs({ color: color.toLowerCase() === c.toLowerCase() ? '' : c }), color.toLowerCase() === c.toLowerCase())) : [] } : null,
         // Sizes render as a chip grid — a set to scan, not a list to read.
@@ -499,44 +514,30 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/shop', async (req, reply) => shopPage(req, reply));
 
-  // /c/:slug and /t/:slug — the same page, one filter pre-applied. A slug
-  // nobody has used 404s rather than quietly rendering the whole catalogue,
-  // which would turn every typo into a soft-200 duplicate of /shop.
-  app.get('/c/:slug', async (req, reply) => {
+  // /c/* — a category at ANY depth, resolved as a path.
+  //
+  // One wildcard rather than a route per level. Two levels is the common case
+  // (Mens > T-Shirts) and Accessories goes three (Mens > Accessories > Hats);
+  // this counts nothing, so a fourth costs no code.
+  //
+  // Every segment is checked against its parent, so /c/womens/t-shirts cannot
+  // serve the Mens t-shirts page — without that, two URLs return identical
+  // content and compete with each other. A path nobody has used 404s rather
+  // than quietly rendering the whole catalogue, which would turn every typo
+  // into a soft-200 duplicate of /shop.
+  app.get('/c/*', async (req, reply) => {
     if (!(await commerceOn())) return html(reply, closedPage());
-    const { slug } = req.params as { slug: string };
-    const cat = await db.productCategory.findUnique({ where: { slug }, select: { name: true, slug: true } });
-    if (!cat) return notFoundStore(reply, 'Category not found');
-    return shopPage(req, reply, { category: cat.slug, title: cat.name, canonical: `/c/${cat.slug}` });
-  });
+    const raw = (req.params as { '*': string })['*'] ?? '';
+    // A trailing slash leaves an empty last segment; the ported header links
+    // every category that way, so this is the common shape, not the edge one.
+    const segments = raw.split('/').filter(Boolean);
+    if (!segments.length) return notFoundStore(reply, 'Category not found');
 
-  // NESTED category URLs, e.g. /c/mens/accessories. The ported header links
-  // this way and there is no reason a real store should not: categories carry
-  // a parent. The parent is VERIFIED rather than decorative — /c/womens/
-  // accessories must not quietly serve the same page as /c/mens/accessories,
-  // or two URLs return identical content and split their own ranking.
-  app.get('/c/:parent/:slug', async (req, reply) => {
-    if (!(await commerceOn())) return html(reply, closedPage());
-    const { parent, slug } = req.params as { parent: string; slug: string };
-    // A TRAILING SLASH lands here with an empty slug — /c/mens/ matches this
-    // two-segment route, not /c/:slug. The ported header links every category
-    // with a trailing slash, so this is the common case, not the edge one:
-    // without it, adding this route silently 404s the entire main nav.
-    if (!slug) {
-      const top = await db.productCategory.findUnique({ where: { slug: parent }, select: { name: true, slug: true } });
-      if (!top) return notFoundStore(reply, 'Category not found');
-      return shopPage(req, reply, { category: top.slug, title: top.name, canonical: `/c/${top.slug}` });
-    }
-    const cat = await db.productCategory.findUnique({
-      where: { slug },
-      select: { name: true, slug: true, parent: { select: { slug: true, name: true } } },
-    });
-    if (!cat || cat.parent?.slug !== parent) return notFoundStore(reply, 'Category not found');
-    return shopPage(req, reply, {
-      category: cat.slug,
-      title: cat.name,
-      canonical: `/c/${parent}/${cat.slug}`,
-    });
+    const cat = await resolveCategoryPath(segments);
+    if (!cat) return notFoundStore(reply, 'Category not found');
+
+    const path = segments.join('/');
+    return shopPage(req, reply, { category: path, title: cat.name, canonical: `/c/${path}` });
   });
 
   app.get('/t/:slug', async (req, reply) => {
