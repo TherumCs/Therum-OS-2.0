@@ -280,7 +280,11 @@ export type BackupSettingsInput = z.infer<typeof BackupSettingsInput>;
 // while already signed in — skippable and resumable, tracked the same way
 // as every other domain here. ────────────────────────────────────────────
 export const OnboardingInput = z.object({
-  step: z.enum(['edition', 'connections', 'branding', 'finish']).optional(),
+  // 'connections' is kept ONLY so an install that stopped on that step still
+  // parses — it no longer has a screen. The wizard now covers what a new
+  // install actually has to decide: who they are, which edition, which Studio
+  // apps, and what the store charges in.
+  step: z.enum(['account', 'edition', 'addons', 'store', 'branding', 'finish', 'connections']).optional(),
   completed: z.boolean().optional(),
 });
 export type OnboardingInput = z.infer<typeof OnboardingInput>;

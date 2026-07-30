@@ -72,9 +72,31 @@ export async function selectProvider(id: string, provider: string): Promise<void
 // revalidating, so the page always re-fetches the freshly-saved step server-
 // side — same reasoning as the rest of this file, plain Route-Handler-style
 // mutations, no client state to keep in sync.
+/** Turn a Studio app on or off from the wizard. Same endpoint the Studio uses. */
+export async function onboardingToggleAddon(id: string, enabled: boolean): Promise<void> {
+  await apiSend('PATCH', `/api/studio-apps/${id}`, { enabled });
+  revalidatePath('/onboarding');
+  redirect('/onboarding');
+}
+
+/** Currency and site name — the two a store cannot open without. */
+export async function onboardingSaveStore(formData: FormData): Promise<void> {
+  const currency = String(formData.get('currency') ?? '').trim();
+  const locale = String(formData.get('locale') ?? '').trim();
+  const siteName = String(formData.get('siteName') ?? '').trim();
+  const calls: Promise<unknown>[] = [apiSend('PATCH', '/api/settings/onboarding', { step: 'branding' })];
+  if (currency) calls.push(apiSend('PATCH', '/api/settings/commerce', { currency, ...(locale ? { locale } : {}) }));
+  if (siteName) {
+    calls.push(apiSend('PATCH', '/api/settings/site', { siteName }));
+    calls.push(apiSend('PATCH', '/api/settings/seo-defaults', { siteName }));
+  }
+  await Promise.all(calls);
+  redirect('/onboarding');
+}
+
 export async function onboardingSetEdition(edition: string): Promise<void> {
   await apiSend('PATCH', '/api/edition', { edition });
-  await apiSend('PATCH', '/api/settings/onboarding', { step: 'connections' });
+  await apiSend('PATCH', '/api/settings/onboarding', { step: 'addons' });
   redirect('/onboarding');
 }
 

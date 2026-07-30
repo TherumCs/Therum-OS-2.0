@@ -491,11 +491,11 @@ const NOTIFICATIONS_DEFAULTS: Notifications = {
 // dashboard checks to decide whether to show the "finish setup" banner at
 // all (true whether the user actually finished or explicitly skipped).
 export interface Onboarding {
-  step: 'edition' | 'connections' | 'branding' | 'finish';
+  step: 'account' | 'edition' | 'addons' | 'store' | 'branding' | 'finish' | 'connections';
   completed: boolean;
 }
 const ONBOARDING_KEY = 'onboarding';
-const ONBOARDING_DEFAULTS: Onboarding = { step: 'edition', completed: false };
+const ONBOARDING_DEFAULTS: Onboarding = { step: 'account', completed: false };
 
 export interface BackupSettings {
   enabled: boolean;

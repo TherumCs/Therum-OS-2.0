@@ -1795,3 +1795,15 @@ tr:hover .th-rowactions, tr:focus-within .th-rowactions { opacity: 1; }
 .th-order__side { border: 1px solid var(--th-line); border-radius: var(--th-r); padding: var(--th-space-14); background: var(--th-surface); }
 .th-order__row { display: flex; justify-content: space-between; gap: var(--th-space-10); padding: 4px 0; font-size: var(--th-fs-sm); }
 .th-order__row--total { border-top: 1px solid var(--th-line); margin-top: 6px; padding-top: 8px; font-weight: 700; }
+
+/* Studio-app picker in the setup wizard. A row you press, not a checkbox in a
+   list — the description is what people are actually choosing between. */
+.th-onb-app { display: flex; align-items: flex-start; gap: var(--th-space-10); width: 100%; text-align: left;
+  padding: var(--th-space-12); border: 1px solid var(--th-line); border-radius: var(--th-r);
+  background: var(--th-surface); cursor: pointer; font: inherit; color: inherit; }
+.th-onb-app:hover { border-color: var(--th-accent-btn, #3858e9); }
+.th-onb-app.is-on { border-color: var(--th-accent-btn, #3858e9);
+  background: color-mix(in srgb, var(--th-accent-btn, #3858e9) 8%, transparent); }
+.th-onb-app__check { flex: 0 0 20px; width: 20px; height: 20px; border-radius: 6px; margin-top: 2px;
+  border: 1px solid var(--th-line); display: grid; place-items: center; font-size: 12px; }
+.th-onb-app.is-on .th-onb-app__check { background: var(--th-accent-btn, #3858e9); border-color: transparent; color: #fff; }

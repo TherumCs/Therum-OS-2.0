@@ -1,16 +1,22 @@
 import type { ReactNode } from 'react';
 import { apiGet } from '../../../lib/api';
-import { onboardingSetEdition, onboardingSetStep, onboardingSaveBranding, onboardingComplete } from '../../actions';
+import { onboardingSetEdition, onboardingSetStep, onboardingSaveBranding, onboardingComplete, onboardingToggleAddon, onboardingSaveStore } from '../../actions';
 import { DEFAULT_LOGIN_BRANDING, type LoginBranding } from '../../../lib/loginBranding';
 import { DEFAULT_APPEARANCE, type Appearance } from '../../../lib/appearance';
 
 export const dynamic = 'force-dynamic';
 
 interface Onboarding {
-  step: 'edition' | 'connections' | 'branding' | 'finish';
+  step: 'account' | 'edition' | 'addons' | 'store' | 'branding' | 'finish' | 'connections';
   completed: boolean;
 }
-const ONBOARDING_DEFAULTS: Onboarding = { step: 'edition', completed: false };
+const ONBOARDING_DEFAULTS: Onboarding = { step: 'account', completed: false };
+
+interface StudioApp { id: string; name: string; description: string; enabled: boolean }
+interface Me { username: string }
+interface CommerceSettings { currency: string; locale: string }
+
+const CURRENCIES = ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY'];
 
 interface SeoDefaults {
   siteName: string;
@@ -19,10 +25,14 @@ interface SeoDefaults {
 }
 const SEO_DEFAULTS: SeoDefaults = { siteName: '', siteDescription: '', siteLogo: '' };
 
-const STEPS = ['edition', 'connections', 'branding', 'finish'] as const;
+// 'connections' is deliberately NOT here: it was a step that told you it was
+// not built yet, which is not a step. Connections exist now and live in Nexus.
+const STEPS = ['account', 'edition', 'addons', 'store', 'branding', 'finish'] as const;
 const STEP_LABELS: Record<(typeof STEPS)[number], string> = {
+  account: 'Account',
   edition: 'Edition',
-  connections: 'Connections',
+  addons: 'Studio apps',
+  store: 'Store',
   branding: 'Branding',
   finish: 'Finish',
 };
@@ -47,14 +57,21 @@ function StepFooter({ children }: { children: ReactNode }) {
 // banner resumes exactly where it left off.
 export default async function OnboardingPage() {
   const onboarding = await apiGet<Onboarding>('/api/settings/onboarding').catch(() => ONBOARDING_DEFAULTS);
-  const [edition, seo, branding, appearance] = await Promise.all([
+  const [edition, seo, branding, appearance, studioApps, me, commerce, site] = await Promise.all([
     apiGet<{ edition: 'pure' | 'unlocked' }>('/api/edition').catch(() => ({ edition: 'pure' as const })),
     apiGet<SeoDefaults>('/api/settings/seo-defaults').catch(() => SEO_DEFAULTS),
     apiGet<LoginBranding>('/api/settings/login-branding').catch(() => DEFAULT_LOGIN_BRANDING),
     apiGet<Appearance>('/api/settings/appearance').catch(() => DEFAULT_APPEARANCE),
+    apiGet<StudioApp[]>('/api/studio-apps').catch((): StudioApp[] => []),
+    apiGet<Me>('/api/me').catch((): Me => ({ username: 'admin' })),
+    apiGet<CommerceSettings>('/api/settings/commerce').catch(() => ({ currency: 'USD', locale: 'en-US' })),
+    apiGet<{ siteName: string }>('/api/settings/site').catch(() => ({ siteName: '' })),
   ]);
 
-  const stepIndex = STEPS.indexOf(onboarding.step);
+  // An install parked on the retired 'connections' step resumes at Studio apps
+  // rather than falling off the end of the list and showing nothing.
+  const current = (onboarding.step === 'connections' ? 'addons' : onboarding.step) as (typeof STEPS)[number];
+  const stepIndex = STEPS.indexOf(current);
 
   return (
     <section style={{ maxWidth: 640 }}>
@@ -72,7 +89,7 @@ export default async function OnboardingPage() {
       </div>
 
       <div className="card" style={{ marginTop: 'var(--th-space-20)' }}>
-        {onboarding.step === 'edition' && (
+        {current === 'edition' && (
           <>
             <h2 style={{ marginTop: 0 }}>Choose your edition</h2>
             <p className="muted">
@@ -106,24 +123,61 @@ export default async function OnboardingPage() {
           </>
         )}
 
-        {onboarding.step === 'connections' && (
+        {current === 'account' && (
           <>
-            <h2 style={{ marginTop: 0 }}>Connections</h2>
-            <p className="muted">Email, payments, storage, and other services connect from one hub.</p>
-            <div className="notice">This hub isn&apos;t built yet — it&apos;s next on the roadmap, so there&apos;s nothing to configure here today.</div>
+            <h2 style={{ marginTop: 0 }}>You&apos;re signed in as {me.username}</h2>
+            <p className="muted">
+              This account is the full administrator. Extra people, roles and two-factor live in Settings once you are
+              through setup — nothing here is permanent.
+            </p>
+            <p className="muted" style={{ fontSize: 13 }}>
+              Change your password or username in Settings → Security. This wizard never asks for a password.
+            </p>
+            <StepFooter>
+              <form action={onboardingComplete}>
+                <button type="submit" className="ghost">Skip setup</button>
+              </form>
+              <form action={onboardingSetStep.bind(null, 'edition')}>
+                <button type="submit">Next →</button>
+              </form>
+            </StepFooter>
+          </>
+        )}
+
+        {current === 'addons' && (
+          <>
+            <h2 style={{ marginTop: 0 }}>Which Studio apps do you want?</h2>
+            <p className="muted">
+              Each one adds a section to the sidebar and its own features. Off means the code stays installed and simply
+              does not appear — turn any of them on later in Studio.
+            </p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--th-space-8)' }}>
+              {studioApps.map((a) => (
+                <form key={a.id} action={onboardingToggleAddon.bind(null, a.id, !a.enabled)}>
+                  <button
+                    type="submit"
+                    className={'th-onb-app' + (a.enabled ? ' is-on' : '')}
+                    aria-pressed={a.enabled}
+                  >
+                    <span className="th-onb-app__check" aria-hidden="true">{a.enabled ? '✓' : ''}</span>
+                    <span>
+                      <strong>{a.name}</strong>
+                      <span className="th-hint" style={{ display: 'block' }}>{a.description}</span>
+                    </span>
+                  </button>
+                </form>
+              ))}
+              {!studioApps.length && <p className="muted">No Studio apps are registered on this install.</p>}
+            </div>
             <StepFooter>
               <form action={onboardingSetStep.bind(null, 'edition')}>
-                <button type="submit" className="ghost">
-                  ← Back
-                </button>
+                <button type="submit" className="ghost">← Back</button>
               </form>
               <div style={{ display: 'flex', gap: 'var(--th-space-8)' }}>
                 <form action={onboardingComplete}>
-                  <button type="submit" className="ghost">
-                    Skip setup
-                  </button>
+                  <button type="submit" className="ghost">Skip setup</button>
                 </form>
-                <form action={onboardingSetStep.bind(null, 'branding')}>
+                <form action={onboardingSetStep.bind(null, 'store')}>
                   <button type="submit">Next →</button>
                 </form>
               </div>
@@ -131,7 +185,37 @@ export default async function OnboardingPage() {
           </>
         )}
 
-        {onboarding.step === 'branding' && (
+        {current === 'store' && (
+          <form action={onboardingSaveStore}>
+            <h2 style={{ marginTop: 0 }}>What does this store sell in?</h2>
+            <p className="muted">
+              Currency is what prices are stored and charged in. It is worth getting right now — changing it later does
+              not convert prices that already exist.
+            </p>
+            <Field label="Store name">
+              <input name="siteName" defaultValue={site.siteName} placeholder="The Sidemoney Company" />
+            </Field>
+            <Field label="Currency">
+              <select name="currency" defaultValue={commerce.currency}>
+                {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </Field>
+            <Field label="Locale">
+              <select name="locale" defaultValue={commerce.locale}>
+                {['en-US', 'en-GB', 'fr-FR', 'de-DE', 'es-ES', 'ja-JP'].map((l) => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </Field>
+            <StepFooter>
+              <button type="submit" className="ghost" formAction={onboardingSetStep.bind(null, 'addons')}>← Back</button>
+              <div style={{ display: 'flex', gap: 'var(--th-space-8)' }}>
+                <button type="submit" className="ghost" formAction={onboardingComplete}>Skip setup</button>
+                <button type="submit">Next →</button>
+              </div>
+            </StepFooter>
+          </form>
+        )}
+
+        {current === 'branding' && (
           <form action={onboardingSaveBranding}>
             <h2 style={{ marginTop: 0 }}>Branding</h2>
             <p className="muted">A few quick touches — all of this stays editable later in Settings. Leave anything blank to keep its current value.</p>
@@ -188,7 +272,7 @@ export default async function OnboardingPage() {
           </form>
         )}
 
-        {onboarding.step === 'finish' && (
+        {current === 'finish' && (
           <>
             <h2 style={{ marginTop: 0 }}>You&apos;re all set</h2>
             <p className="muted">Therum CMS is ready to go. Everything here stays editable later from Settings or Studio.</p>
