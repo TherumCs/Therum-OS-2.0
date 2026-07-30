@@ -11,7 +11,12 @@ dist/
 .DS_Store
 prisma/*.db
 coverage/
-uploads/
+# ANCHORED to the repo root. As a bare `uploads/` this matched ANY directory
+# called uploads at any depth — and silently excluded
+# admin/app/(app)/settings/uploads/, the entire Uploads settings page, from the
+# repository. It was on disk and working locally, so nothing looked wrong; a
+# fresh clone simply would not have had that page.
+/uploads/
 .next/
 admin/.next/
 admin/.env.local

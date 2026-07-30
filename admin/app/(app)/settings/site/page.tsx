@@ -21,11 +21,27 @@ interface ContentItem {
 interface Paged<T> {
   items: T[];
 }
+interface CommerceSettings { currency: string; locale: string; minMarginPct: number }
+interface SeoDefaults { siteName: string; siteDescription: string; siteLogo: string }
+
+// Currencies the storefront can actually price in. A free-text box invites
+// "USD " or "dollars"; the API takes a 3-letter code and rejects everything
+// else, so the control should only offer valid ones.
+const CURRENCIES: [string, string][] = [
+  ['USD', 'US Dollar (USD)'], ['EUR', 'Euro (EUR)'], ['GBP', 'British Pound (GBP)'],
+  ['CAD', 'Canadian Dollar (CAD)'], ['AUD', 'Australian Dollar (AUD)'], ['JPY', 'Japanese Yen (JPY)'],
+];
+const LOCALES: [string, string][] = [
+  ['en-US', 'English (US)'], ['en-GB', 'English (UK)'], ['fr-FR', 'French'],
+  ['de-DE', 'German'], ['es-ES', 'Spanish'], ['ja-JP', 'Japanese'],
+];
 
 export default async function SiteSettingsPage() {
-  const [site, content] = await Promise.all([
+  const [site, content, commerce, seo] = await Promise.all([
     apiGet<SiteSettings>('/api/settings/site'),
     apiGet<Paged<ContentItem>>('/api/content?limit=100'),
+    apiGet<CommerceSettings>('/api/settings/commerce').catch(() => ({ currency: 'USD', locale: 'en-US', minMarginPct: 0 })),
+    apiGet<SeoDefaults>('/api/settings/seo-defaults').catch(() => ({ siteName: '', siteDescription: '', siteLogo: '' })),
   ]);
   const pages = content.items.filter((c) => c.type === 'page' && c.status === 'published');
 
@@ -76,6 +92,35 @@ export default async function SiteSettingsPage() {
       <div className="settings-group">
         <h3 className="settings-group-title">Navigation menu</h3>
         <MenuEditor initial={site.menu} />
+      </div>
+
+      {/* CURRENCY AND LOCALE had no control anywhere. The API has always taken
+          them; there was simply no way to set them without calling it by hand,
+          which for a store about to go live on a domain is not a small gap. */}
+      <div className="settings-group">
+        <h3 className="settings-group-title">Store</h3>
+        <Field label="Currency" help="What prices are stored and charged in. Changing it does not convert existing prices.">
+          <SelectField domain="commerce" field="currency" initial={commerce.currency} options={CURRENCIES} />
+        </Field>
+        <Field label="Locale" help="How prices and dates are formatted for shoppers.">
+          <SelectField domain="commerce" field="locale" initial={commerce.locale} options={LOCALES} />
+        </Field>
+      </div>
+
+      {/* SEO DEFAULTS were only reachable during onboarding — set once, then
+          unreachable forever. These are what a page falls back to when it has
+          no title or description of its own, and what gets shared to social. */}
+      <div className="settings-group">
+        <h3 className="settings-group-title">Search &amp; sharing defaults</h3>
+        <Field label="Default title" help="Used when a page has no SEO title of its own.">
+          <TextInput domain="seo-defaults" field="siteName" initial={seo.siteName} placeholder={site.siteName} />
+        </Field>
+        <Field label="Default description" help="The sentence search engines and link previews show. Around 150 characters.">
+          <TextInput domain="seo-defaults" field="siteDescription" initial={seo.siteDescription} placeholder="What this store sells, in one sentence." />
+        </Field>
+        <Field label="Share image" help="Shown when a link to this site is posted. 1200x630 works everywhere.">
+          <TextInput domain="seo-defaults" field="siteLogo" initial={seo.siteLogo} placeholder="https://…/share.png" />
+        </Field>
       </div>
     </section>
   );
