@@ -126,13 +126,14 @@ export function SettingsForm<T extends Record<string, unknown>>({
     <FormCtx.Provider value={ctx}>
       {children}
       {/* ALWAYS rendered, and styled INLINE.
-          Two earlier versions of this bar were invisible on the page for
-          different reasons — first an opacity toggle that computed to 0, then a
-          conditional mount. Both failures had the same root: the bar's
-          appearance depended on admin/app/globals.css, which has 45 more
-          closing braces than opening ones, so rules past that point are not
-          reliably applied. The one control that must never go missing is the
-          one that saves, so it carries its own styling and is always on screen
+          Two earlier versions of this bar were invisible on the page: first an
+          opacity toggle that computed to 0, then a conditional mount.
+          I originally blamed an unbalanced globals.css. That was WRONG — the
+          file is balanced (697 braces each way), and the real reason the
+          `.th-savebar` rules did not take is still not identified. What is
+          certain is that the bar was interactive and unseen twice, so it no
+          longer depends on the stylesheet at all: the one control that must
+          never go missing carries its own styling and is always on screen,
           whether or not there is anything to save. */}
       <div
         role="status"

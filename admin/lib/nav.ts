@@ -54,7 +54,7 @@ export function buildNav(commerceActive: boolean, portfolioActive: boolean, stud
       id: 'counter',
       label: 'Counter',
       items: [
-        { href: '/products', label: 'Products', icon: 'widgets' },
+        { href: '/products', label: 'Product Catalog', icon: 'widgets' },
         { href: '/orders', label: 'Orders', icon: 'import' },
         { href: '/promotions', label: 'Promotions', icon: 'studio' },
         { href: '/customization', label: 'Customization', icon: 'palette' },

@@ -146,3 +146,73 @@ export async function removeBricksAddon(slug: string): Promise<void> {
   await apiSend('DELETE', `/api/bricks/addons/${slug}`);
   revalidatePath('/bricks');
 }
+
+// ── Product Catalog: categories and tags ────────────────────────────────
+//
+// These had no UI at all — a category could only be ticked from inside a
+// single product, so there was no way to create one, rename it, move it, or
+// see the tree. Every action revalidates BOTH the manager and the product
+// list, because renaming or re-parenting a category changes what the product
+// rows say about themselves.
+
+function catalogRevalidate(): void {
+  revalidatePath('/products/categories');
+  revalidatePath('/products/tags');
+  revalidatePath('/products');
+}
+
+export async function createCategory(formData: FormData): Promise<void> {
+  const name = String(formData.get('name') ?? '').trim();
+  if (!name) return;
+  const slug = String(formData.get('slug') ?? '').trim();
+  const parentId = String(formData.get('parentId') ?? '').trim();
+  await apiSend('POST', '/api/catalog/categories', {
+    name,
+    ...(slug ? { slug } : {}),
+    // '' means top level. Sent as null rather than omitted so the intent is
+    // explicit on the wire.
+    parentId: parentId || null,
+  });
+  catalogRevalidate();
+}
+
+export async function updateCategory(formData: FormData): Promise<void> {
+  const id = String(formData.get('id') ?? '').trim();
+  if (!id) return;
+  const name = String(formData.get('name') ?? '').trim();
+  const slug = String(formData.get('slug') ?? '').trim();
+  const parentRaw = formData.get('parentId');
+  const patch: Record<string, unknown> = {};
+  if (name) patch.name = name;
+  if (slug) patch.slug = slug;
+  // Only sent when the field was actually present, so a rename cannot
+  // accidentally re-root a category by omitting it.
+  if (parentRaw !== null) patch.parentId = String(parentRaw).trim() || null;
+  if (!Object.keys(patch).length) return;
+  await apiSend('PATCH', `/api/catalog/categories/${id}`, patch);
+  catalogRevalidate();
+}
+
+export async function deleteCategory(formData: FormData): Promise<void> {
+  const id = String(formData.get('id') ?? '').trim();
+  if (!id) return;
+  // Children re-root rather than disappearing (onDelete: SetNull), and the
+  // products simply lose the link — nothing is deleted with it.
+  await apiSend('DELETE', `/api/catalog/categories/${id}`);
+  catalogRevalidate();
+}
+
+export async function createTag(formData: FormData): Promise<void> {
+  const name = String(formData.get('name') ?? '').trim();
+  if (!name) return;
+  const slug = String(formData.get('slug') ?? '').trim();
+  await apiSend('POST', '/api/catalog/tags', { name, ...(slug ? { slug } : {}) });
+  catalogRevalidate();
+}
+
+export async function deleteTag(formData: FormData): Promise<void> {
+  const id = String(formData.get('id') ?? '').trim();
+  if (!id) return;
+  await apiSend('DELETE', `/api/catalog/tags/${id}`);
+  catalogRevalidate();
+}

@@ -15,6 +15,7 @@ import { customerAccountService } from '../../services/customerAccount.service.j
 import { UnauthorizedError, ValidationError } from '../../lib/errors.js';
 import { checkRateLimit } from '../../lib/rateLimit.js';
 import { TooManyRequestsError } from '../../lib/errors.js';
+import * as catalogImport from '../../counter/catalogImport.js';
 
 // Counter — HTTP surface.
 //
@@ -418,6 +419,37 @@ export async function counterAdminRoutes(app: FastifyInstance): Promise<void> {
     storeUrl: z.string().url(),
     consumerKey: z.string().min(1).max(200),
     consumerSecret: z.string().min(1).max(200),
+  });
+
+  // ── Catalogue import (any file, mapped by hand) ───────────────────────
+  //
+  // Two steps on purpose. ANALYSE is read-only: it reads the headers, guesses
+  // what each column means and hands back a sample, so the mapping can be
+  // corrected before anything exists. COMMIT is the only call that writes.
+  app.post('/counter/import/catalog/analyze', async (req, reply) => {
+    const input = z.object({ text: z.string().min(1).max(20 * 1024 * 1024) }).parse(req.body);
+    reply.send({ ...catalogImport.analyze(input.text), fields: catalogImport.TARGET_FIELDS });
+  });
+
+  app.post('/counter/import/catalog/commit', async (req, reply) => {
+    const input = z.object({
+      text: z.string().min(1).max(20 * 1024 * 1024),
+      mapping: z.array(z.enum(['name', 'description', 'price', 'sku', 'image', 'category', 'tags', 'status', 'stock', 'ignore'])),
+      withImages: z.boolean().optional(),
+      onDuplicate: z.enum(['skip', 'update']).optional(),
+      defaultStatus: z.enum(['draft', 'active']).optional(),
+    }).parse(req.body);
+
+    const rows = catalogImport.parseDelimited(input.text);
+    if (rows.length < 2) throw new ValidationError('That file has a header but no rows.', 'text');
+    const result = await catalogImport.commit({
+      mapping: input.mapping,
+      rows: rows.slice(1),
+      withImages: input.withImages,
+      onDuplicate: input.onDuplicate,
+      defaultStatus: input.defaultStatus,
+    });
+    reply.send(result);
   });
 
   app.post('/counter/import/woo/check', async (req, reply) => {

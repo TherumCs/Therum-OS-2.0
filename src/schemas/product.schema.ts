@@ -55,6 +55,11 @@ export const UpdateProductInput = z.object({
 export const ListProductsQuery = z.object({
   status: z.enum(['draft', 'active', 'archived']).optional(),
   vendorId: z.string().optional(),
+  // Filter the admin list the same way the storefront filters: a category
+  // brings its DESCENDANTS with it, so "show me Mens" answers with everything
+  // filed under Mens rather than only what sits directly on it.
+  categoryId: z.string().optional(),
+  tagId: z.string().optional(),
   q: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(100).default(20),
   cursor: z.string().optional(),

@@ -4,6 +4,7 @@ import { hookBus } from '../lib/hooks.js';
 import { NotFoundError, ConflictError } from '../lib/errors.js';
 import type { CreateProductInput, UpdateProductInput, ListProductsQuery, VariantInput, UpdateVariantInput } from '../schemas/product.schema.js';
 import { orderByOf } from '../schemas/listing.js';
+import { categoryAndDescendantIds } from '../counter/categoryTree.js';
 
 function slugify(input: string): string {
   return input
@@ -27,6 +28,14 @@ export const productService = {
     if (query.status) where.status = query.status;
     if (query.vendorId) where.vendorId = query.vendorId;
     if (query.q) where.name = { contains: query.q, mode: 'insensitive' };
+    // Descendants included, matching the storefront. A category manager that
+    // reports "0 products" for Mens while its children hold twenty is worse
+    // than no count at all.
+    if (query.categoryId) {
+      const ids = await categoryAndDescendantIds(query.categoryId);
+      where.categories = { some: { id: { in: ids } } };
+    }
+    if (query.tagId) where.tags = { some: { id: query.tagId } };
 
     // Cursor pagination (not offset) — stable under inserts.
     const [rows, total] = await Promise.all([

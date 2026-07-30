@@ -2,6 +2,7 @@ import { apiGet } from '../../../lib/api';
 import { money, type Paged, type Product } from '../../../lib/types';
 import { createProduct } from '../../actions';
 import { ListControls, ListPager, type SortOption } from '../ListControls';
+import { CatalogTabs } from './CatalogTabs';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +23,7 @@ async function perPage(): Promise<number> {
   return a?.itemsPerPage ?? PER_PAGE_FALLBACK;
 }
 
-interface SP { status?: string; q?: string; sort?: string; order?: string; cursor?: string }
+interface SP { status?: string; q?: string; sort?: string; order?: string; cursor?: string; categoryId?: string; tagId?: string }
 
 export default async function ProductsPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
@@ -32,6 +33,11 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   if (sp.sort) qs.set('sort', sp.sort);
   if (sp.order) qs.set('order', sp.order);
   if (sp.cursor) qs.set('cursor', sp.cursor);
+  // Arriving from the Category or Tag manager: "show me what is in this".
+  // A category brings its descendants with it, so a parent never reports an
+  // empty list while its children hold products.
+  if (sp.categoryId) qs.set('categoryId', sp.categoryId);
+  if (sp.tagId) qs.set('tagId', sp.tagId);
 
   let data: Paged<Product> | null = null;
   let err: string | null = null;
@@ -49,9 +55,29 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   const [allC, activeC, draftC, archivedC] = await Promise.all([
     countFor(), countFor('active'), countFor('draft'), countFor('archived'),
   ]);
+  // Name the filter when one is applied, so the list never silently shows a
+  // subset that looks like the whole catalogue.
+  let scopeLabel: string | null = null;
+  if (sp.categoryId) {
+    scopeLabel = await apiGet<{ name: string }>(`/api/catalog/categories`)
+      .then((all) => (all as unknown as { id: string; name: string }[]).find((c) => c.id === sp.categoryId)?.name ?? 'category')
+      .then((n) => `Category: ${n}`)
+      .catch(() => 'Filtered by category');
+  } else if (sp.tagId) {
+    scopeLabel = await apiGet<{ id: string; name: string }[]>('/api/catalog/tags')
+      .then((all) => `Tag: ${all.find((t) => t.id === sp.tagId)?.name ?? 'tag'}`)
+      .catch(() => 'Filtered by tag');
+  }
+
   return (
     <section>
-      <h1>Products</h1>
+      <h1>Product Catalog</h1>
+      <CatalogTabs current="products" counts={{ products: allC }} />
+      {scopeLabel && (
+        <p className="th-hint" style={{ marginTop: 12 }}>
+          {scopeLabel} · <a href="/products">show all products</a>
+        </p>
+      )}
       <form action={createProduct} className="row-form">
         <input name="name" placeholder="Product name" required />
         <input name="price" type="number" step="0.01" placeholder="Price (USD)" />
