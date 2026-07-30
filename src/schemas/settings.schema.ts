@@ -284,7 +284,9 @@ export const OnboardingInput = z.object({
   // parses — it no longer has a screen. The wizard now covers what a new
   // install actually has to decide: who they are, which edition, which Studio
   // apps, and what the store charges in.
-  step: z.enum(['account', 'edition', 'addons', 'store', 'branding', 'finish', 'connections']).optional(),
+  // 'store' and 'connections' are retired but still ACCEPTED: an install
+  // parked on either must still parse. The page maps them onto a live step.
+  step: z.enum(['account', 'edition', 'addons', 'configure', 'branding', 'finish', 'store', 'connections']).optional(),
   completed: z.boolean().optional(),
 });
 export type OnboardingInput = z.infer<typeof OnboardingInput>;

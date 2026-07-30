@@ -1,18 +1,19 @@
 import type { ReactNode } from 'react';
 import { apiGet } from '../../../lib/api';
-import { onboardingSetEdition, onboardingSetStep, onboardingSaveBranding, onboardingComplete, onboardingToggleAddon, onboardingSaveStore } from '../../actions';
+import { BASE_PATH } from '../../../lib/session';
+import { onboardingSetEdition, onboardingSetStep, onboardingSaveBranding, onboardingComplete, onboardingToggleAddon } from '../../actions';
 import { DEFAULT_LOGIN_BRANDING, type LoginBranding } from '../../../lib/loginBranding';
 import { DEFAULT_APPEARANCE, type Appearance } from '../../../lib/appearance';
 
 export const dynamic = 'force-dynamic';
 
 interface Onboarding {
-  step: 'account' | 'edition' | 'addons' | 'store' | 'branding' | 'finish' | 'connections';
+  step: 'account' | 'edition' | 'addons' | 'configure' | 'branding' | 'finish' | 'store' | 'connections';
   completed: boolean;
 }
 const ONBOARDING_DEFAULTS: Onboarding = { step: 'account', completed: false };
 
-interface StudioApp { id: string; name: string; description: string; enabled: boolean }
+interface StudioApp { id: string; name: string; description: string; enabled: boolean; navHref?: string }
 interface Me { username: string }
 interface CommerceSettings { currency: string; locale: string }
 
@@ -27,12 +28,12 @@ const SEO_DEFAULTS: SeoDefaults = { siteName: '', siteDescription: '', siteLogo:
 
 // 'connections' is deliberately NOT here: it was a step that told you it was
 // not built yet, which is not a step. Connections exist now and live in Nexus.
-const STEPS = ['account', 'edition', 'addons', 'store', 'branding', 'finish'] as const;
+const STEPS = ['account', 'edition', 'addons', 'configure', 'branding', 'finish'] as const;
 const STEP_LABELS: Record<(typeof STEPS)[number], string> = {
   account: 'Account',
   edition: 'Edition',
   addons: 'Studio apps',
-  store: 'Store',
+  configure: 'Set up',
   branding: 'Branding',
   finish: 'Finish',
 };
@@ -70,8 +71,12 @@ export default async function OnboardingPage() {
 
   // An install parked on the retired 'connections' step resumes at Studio apps
   // rather than falling off the end of the list and showing nothing.
-  const current = (onboarding.step === 'connections' ? 'addons' : onboarding.step) as (typeof STEPS)[number];
+  // Retired steps map onto live ones rather than falling off the end of the
+  // list and rendering an empty card.
+  const RETIRED: Record<string, (typeof STEPS)[number]> = { connections: 'addons', store: 'configure' };
+  const current = (RETIRED[onboarding.step] ?? onboarding.step) as (typeof STEPS)[number];
   const stepIndex = STEPS.indexOf(current);
+  const enabledApps = studioApps.filter((a) => a.enabled);
 
   return (
     <section style={{ maxWidth: 640 }}>
@@ -177,7 +182,7 @@ export default async function OnboardingPage() {
                 <form action={onboardingComplete}>
                   <button type="submit" className="ghost">Skip setup</button>
                 </form>
-                <form action={onboardingSetStep.bind(null, 'store')}>
+                <form action={onboardingSetStep.bind(null, 'configure')}>
                   <button type="submit">Next →</button>
                 </form>
               </div>
@@ -185,34 +190,58 @@ export default async function OnboardingPage() {
           </>
         )}
 
-        {current === 'store' && (
-          <form action={onboardingSaveStore}>
-            <h2 style={{ marginTop: 0 }}>What does this store sell in?</h2>
+        {current === 'configure' && (
+          <>
+            <h2 style={{ marginTop: 0 }}>Set these up now, or finish later</h2>
             <p className="muted">
-              Currency is what prices are stored and charged in. It is worth getting right now — changing it later does
-              not convert prices that already exist.
+              These are the apps you turned on. Each opens its own screen — none of it has to happen now, and nothing
+              here blocks the rest of setup. Anything you skip is exactly where you left it, in the sidebar.
             </p>
-            <Field label="Store name">
-              <input name="siteName" defaultValue={site.siteName} placeholder="The Sidemoney Company" />
-            </Field>
-            <Field label="Currency">
-              <select name="currency" defaultValue={commerce.currency}>
-                {CURRENCIES.map((c) => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </Field>
-            <Field label="Locale">
-              <select name="locale" defaultValue={commerce.locale}>
-                {['en-US', 'en-GB', 'fr-FR', 'de-DE', 'es-ES', 'ja-JP'].map((l) => <option key={l} value={l}>{l}</option>)}
-              </select>
-            </Field>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--th-space-8)' }}>
+              {enabledApps.map((a) => (
+                <div key={a.id} className="th-onb-app" style={{ cursor: 'default' }}>
+                  <span className="th-onb-app__check" aria-hidden="true">✓</span>
+                  <span style={{ flex: 1 }}>
+                    <strong>{a.name}</strong>
+                    <span className="th-hint" style={{ display: 'block' }}>{a.description}</span>
+                  </span>
+                  {a.navHref && (
+                    /* Opens in a new tab ON PURPOSE — sending someone out of a
+                       wizard to configure something is how they lose their
+                       place in it. */
+                    <a
+                      className="th-btn th-btn--xs"
+                      href={`${BASE_PATH}${a.navHref}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      style={{ flex: '0 0 auto', alignSelf: 'center' }}
+                    >
+                      Set up ↗
+                    </a>
+                  )}
+                </div>
+              ))}
+              {!enabledApps.length && (
+                <p className="muted">
+                  You did not turn any Studio apps on. That is a perfectly good answer — you can add them later from
+                  Studio.
+                </p>
+              )}
+            </div>
             <StepFooter>
-              <button type="submit" className="ghost" formAction={onboardingSetStep.bind(null, 'addons')}>← Back</button>
+              <form action={onboardingSetStep.bind(null, 'addons')}>
+                <button type="submit" className="ghost">← Back</button>
+              </form>
               <div style={{ display: 'flex', gap: 'var(--th-space-8)' }}>
-                <button type="submit" className="ghost" formAction={onboardingComplete}>Skip setup</button>
-                <button type="submit">Next →</button>
+                <form action={onboardingComplete}>
+                  <button type="submit" className="ghost">Skip setup</button>
+                </form>
+                <form action={onboardingSetStep.bind(null, 'branding')}>
+                  <button type="submit">{enabledApps.length ? 'Finish these later →' : 'Next →'}</button>
+                </form>
               </div>
             </StepFooter>
-          </form>
+          </>
         )}
 
         {current === 'branding' && (

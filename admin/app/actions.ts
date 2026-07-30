@@ -79,21 +79,6 @@ export async function onboardingToggleAddon(id: string, enabled: boolean): Promi
   redirect('/onboarding');
 }
 
-/** Currency and site name — the two a store cannot open without. */
-export async function onboardingSaveStore(formData: FormData): Promise<void> {
-  const currency = String(formData.get('currency') ?? '').trim();
-  const locale = String(formData.get('locale') ?? '').trim();
-  const siteName = String(formData.get('siteName') ?? '').trim();
-  const calls: Promise<unknown>[] = [apiSend('PATCH', '/api/settings/onboarding', { step: 'branding' })];
-  if (currency) calls.push(apiSend('PATCH', '/api/settings/commerce', { currency, ...(locale ? { locale } : {}) }));
-  if (siteName) {
-    calls.push(apiSend('PATCH', '/api/settings/site', { siteName }));
-    calls.push(apiSend('PATCH', '/api/settings/seo-defaults', { siteName }));
-  }
-  await Promise.all(calls);
-  redirect('/onboarding');
-}
-
 export async function onboardingSetEdition(edition: string): Promise<void> {
   await apiSend('PATCH', '/api/edition', { edition });
   await apiSend('PATCH', '/api/settings/onboarding', { step: 'addons' });
