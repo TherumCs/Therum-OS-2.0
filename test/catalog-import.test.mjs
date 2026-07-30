@@ -94,3 +94,49 @@ test('isFetchableUrl: refuses to fetch the private network (SSRF)', () => {
   assert.equal(isFetchableUrl('file:///etc/passwd'), false);
   assert.equal(isFetchableUrl('not a url'), false);
 });
+
+// ── File formats ───────────────────────────────────────────────────────
+
+test('wordVsColumnThreshold: splits word spaces from column gutters', async () => {
+  const { wordVsColumnThreshold } = await import('../dist/counter/catalogFiles.js');
+  // Measured off a real 3-column PDF page. The median is 58 and lands inside
+  // the LARGE cluster, which merges every column into one — the threshold has
+  // to sit in the jump between 7 and 22.
+  const real = [7, 7, 7, 7, 22, 36, 58, 65, 65, 65, 79, 86];
+  const cut = wordVsColumnThreshold(real);
+  assert.ok(cut > 7 && cut < 22, `expected a cut between 7 and 22, got ${cut}`);
+
+  // Evenly spaced gaps are prose, not a table: keep the line whole rather
+  // than inventing columns.
+  assert.equal(wordVsColumnThreshold([6, 7, 7, 8, 8, 9]), Infinity);
+  assert.equal(wordVsColumnThreshold([5]), Infinity, 'one gap cannot define a split');
+});
+
+test('xlsx: reads a real workbook, resolving formulas and keeping empty cells in place', async () => {
+  const ExcelJS = (await import('exceljs')).default;
+  const { extract } = await import('../dist/counter/catalogFiles.js');
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('Catalogue');
+  ws.addRow(['Item Name', 'Unit Price', 'Category']);
+  ws.addRow(['Yuzu Kit Kat', 3.5, 'snacks/japan']);
+  const r = ws.addRow(['Pocky', null, 'snacks/japan']);
+  // A formula cell must arrive as the number a human sees, not "=ROUND(...)".
+  r.getCell(2).value = { formula: 'ROUND(2.1,2)', result: 2.1 };
+  const buf = Buffer.from(await wb.xlsx.writeBuffer());
+
+  const out = await extract(buf, 'catalogue.xlsx');
+  assert.equal(out.kind, 'xlsx');
+  assert.deepEqual(out.rows[0], ['Item Name', 'Unit Price', 'Category']);
+  assert.deepEqual(out.rows[1], ['Yuzu Kit Kat', '3.5', 'snacks/japan']);
+  assert.equal(out.rows[2]?.[1], '2.1', 'formula resolved to its result');
+  assert.equal(out.rows[2]?.[2], 'snacks/japan', 'a blank cell must not shift later columns left');
+});
+
+test('kindFromFilename: routes by extension and mimetype', async () => {
+  const { kindFromFilename } = await import('../dist/counter/catalogFiles.js');
+  assert.equal(kindFromFilename('a.pdf'), 'pdf');
+  assert.equal(kindFromFilename('a.bin', 'application/pdf'), 'pdf');
+  assert.equal(kindFromFilename('a.xlsx'), 'xlsx');
+  assert.equal(kindFromFilename('a.csv'), 'delimited');
+  assert.equal(kindFromFilename('a.txt'), 'delimited');
+});

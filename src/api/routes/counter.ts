@@ -16,6 +16,7 @@ import { UnauthorizedError, ValidationError } from '../../lib/errors.js';
 import { checkRateLimit } from '../../lib/rateLimit.js';
 import { TooManyRequestsError } from '../../lib/errors.js';
 import * as catalogImport from '../../counter/catalogImport.js';
+import * as catalogFiles from '../../counter/catalogFiles.js';
 
 // Counter — HTTP surface.
 //
@@ -426,6 +427,38 @@ export async function counterAdminRoutes(app: FastifyInstance): Promise<void> {
   // Two steps on purpose. ANALYSE is read-only: it reads the headers, guesses
   // what each column means and hands back a sample, so the mapping can be
   // corrected before anything exists. COMMIT is the only call that writes.
+  // Upload a FILE — PDF, spreadsheet or delimited text. Read-only: it returns
+  // the rows it found, the mapping it guesses, and any images it pulled out of
+  // a PDF. Nothing is written until commit.
+  app.post('/counter/import/catalog/upload', async (req, reply) => {
+    const file = await req.file();
+    if (!file) throw new ValidationError('No file was uploaded.', 'file');
+    const buffer = await file.toBuffer();
+    if (!buffer.length) throw new ValidationError('That file is empty.', 'file');
+
+    const extracted = await catalogFiles.extract(buffer, file.filename, file.mimetype);
+    if (extracted.rows.length < 2) {
+      throw new ValidationError(
+        extracted.notes[0] ?? 'Nothing readable was found in that file.',
+        'file',
+      );
+    }
+    const headers = extracted.rows[0] ?? [];
+    reply.send({
+      kind: extracted.kind,
+      headers,
+      suggested: catalogImport.suggestMapping(headers),
+      sample: extracted.rows.slice(1, 6),
+      totalRows: extracted.rows.length - 1,
+      images: extracted.images,
+      notes: extracted.notes,
+      fields: catalogImport.TARGET_FIELDS,
+      // Handed back so commit works on exactly what was shown, rather than
+      // re-parsing and possibly reaching a different answer.
+      rows: extracted.rows,
+    });
+  });
+
   app.post('/counter/import/catalog/analyze', async (req, reply) => {
     const input = z.object({ text: z.string().min(1).max(20 * 1024 * 1024) }).parse(req.body);
     reply.send({ ...catalogImport.analyze(input.text), fields: catalogImport.TARGET_FIELDS });
@@ -433,14 +466,17 @@ export async function counterAdminRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/counter/import/catalog/commit', async (req, reply) => {
     const input = z.object({
-      text: z.string().min(1).max(20 * 1024 * 1024),
+      text: z.string().max(20 * 1024 * 1024).optional(),
+      rows: z.array(z.array(z.string())).max(50_000).optional(),
       mapping: z.array(z.enum(['name', 'description', 'price', 'sku', 'image', 'category', 'tags', 'status', 'stock', 'ignore'])),
       withImages: z.boolean().optional(),
       onDuplicate: z.enum(['skip', 'update']).optional(),
       defaultStatus: z.enum(['draft', 'active']).optional(),
     }).parse(req.body);
 
-    const rows = catalogImport.parseDelimited(input.text);
+    // Rows arrive already extracted when the source was a PDF or a spreadsheet
+    // — re-parsing those is not possible from text alone.
+    const rows = input.rows ?? catalogImport.parseDelimited(input.text ?? '');
     if (rows.length < 2) throw new ValidationError('That file has a header but no rows.', 'text');
     const result = await catalogImport.commit({
       mapping: input.mapping,

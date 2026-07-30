@@ -15,12 +15,17 @@ import { BASE_PATH } from '../../../../lib/session';
 type TargetField = 'name' | 'description' | 'price' | 'sku' | 'image' | 'category' | 'tags' | 'status' | 'stock' | 'ignore';
 
 interface Analysis {
+  kind?: 'delimited' | 'xlsx' | 'pdf';
   headers: string[];
   suggested: TargetField[];
   sample: string[][];
   totalRows: number;
-  delimiter: string;
+  delimiter?: string;
   fields: { id: TargetField; label: string; hint: string }[];
+  /** PDF and spreadsheet rows are extracted server-side and handed back. */
+  rows?: string[][];
+  images?: { page: number; index: number; dataUrl: string }[];
+  notes?: string[];
 }
 
 interface Result {
@@ -36,6 +41,7 @@ export function ImportClient() {
   const [text, setText] = useState('');
   const [fileName, setFileName] = useState('');
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [rows, setRows] = useState<string[][] | null>(null);
   const [mapping, setMapping] = useState<TargetField[]>([]);
   const [withImages, setWithImages] = useState(true);
   const [onDuplicate, setOnDuplicate] = useState<'skip' | 'update'>('skip');
@@ -58,6 +64,7 @@ export function ImportClient() {
       const a = (await res.json()) as Analysis;
       if (!a.headers.length) throw new Error('No columns found — is this a delimited file?');
       setText(raw);
+      setRows(null);
       setFileName(name);
       setAnalysis(a);
       setMapping(a.suggested);
@@ -67,16 +74,31 @@ export function ImportClient() {
     setBusy(false);
   }
 
+  // Every file goes to the server. A PDF or a spreadsheet cannot be read as
+  // text in the browser, and having one path for all three means the mapping
+  // step behaves identically whatever the source was.
   async function onFile(file: File): Promise<void> {
-    const lower = file.name.toLowerCase();
-    if (lower.endsWith('.pdf') || lower.endsWith('.xlsx') || lower.endsWith('.xls')) {
-      setError(
-        `${file.name} is not readable yet — this importer handles delimited text (CSV, TSV, semicolon). ` +
-          'PDF and Excel catalogues are the next step; export or save as CSV for now.',
-      );
-      return;
+    setError('');
+    setResult(null);
+    setBusy(true);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const res = await fetch(`${BASE_PATH}/api/catalog-import/upload`, { method: 'POST', body: form });
+      const body = (await res.json()) as Analysis & { error?: { message?: string } | string };
+      if (!res.ok) {
+        const msg = typeof body.error === 'string' ? body.error : body.error?.message;
+        throw new Error(msg ?? 'Could not read that file.');
+      }
+      setText('');
+      setRows(body.rows ?? null);
+      setFileName(file.name);
+      setAnalysis(body);
+      setMapping(body.suggested);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not read that file.');
     }
-    await analyse(await file.text(), file.name);
+    setBusy(false);
   }
 
   async function run(): Promise<void> {
@@ -86,7 +108,7 @@ export function ImportClient() {
       const res = await fetch(`${BASE_PATH}/api/catalog-import/commit`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text, mapping, withImages, onDuplicate, defaultStatus }),
+        body: JSON.stringify({ ...(rows ? { rows } : { text }), mapping, withImages, onDuplicate, defaultStatus }),
       });
       if (!res.ok) throw new Error(await res.text());
       setResult((await res.json()) as Result);
@@ -121,7 +143,7 @@ export function ImportClient() {
         )}
         <div style={{ display: 'flex', gap: 10, marginTop: 16 }}>
           <a className="th-btn th-btn-primary" href="/products">See the products</a>
-          <button type="button" className="th-btn" onClick={() => { setResult(null); setAnalysis(null); setText(''); setFileName(''); }}>
+          <button type="button" className="th-btn" onClick={() => { setResult(null); setAnalysis(null); setText(''); setRows(null); setFileName(''); }}>
             Import another file
           </button>
         </div>
@@ -139,14 +161,15 @@ export function ImportClient() {
             Choose a file
             <input
               type="file"
-              accept=".csv,.tsv,.txt,text/csv,text/plain,.pdf,.xlsx,.xls"
+              accept=".csv,.tsv,.txt,text/csv,text/plain,.pdf,application/pdf,.xlsx,.xls"
               style={{ display: 'none' }}
               onChange={(e) => { const f = e.target.files?.[0]; if (f) void onFile(f); }}
             />
           </label>
           <p className="th-hint" style={{ marginTop: 10 }}>
-            CSV, TSV or semicolon-separated. The delimiter is detected — quoted fields, embedded commas and
-            European decimals (<code>1.299,00</code>) are all handled.
+            CSV, TSV, semicolon-separated, Excel (<code>.xlsx</code>) or PDF. Delimiters are detected, quoted
+            fields and embedded commas survive, European decimals (<code>1.299,00</code>) are understood, and a
+            tabular PDF is read into columns.
           </p>
           <details style={{ marginTop: 16 }}>
             <summary className="th-hint" style={{ cursor: 'pointer' }}>…or paste the rows directly</summary>
@@ -166,6 +189,25 @@ export function ImportClient() {
             <strong>{fileName}</strong> — {analysis.totalRows} row{analysis.totalRows === 1 ? '' : 's'},{' '}
             {analysis.headers.length} columns. Check what each column means before importing.
           </p>
+
+          {analysis.notes?.map((n) => (
+            <p key={n} className="th-hint" style={{ marginTop: 8 }}>{n}</p>
+          ))}
+          {!!analysis.images?.length && (
+            <div style={{ marginTop: 12 }}>
+              <p className="th-hint">{analysis.images.length} image(s) found in the file, in page order:</p>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 8 }}>
+                {analysis.images.slice(0, 12).map((img) => (
+                  <img
+                    key={`${img.page}-${img.index}`}
+                    src={img.dataUrl}
+                    alt={`Page ${img.page}, image ${img.index + 1}`}
+                    style={{ width: 64, height: 64, objectFit: 'cover', borderRadius: 6, border: '1px solid var(--th-line)' }}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
 
           <table style={{ marginTop: 14 }}>
             <thead>
@@ -229,7 +271,7 @@ export function ImportClient() {
             <button type="button" className="th-btn th-btn-primary" disabled={busy || !hasName} onClick={() => void run()}>
               {busy ? 'Importing…' : `Import ${analysis.totalRows} row${analysis.totalRows === 1 ? '' : 's'}`}
             </button>
-            <button type="button" className="th-btn" disabled={busy} onClick={() => { setAnalysis(null); setText(''); setFileName(''); }}>
+            <button type="button" className="th-btn" disabled={busy} onClick={() => { setAnalysis(null); setText(''); setRows(null); setFileName(''); }}>
               Choose a different file
             </button>
           </div>
