@@ -17,6 +17,7 @@ import { checkRateLimit } from '../../lib/rateLimit.js';
 import { TooManyRequestsError } from '../../lib/errors.js';
 import * as catalogImport from '../../counter/catalogImport.js';
 import * as catalogFiles from '../../counter/catalogFiles.js';
+import { requireBundle } from '../../middleware/bundle.js';
 
 // Counter — HTTP surface.
 //
@@ -310,6 +311,18 @@ export async function counterAdminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Fulfilment ---------------------------------------------------------------
+  // Pull the catalog FROM Printful. Idempotent by Printful's sync-product id,
+  // so this is safe to re-run — that is the point of a sync.
+  app.get('/counter/sync/printful/status', { preHandler: [app.authenticate, requireBundle('manage-settings')] }, async (_req, reply) => {
+    const { printfulSyncService } = await import('../../counter/printfulSync.js');
+    reply.send({ available: await printfulSyncService.available() });
+  });
+
+  app.post('/counter/sync/printful', { preHandler: [app.authenticate, requireBundle('manage-settings')] }, async (_req, reply) => {
+    const { printfulSyncService } = await import('../../counter/printfulSync.js');
+    reply.send(await printfulSyncService.run());
+  });
+
   app.get('/counter/orders/:orderId/shipments', async (req, reply) => {
     const { orderId } = req.params as { orderId: string };
     reply.send(await shipmentService.listForOrder(orderId));

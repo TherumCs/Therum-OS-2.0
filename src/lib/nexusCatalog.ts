@@ -141,7 +141,12 @@ export const nexusCatalog: CatalogProvider[] = [
   // (fulfillment delegates, no Woo-style zones engine). Printful + Printify
   // have live credential testers; the rest store-and-hold until their
   // Counter fleet modules land.
-  { id: 'printful', name: 'Printful', category: 'fulfillment', authType: 'apikey', join: '|', issuedBy: 'provider', credentialHint: 'Copy both values from the Printful screen that shows them', note: 'A Printful Private Token works too — paste it as the Consumer key and leave the secret blank.', fields: [{ label: 'Consumer key' }, { label: 'Consumer secret', secret: true, optional: true }, { label: 'Store ID', optional: true, pattern: '^[0-9]+$', example: '12345678' }], connectsVia: 'store-pull-woo' },
+  // Printful retired API-key/Basic auth: the API now answers "Basic API token
+  // authentication is no longer supported... create a new OAuth 2.0 token".
+  // The panel asked for a Consumer key + secret, which no longer authenticates
+  // anything — so it is a token field now. Store ID is still needed by accounts
+  // with more than one store.
+  { id: 'printful', name: 'Printful', category: 'fulfillment', authType: 'apikey', join: '|', issuedBy: 'provider', credentialHint: 'An OAuth 2.0 access token from developers.printful.com — legacy API keys no longer work', note: 'Printful → Developers → create a token with products/read and orders read+write. Old Consumer key/secret pairs are rejected by Printful now.', fields: [{ label: 'API token', secret: true }, { label: 'Store ID', optional: true, pattern: '^[0-9]+$', example: '12345678' }], connectsVia: 'store-pull-woo' },
   { id: 'printify', name: 'Printify', category: 'fulfillment', authType: 'apikey', issuedBy: 'provider', join: '|', credentialHint: 'Personal Access Token (expires after 1 year)', fields: [{ label: 'Personal Access Token', secret: true }, { label: 'Shop ID', optional: true , pattern: '^[0-9]+$', example: '12345678' }], connectsVia: 'store-pull-woo' },
   { id: 'gelato', name: 'Gelato', category: 'fulfillment', authType: 'apikey', issuedBy: 'provider', join: '|', credentialHint: 'Sent as the X-API-KEY header', fields: [{ label: 'API Key', secret: true }, { label: 'Store ID (ecommerce endpoints only)', optional: true }], connectsVia: 'store-pull-woo' },
   { id: 'gooten', name: 'Gooten', category: 'fulfillment', authType: 'apikey', issuedBy: 'provider', join: '|', credentialHint: 'Both are in Gooten: Settings > API', fields: [{ label: 'Recipe ID' }, { label: 'Partner Billing Key', secret: true }], connectsVia: 'store-pull-woo' },

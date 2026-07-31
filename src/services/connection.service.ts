@@ -143,16 +143,13 @@ const TESTERS: Record<string, Tester> = {
   // credential that is actually fine is the worst outcome here — it sends the
   // merchant back to regenerate something that was never the problem.
   printful: async (c) => {
-    // Accepts EITHER shape, because Printful presents both depending on which
-    // screen you connect from: a key+secret pair authenticates as Basic, a
-    // lone private token as Bearer. Trying only one and reporting 401 tells
-    // the merchant their credential is broken when it is simply the other
-    // kind — which is exactly the loop this connection got stuck in.
-    const [first, second] = c.split('|');
-    if (first && second) {
-      const basic = await get('https://api.printful.com/stores', { Authorization: basicAuthHeader(first, second) });
-      if (basic.ok) return basic;
-    }
+    // BEARER ONLY. This used to try Basic first for a key+secret pair, which
+    // was correct until Printful retired API-key auth. Its API now answers
+    // "Basic API token authentication is no longer supported... create a new
+    // OAuth 2.0 token" — verified live against a stored legacy key, which
+    // 401s. Trying Basic now only produces a confusing failure before the
+    // Bearer attempt that was always going to be the real one.
+    const [first] = c.split('|');
     return bearerGet('https://api.printful.com/stores', first ?? c);
   },
   printify: (c) => bearerGet('https://api.printify.com/v1/shops.json', firstField(c)),
