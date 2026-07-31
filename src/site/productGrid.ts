@@ -733,39 +733,84 @@ export const CARD_EVOLVE_RUNTIME = `
       if (out.error) throw new Error(out.error.message);
       return out.paymentMethod.id;
     }
-    async function loadWallets(){
+    // The SAME method strip the full checkout renders, from the same endpoint.
+    // Quick checkout is not a reduced payment surface: every method Nexus
+    // exposes (card, wallets, pay later, bank, crypto, P2P) appears here too,
+    // grouped, with unconnected ones disabled rather than hidden so the
+    // shopper can see what the store supports.
+    var chosenMethod = null;
+    async function loadMethods(){
       if (walletsLoaded) return;
       walletsLoaded = true;
       var box = payQ('[data-pay-wallets]');
-      var or = payQ('[data-pay-or]');
       if (!box) return;
+      try {
+        var res = await fetch('/api/checkout/methods');
+        var data = await res.json();
+        var groups = data.groups || [];
+        var methods = data.methods || [];
+        box.hidden = false;
+        box.innerHTML =
+          '<div class="card-pay__tabs">' + groups.map(function(g){
+            var any = methods.some(function(m){ return m.group === g.id && m.available; });
+            return '<button type="button" class="card-pay__tab" data-mgroup="' + g.id + '"'
+              + (any ? '' : ' disabled title="No provider connected for this yet"')
+              + '>' + g.ico + ' ' + g.label + '</button>';
+          }).join('') + '</div><div class="card-pay__methods" data-pay-methods></div>';
+
+        box.addEventListener('click', function(e){
+          var t = e.target.closest('[data-mgroup]');
+          if (t && !t.disabled) return showGroup(t.getAttribute('data-mgroup'), methods);
+          var b = e.target.closest('[data-method]');
+          if (b && !b.disabled) {
+            chosenMethod = { id: b.getAttribute('data-method'), provider: b.getAttribute('data-provider') };
+            box.querySelectorAll('[data-method]').forEach(function(x){ x.classList.toggle('on', x === b); });
+          }
+        });
+
+        var first = groups.filter(function(g){
+          return methods.some(function(m){ return m.group === g.id && m.available; });
+        })[0];
+        if (first) showGroup(first.id, methods);
+        else {
+          var host = payQ('[data-pay-methods]');
+          if (host) host.innerHTML = '<p class="card-pay__msg">No payment provider is connected yet.</p>';
+        }
+      } catch (e) {
+        box.hidden = false;
+        box.innerHTML = '<p class="card-pay__msg">Could not load payment methods.</p>';
+      }
+    }
+
+    function showGroup(groupId, methods){
+      var host = payQ('[data-pay-methods]');
+      if (!host) return;
+      payEl.querySelectorAll('[data-mgroup]').forEach(function(t){
+        t.classList.toggle('on', t.getAttribute('data-mgroup') === groupId);
+      });
+      host.innerHTML = methods.filter(function(m){ return m.group === groupId; }).map(function(m){
+        return '<button type="button" class="card-pay__method" data-method="' + m.id + '"'
+          + ' data-provider="' + (m.provider || '') + '"' + (m.available ? '' : ' disabled') + '>'
+          + '<span>' + m.label + (m.sub ? '<em>' + m.sub + '</em>' : '') + '</span>'
+          + (m.available ? '' : '<span class="card-pay__na">setup required</span>') + '</button>';
+      }).join('');
+      // Card is the only group with an inline field; the rest tokenise in
+      // their own sheet or hand off to the provider.
+      var cardField = payQ('[data-pay-cardfield]');
+      if (cardField) cardField.hidden = groupId !== 'card';
+      if (groupId === 'card') {
+        var live = methods.filter(function(m){ return m.group === 'card' && m.available; })[0];
+        if (live) { chosenMethod = live; loadClientAndMount(live.provider); }
+      }
+    }
+
+    async function loadClientAndMount(provider){
       try {
         var res = await fetch('/api/shop/wallets');
         var data = await res.json();
-        var ready = (data.providers || []).filter(function(p){ return p.ready; });
-        if (ready.length === 0) {
-          // Say WHY rather than rendering nothing — an empty area reads as a
-          // broken page, and the reason is actionable for the operator.
-          var why = (data.providers || []).map(function(p){ return p.reason; }).filter(Boolean)[0];
-          box.hidden = false;
-          box.innerHTML = '<p class="card-pay__msg">' + (why || 'Wallet payments are not available yet.') + '</p>';
-          return;
-        }
-        box.hidden = false;
-        if (or) or.hidden = false;
-        payReady = ready[0];
-        mountCardField();
-        box.innerHTML = ready.map(function(p){
-          return p.wallets.map(function(w){
-            return '<button class="card-btn card-btn--solid" type="button" data-wallet="' + w
-              + '" data-wallet-provider="' + p.provider + '">'
-              + (w === 'apple_pay' ? 'Pay' : w === 'google_pay' ? 'Google Pay' : w) + '</button>';
-          }).join('');
-        }).join('');
-      } catch (e) {
-        box.hidden = false;
-        box.innerHTML = '<p class="card-pay__msg">Could not check wallet availability.</p>';
-      }
+        var p = (data.providers || []).filter(function(x){ return x.provider === provider; })[0];
+        if (p) { payReady = p; await mountCardField(); }
+      } catch (e) { /* the strip still works; only the inline field is lost */ }
     }
 
     confirm.addEventListener('click', function(){
@@ -776,7 +821,7 @@ export const CARD_EVOLVE_RUNTIME = `
           + (chosenVariant.c || chosenVariant.s ? ' — ' : '') + money(chosenVariant.p);
       }
       face('pay');
-      loadWallets();
+      loadMethods();
     });
     if (payEl) {
       var back = payQ('[data-pay-back]');
@@ -1002,6 +1047,23 @@ export const PRODUCT_GRID_FALLBACK_CSS = `
 .card-pay__in:focus{outline:none;border-color:var(--tx,#111)}
 .card-pay__wallets{display:flex;flex-direction:column;gap:6px}
 .card-pay__or{font-size:11px;color:var(--tx3,#6b7280);text-align:center;position:relative}
+/* The method strip, same shape as the full checkout's — tabs across the top,
+   the group's methods under it. Scrolls horizontally because a card is narrow
+   and six groups will not fit; wrapping made the card jump height on change. */
+.card-pay__tabs{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;padding-bottom:2px}
+.card-pay__tabs::-webkit-scrollbar{display:none}
+.card-pay__tab{flex:0 0 auto;padding:5px 8px;font:inherit;font-size:11px;cursor:pointer;
+  border:1px solid var(--ln,#e5e7eb);border-radius:999px;background:transparent;white-space:nowrap}
+.card-pay__tab.on{border-color:var(--tx,#111);background:var(--tx,#111);color:#fff}
+.card-pay__tab:disabled{opacity:.4;cursor:not-allowed}
+.card-pay__methods{display:flex;flex-direction:column;gap:4px;margin-top:6px}
+.card-pay__method{display:flex;justify-content:space-between;align-items:center;gap:8px;
+  padding:8px 10px;font:inherit;font-size:12px;text-align:left;cursor:pointer;
+  border:1px solid var(--ln,#e5e7eb);border-radius:8px;background:transparent}
+.card-pay__method.on{border-color:var(--tx,#111);box-shadow:inset 0 0 0 1px var(--tx,#111)}
+.card-pay__method:disabled{opacity:.5;cursor:not-allowed}
+.card-pay__method em{display:block;font-style:normal;font-size:10px;color:var(--tx3,#6b7280)}
+.card-pay__na{font-size:10px;color:var(--tx3,#6b7280);white-space:nowrap}
 .card-pay__cardfield:not(:empty){border:1px solid var(--ln,#e5e7eb);border-radius:8px;padding:8px;min-height:38px}
 .card-pay__msg{font-size:11px;line-height:1.4;margin:0;color:var(--tx3,#6b7280)}
 .card-pay__msg.is-bad{color:#b3261e}
