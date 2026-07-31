@@ -6,6 +6,11 @@ export const ImportMapping = z.object({
   price: z.string().min(1),
   sku: z.string().optional(),
   sourceId: z.string().optional(),
+  /** Stock column. Without it every imported variant lands at 0, which means
+   *  the product can be added to a cart and then fails at checkout with
+   *  "Insufficient stock" — the worst place to discover it. Print-on-demand
+   *  has no real stock limit, so a POD sync should map a high number. */
+  inventory: z.string().optional(),
 });
 
 export const RunImportInput = z.object({

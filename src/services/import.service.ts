@@ -43,6 +43,11 @@ export const importService = {
       const cents = toCents(row[m.price] ?? '');
       const sku = m.sku ? row[m.sku] : undefined;
       const sourceId = m.sourceId ? row[m.sourceId] : undefined;
+      // Default 0 is deliberate for a hand-made CSV — better to under-sell
+      // than to promise stock that is not there. A provider sync should map a
+      // real column, and a POD sync a large one.
+      const inventoryRaw = m.inventory ? Number(row[m.inventory]) : NaN;
+      const inventory = Number.isFinite(inventoryRaw) && inventoryRaw >= 0 ? Math.floor(inventoryRaw) : 0;
 
       if (!name) {
         audit.skipped++;
@@ -79,7 +84,34 @@ export const importService = {
                 status: 'active',
                 vendorId: input.vendorId,
                 sourceId,
-                variants: { create: [{ price: cents, sku, sourceId, inventory: 0 }] },
+                variants: { create: [{ price: cents, sku, sourceId, inventory }] },
+              },
+            });
+            audit.created++;
+          }
+        } else if (sourceId) {
+          // A source id with no vendor. The unique index is (vendorId,
+          // sourceId), so this cannot use the upsert above — but it must still
+          // be idempotent, because a store with ONE source (the common case:
+          // a single provider sync) would otherwise duplicate its whole
+          // catalog on every run. It previously fell through to the
+          // create-always branch below, which also DISCARDED sourceId
+          // entirely, so nothing even recorded where the product came from.
+          const existing = await db.product.findFirst({
+            where: { sourceId, vendorId: null },
+            select: { id: true },
+          });
+          if (existing) {
+            await db.product.update({ where: { id: existing.id }, data: { name } });
+            audit.updated++;
+          } else {
+            await db.product.create({
+              data: {
+                name,
+                slug: `${slugify(name)}-${sourceId.slice(0, 8)}`,
+                status: 'active',
+                sourceId,
+                variants: { create: [{ price: cents, sku, sourceId, inventory }] },
               },
             });
             audit.created++;
@@ -90,7 +122,7 @@ export const importService = {
               name,
               slug: `${slugify(name)}-${randomBytes(3).toString('hex')}`,
               status: 'active',
-              variants: { create: [{ price: cents, sku, inventory: 0 }] },
+              variants: { create: [{ price: cents, sku, inventory }] },
             },
           });
           audit.created++;
