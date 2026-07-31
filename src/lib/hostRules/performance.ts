@@ -172,7 +172,12 @@ export const performanceRules: Rule[] = [
         why:
           'With no ceiling Redis grows until the host runs out of memory, and the OOM killer usually takes ' +
           'Postgres or Node rather than Redis. A cache should shed keys, not take the box down.',
-        fix: 'Set maxmemory to a fixed share of RAM and maxmemory-policy to allkeys-lru, so it evicts instead of growing.',
+        fix:
+          'Set maxmemory to a fixed share of RAM and maxmemory-policy to volatile-lru.\n\n' +
+          'volatile-lru, NOT allkeys-lru: this Redis is not only a cache. It holds carts (7-day TTL), rate ' +
+          'limit counters (TTL) and BullMQ job data (NO TTL). allkeys-lru would evict queued jobs — a silent ' +
+          'loss of work with nothing to show it happened. volatile-lru only evicts keys that have an expiry, ' +
+          'so under pressure it sheds carts and rate limits and leaves the queues intact.',
       };
     },
   },
@@ -192,7 +197,9 @@ export const performanceRules: Rule[] = [
         title: 'Redis will reject writes when full',
         detail: 'maxmemory is set but maxmemory-policy is "noeviction".',
         why: 'At the limit Redis starts returning errors on write instead of evicting. For a cache that turns a soft limit into an outage.',
-        fix: 'CONFIG SET maxmemory-policy allkeys-lru, and persist it in redis.conf.',
+        fix:
+          'CONFIG SET maxmemory-policy volatile-lru, and persist it in redis.conf. Not allkeys-lru — BullMQ ' +
+          'job data has no TTL and would be evicted along with the caches.',
       };
     },
   },

@@ -176,6 +176,21 @@ test('shared_buffers rule converts 8kB blocks and respects a tuned instance', ()
   assert.equal(tuned, null);
 });
 
+test('redis advice is volatile-lru, because this Redis holds queues too', () => {
+  // Not allkeys-lru. Carts (7-day TTL) and rate limits expire; BullMQ job data
+  // does NOT. allkeys-lru would evict queued jobs — silent loss of work.
+  const unlimited = evaluate('perf.redis-no-maxmemory', {
+    'redis-config': { maxmemoryBytes: 0, maxmemoryPolicy: 'noeviction' },
+  });
+  assert.match(unlimited.fix, /volatile-lru/);
+  assert.doesNotMatch(unlimited.fix, /Set maxmemory-policy to allkeys-lru/);
+
+  const rejects = evaluate('perf.redis-noeviction', {
+    'redis-config': { maxmemoryBytes: 512 * 1024 * 1024, maxmemoryPolicy: 'noeviction' },
+  });
+  assert.match(rejects.fix, /volatile-lru/);
+});
+
 test('redis eviction policy: unlimited and noeviction are distinct findings', () => {
   const unlimited = evaluate('perf.redis-no-maxmemory', {
     'redis-config': { maxmemoryBytes: 0, maxmemoryPolicy: 'noeviction' },
