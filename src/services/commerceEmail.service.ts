@@ -28,6 +28,14 @@ function receiptLines(order: NonNullable<Awaited<ReturnType<typeof orderWithItem
     return `  ${i.quantity} × ${name}${sku} — ${money(i.priceAtTime * i.quantity, order.currency)}`;
   });
   if (order.discountAmount > 0) lines.push(`  ${order.discountLabel ?? 'Discount'} — −${money(order.discountAmount, order.currency)}`);
+  // Shipping and tax are part of what was charged, so the receipt has to show
+  // them: without these the items sum to one number and Total shows another,
+  // and the customer has no way to see why.
+  if (order.shippingTotal > 0) {
+    const method = order.shippingMethod ? ` (${order.shippingMethod})` : '';
+    lines.push(`  Shipping${method} — ${money(order.shippingTotal, order.currency)}`);
+  }
+  if (order.taxTotal > 0) lines.push(`  Tax — ${money(order.taxTotal, order.currency)}`);
   lines.push(`  Total — ${money(order.total, order.currency)}`);
   return lines.join('\n');
 }

@@ -199,6 +199,14 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     reply.send(await settingsService.setOnboarding(OnboardingInput.parse(req.body)));
   });
 
+  // Which transport a send would actually use. With Nexus providers AND raw
+  // SMTP both possible, "email is configured" is no longer a yes/no a human
+  // can infer from the fields on screen.
+  app.get('/settings/notifications/transport', { preHandler: app.authenticate }, async (_req, reply) => {
+    const { mailTransport } = await import('../../services/notification.service.js');
+    reply.send(await mailTransport());
+  });
+
   app.post('/settings/notifications/test', { preHandler: [app.authenticate, requireSettingsWrite] }, async (_req, reply) => {
     reply.send(await notificationService.sendTest());
   });

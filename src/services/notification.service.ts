@@ -1,5 +1,79 @@
 import nodemailer from 'nodemailer';
 import { settingsService } from './settings.service.js';
+import { connectionService } from './connection.service.js';
+
+// Email goes out through whichever provider is CONNECTED IN NEXUS, falling
+// back to raw SMTP settings. That order matters: on the domain every provider
+// is connected through Nexus, so a mail layer that only knew about smtpHost
+// would sit there silently sending nothing while the store looked configured.
+//
+// Each sender returns false when it cannot send, rather than throwing — the
+// next one is tried, and a send that ultimately fails must never break the
+// operation it was reporting on.
+
+interface MailMessage {
+  to: string;
+  from: string;
+  subject: string;
+  body: string;
+}
+
+async function viaResend(msg: MailMessage): Promise<boolean> {
+  const key = await connectionService.credentialFor('resend');
+  if (!key) return false;
+  const res = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ from: msg.from, to: [msg.to], subject: msg.subject, text: msg.body }),
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => null);
+  return Boolean(res?.ok);
+}
+
+async function viaSendgrid(msg: MailMessage): Promise<boolean> {
+  const key = await connectionService.credentialFor('sendgrid');
+  if (!key) return false;
+  const res = await fetch('https://api.sendgrid.com/v3/mail/send', {
+    method: 'POST',
+    headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      personalizations: [{ to: [{ email: msg.to }] }],
+      from: { email: msg.from },
+      subject: msg.subject,
+      content: [{ type: 'text/plain', value: msg.body }],
+    }),
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => null);
+  return Boolean(res?.ok);
+}
+
+async function viaPostmark(msg: MailMessage): Promise<boolean> {
+  const key = await connectionService.credentialFor('postmark');
+  if (!key) return false;
+  const res = await fetch('https://api.postmarkapp.com/email', {
+    method: 'POST',
+    headers: { 'X-Postmark-Server-Token': key, 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ From: msg.from, To: msg.to, Subject: msg.subject, TextBody: msg.body }),
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => null);
+  return Boolean(res?.ok);
+}
+
+const NEXUS_SENDERS = [viaResend, viaSendgrid, viaPostmark];
+
+/** Which transport would actually be used, for the settings screen to show. */
+export async function mailTransport(): Promise<{ ready: boolean; via: string }> {
+  for (const [id, has] of [
+    ['Resend', await connectionService.credentialFor('resend')],
+    ['SendGrid', await connectionService.credentialFor('sendgrid')],
+    ['Postmark', await connectionService.credentialFor('postmark')],
+  ] as [string, string | null][]) {
+    if (has) return { ready: true, via: `${id} (Nexus)` };
+  }
+  const n = await settingsService.getNotifications();
+  if (n.smtpHost) return { ready: true, via: `SMTP · ${n.smtpHost}` };
+  return { ready: false, via: 'nothing connected' };
+}
 
 async function sendEmail(subject: string, body: string): Promise<void> {
   const n = await settingsService.getNotifications();
@@ -12,7 +86,17 @@ async function sendEmail(subject: string, body: string): Promise<void> {
 // instead of the admin. Silently a no-op until SMTP is configured.
 export async function sendEmailTo(to: string, subject: string, body: string): Promise<void> {
   const n = await settingsService.getNotifications();
-  if (!n.emailEnabled || !n.smtpHost) return;
+  if (!n.emailEnabled) return;
+
+  // Nexus providers first — see the note at the top of this file.
+  const from = n.smtpFrom || n.smtpUser || n.adminEmail || '';
+  if (from) {
+    for (const send of NEXUS_SENDERS) {
+      if (await send({ to, from, subject, body }).catch(() => false)) return;
+    }
+  }
+
+  if (!n.smtpHost) return;
   const transport = nodemailer.createTransport({
     host: n.smtpHost,
     port: n.smtpPort,

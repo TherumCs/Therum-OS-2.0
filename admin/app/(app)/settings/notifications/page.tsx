@@ -43,6 +43,9 @@ function ToggleRow({ label, domain, field, initial }: { label: string; domain: s
 
 export default async function NotificationsSettingsPage() {
   const n = await apiGet<Notifications>('/api/settings/notifications').catch(() => DEFAULTS);
+  const transport = await apiGet<{ ready: boolean; via: string }>('/api/settings/notifications/transport').catch(
+    () => ({ ready: false, via: 'unknown' }),
+  );
 
   return (
     <div>
@@ -96,6 +99,13 @@ export default async function NotificationsSettingsPage() {
 
       <div className="settings-group">
         <h3 className="settings-group-title">Test</h3>
+        {/* Email can now go out through a Nexus-connected provider OR raw
+            SMTP, so "is email configured" is no longer answerable by reading
+            the fields above. This says which one a send would actually use. */}
+        <p className="field-help" style={{ marginTop: 0, maxWidth: 480 }}>
+          Sending via: <strong>{transport.via}</strong>
+          {!transport.ready && ' — connect Resend, SendGrid or Postmark in Connections, or fill in SMTP above.'}
+        </p>
         <ActionButton label="Send test notification" endpoint="/api/settings/notifications/test" successMessage="Test sent. Check inbox/Slack." />
       </div>
     </div>
