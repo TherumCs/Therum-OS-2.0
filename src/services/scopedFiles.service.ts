@@ -1,0 +1,176 @@
+import { readFile, writeFile, readdir, stat, realpath } from 'node:fs/promises';
+import { existsSync } from 'node:fs';
+import { join, resolve, relative, sep, extname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { db } from '../lib/db.js';
+
+// The editable surface, and nothing else.
+//
+// Bam's scope, verbatim: "i would just just bricks / css and thats it." That
+// is three surfaces, and they are not all files — the per-admin custom CSS is
+// a database column. Treating them uniformly here is what lets the propose /
+// apply flow above not care which is which.
+//
+// Everything outside this list is unreachable by design. Not the repo root,
+// not src/, not admin/, never .env.
+
+const repoRoot = fileURLToPath(new URL('../..', import.meta.url));
+
+export interface EditableRoot {
+  id: string;
+  label: string;
+  /** Absolute directory that contains everything this root may touch. */
+  dir: string;
+  /** Extensions this root will read or write. */
+  extensions: string[];
+  /** Files here are gitignored, so a revert cannot rely on git history and a
+   *  sidecar copy is written before every apply. Both current roots are. */
+  gitignored: boolean;
+}
+
+export const EDITABLE_ROOTS: EditableRoot[] = [
+  {
+    id: 'bricks',
+    label: 'Bricks addons',
+    dir: join(repoRoot, 'bricks-addons'),
+    extensions: ['.css', '.js', '.json', '.html', '.svg'],
+    // .gitignore line 34 ignores bricks-addons/ outright, and `git ls-files`
+    // there returns nothing. Checked rather than assumed: an earlier version
+    // of this said false, which made the "one commit per change, so revert is
+    // one command" promise false for BOTH roots.
+    gitignored: true,
+  },
+  {
+    // The ported chrome stylesheet. Large (~1.1 MB each) and partly GENERATED
+    // by generate-live-diff.py — an edit here is lost if that is re-run, which
+    // has already happened once with the font-URL fix. Callers surface that
+    // warning rather than letting the work quietly disappear.
+    id: 'chrome-css',
+    label: 'Site chrome CSS',
+    dir: join(repoRoot, 'uploads'),
+    extensions: ['.css'],
+    gitignored: true,
+  },
+];
+
+export interface ScopedFile {
+  root: string;
+  /** Path relative to its root — the only form callers ever pass around. */
+  path: string;
+  bytes: number;
+  gitignored: boolean;
+  generated?: string;
+}
+
+export class ScopeError extends Error {}
+
+function rootById(id: string): EditableRoot {
+  const root = EDITABLE_ROOTS.find((r) => r.id === id);
+  if (!root) throw new ScopeError(`Unknown root "${id}". Editable roots: ${EDITABLE_ROOTS.map((r) => r.id).join(', ')}.`);
+  return root;
+}
+
+/**
+ * Resolve `rel` inside `root`, or throw.
+ *
+ * Three separate checks, because each catches something the others do not:
+ * the null-byte check stops a truncation trick reaching the syscall, the
+ * prefix check stops `..` traversal, and the realpath check stops a symlink
+ * inside the root pointing out of it. The last one is the one people skip.
+ */
+export async function resolveWithin(rootId: string, rel: string): Promise<string> {
+  const root = rootById(rootId);
+  if (rel.includes('\0')) throw new ScopeError('Invalid path.');
+
+  const abs = resolve(root.dir, rel);
+  const rl = relative(root.dir, abs);
+  if (rl === '' || rl.startsWith('..') || rl.startsWith(sep) || resolve(root.dir, rl) !== abs) {
+    throw new ScopeError(`Path escapes ${rootId}: ${rel}`);
+  }
+
+  const ext = extname(abs).toLowerCase();
+  if (!root.extensions.includes(ext)) {
+    throw new ScopeError(`${ext || 'that file type'} is not editable in ${rootId} (allowed: ${root.extensions.join(', ')}).`);
+  }
+
+  if (existsSync(abs)) {
+    // A symlink inside the root may still point outside it. Compare real
+    // paths, not the paths we were given.
+    const realRoot = await realpath(root.dir);
+    const realAbs = await realpath(abs);
+    const realRel = relative(realRoot, realAbs);
+    if (realRel.startsWith('..') || realRel.startsWith(sep)) {
+      throw new ScopeError(`Path resolves outside ${rootId} via a symlink: ${rel}`);
+    }
+  }
+  return abs;
+}
+
+async function walk(dir: string, root: EditableRoot, out: ScopedFile[], depth = 0): Promise<void> {
+  if (depth > 6) return;
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  for (const e of entries) {
+    const abs = join(dir, e.name);
+    if (e.isDirectory()) {
+      if (e.name === 'node_modules' || e.name.startsWith('.')) continue;
+      await walk(abs, root, out, depth + 1);
+      continue;
+    }
+    if (!e.isFile()) continue;
+    if (!root.extensions.includes(extname(e.name).toLowerCase())) continue;
+    const s = await stat(abs).catch(() => null);
+    if (!s) continue;
+    out.push({
+      root: root.id,
+      path: relative(root.dir, abs),
+      bytes: s.size,
+      gitignored: root.gitignored,
+      ...(root.id === 'chrome-css'
+        ? { generated: 'Partly generated by generate-live-diff.py — re-running the generator discards edits made here.' }
+        : {}),
+    });
+  }
+}
+
+export const scopedFilesService = {
+  roots(): { id: string; label: string; extensions: string[] }[] {
+    return EDITABLE_ROOTS.map((r) => ({ id: r.id, label: r.label, extensions: r.extensions }));
+  },
+
+  async list(rootId?: string): Promise<ScopedFile[]> {
+    const roots = rootId ? [rootById(rootId)] : EDITABLE_ROOTS;
+    const out: ScopedFile[] = [];
+    for (const root of roots) {
+      if (!existsSync(root.dir)) continue;
+      await walk(root.dir, root, out);
+    }
+    return out.sort((a, b) => a.root.localeCompare(b.root) || a.path.localeCompare(b.path));
+  },
+
+  async read(rootId: string, path: string): Promise<string> {
+    const abs = await resolveWithin(rootId, path);
+    return readFile(abs, 'utf8');
+  },
+
+  async write(rootId: string, path: string, content: string): Promise<void> {
+    const abs = await resolveWithin(rootId, path);
+    await writeFile(abs, content, 'utf8');
+  },
+
+  // The custom-CSS column, exposed with the same shape as a file so the
+  // propose/apply flow does not need a second code path for it.
+  async readCustomCss(userId: string): Promise<string> {
+    const row = await db.adminUser.findUnique({ where: { id: userId }, select: { customCss: true } });
+    if (!row) throw new ScopeError('No such admin user.');
+    return row.customCss ?? '';
+  },
+
+  async writeCustomCss(userId: string, css: string): Promise<void> {
+    // Deliberately routed through the existing service rather than writing the
+    // column directly: that is where @import / expression() / script-bearing
+    // url() are stripped, and an agent-authored stylesheet is exactly the case
+    // that sanitisation exists for.
+    const { meService } = await import('./me.service.js');
+    await meService.setCustomCss(userId, css);
+  },
+};

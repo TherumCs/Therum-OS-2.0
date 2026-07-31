@@ -158,6 +158,110 @@ mcpTools.push(
   },
 );
 
+// ── Scoped editing + host advisor ─────────────────────────────────────
+// Bricks and CSS only — see scopedFiles.service.ts for why those roots and
+// nothing else. Reads are open within that scope; writing is a two-step
+// propose -> apply, and `apply` takes a proposal id rather than content, so a
+// human has always seen the exact diff that lands.
+//
+// These are registered here rather than behind a separate agent API on
+// purpose: the dashboard agent and Claude Code running locally then drive the
+// same tools, with one implementation and one set of guarantees.
+const ListFilesInput = z.object({ root: z.string().optional() });
+const ReadFileInput = z.object({ root: z.string().min(1), path: z.string().min(1) });
+const ProposeEditInput = z.object({ root: z.string().min(1), path: z.string().min(1), content: z.string() });
+const ApplyEditInput = z.object({ proposalId: z.string().min(1) });
+
+mcpTools.push(
+  {
+    name: 'list_editable_files',
+    description:
+      'List the files this workspace allows editing: Bricks addons and the site chrome CSS. Nothing outside those roots is reachable.',
+    inputSchema: { type: 'object', properties: { root: { type: 'string', enum: ['bricks', 'chrome-css'] } } },
+    async handler(args) {
+      const { root } = ListFilesInput.parse(args ?? {});
+      const { scopedFilesService } = await import('../services/scopedFiles.service.js');
+      try {
+        return ok({ roots: scopedFilesService.roots(), files: await scopedFilesService.list(root) });
+      } catch (e) {
+        return fail(e instanceof Error ? e.message : String(e));
+      }
+    },
+  },
+  {
+    name: 'read_editable_file',
+    description: 'Read one file from an editable root. Paths are relative to that root.',
+    inputSchema: {
+      type: 'object',
+      properties: { root: { type: 'string', enum: ['bricks', 'chrome-css'] }, path: { type: 'string' } },
+      required: ['root', 'path'],
+    },
+    async handler(args) {
+      const { root, path } = ReadFileInput.parse(args);
+      const { scopedFilesService } = await import('../services/scopedFiles.service.js');
+      try {
+        return ok({ root, path, content: await scopedFilesService.read(root, path) });
+      } catch (e) {
+        return fail(e instanceof Error ? e.message : String(e));
+      }
+    },
+  },
+  {
+    name: 'propose_edit',
+    description:
+      'Propose replacing a file with new content. Writes NOTHING: returns a unified diff and a proposalId for a human to review. Send the FULL new file content, not a patch.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        root: { type: 'string', enum: ['bricks', 'chrome-css'] },
+        path: { type: 'string' },
+        content: { type: 'string', description: 'The complete new file contents.' },
+      },
+      required: ['root', 'path', 'content'],
+    },
+    async handler(args) {
+      const { root, path, content } = ProposeEditInput.parse(args);
+      const { editProposalService } = await import('../services/editProposal.service.js');
+      try {
+        const p = await editProposalService.proposeFile(root, path, content);
+        return ok({ proposalId: p.id, label: p.label, diff: p.diff, stats: p.stats, warnings: p.warnings });
+      } catch (e) {
+        return fail(e instanceof Error ? e.message : String(e));
+      }
+    },
+  },
+  {
+    // The only write tool here, and it cannot write arbitrary content: it
+    // applies a proposal whose diff a human already saw. It re-reads the file
+    // first and refuses if it moved underneath the proposal.
+    name: 'apply_edit',
+    description:
+      'Apply a previously proposed edit by id, after a human approved the diff. Commits the change where the file is tracked in git.',
+    write: true,
+    inputSchema: { type: 'object', properties: { proposalId: { type: 'string' } }, required: ['proposalId'] },
+    async handler(args) {
+      const { proposalId } = ApplyEditInput.parse(args);
+      const { editProposalService } = await import('../services/editProposal.service.js');
+      try {
+        return ok(await editProposalService.apply(proposalId));
+      } catch (e) {
+        return fail(e instanceof Error ? e.message : String(e));
+      }
+    },
+  },
+  {
+    name: 'host_scan',
+    description:
+      'Scan this host for security, compression and performance issues. Read-only; every finding carries a fix, and checks that could not run are reported rather than counted as passing.',
+    inputSchema: { type: 'object', properties: {} },
+    async handler() {
+      const { hostAdvisorService } = await import('../services/hostAdvisor.service.js');
+      const scan = await hostAdvisorService.scan();
+      return ok({ host: scan.host, counts: scan.counts, findings: scan.findings, skippedCount: scan.skipped.length });
+    },
+  },
+);
+
 export function findTool(name: string): McpTool | undefined {
   return mcpTools.find((t) => t.name === name);
 }

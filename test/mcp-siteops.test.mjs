@@ -43,7 +43,7 @@ after(async () => {
   await disconnectDb();
 });
 
-test('tools/list exposes the 7-tool surface', async () => {
+test('tools/list exposes the expected tool surface', async () => {
   const res = await rpc('tools/list', undefined, `Bearer ${readToken}`);
   const tools = res.json().result.tools.map((t) => t.name);
   for (const t of ['get_preview_url', 'check_queue_status', 'list_content', 'create_draft', 'sales_report', 'list_orders', 'connections_status']) {
