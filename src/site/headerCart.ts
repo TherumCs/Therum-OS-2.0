@@ -303,6 +303,13 @@ export function headerCartRuntime(cfg: HeaderCartConfig = HEADER_CART_DEFAULTS):
     if (drawer) drawer.classList.add('c-shop-sidebar--disabled');
   }
 
+  // Exposed so ANY surface that adds to the cart can reveal the drawer.
+  // addToCart in storefrontHtml.ts posts, updates the count and stops — which
+  // is why adding from a product page changed the badge and nothing else,
+  // while the same action elsewhere opened the drawer. One cart, one reveal.
+  window.__thCartOpen = function(){ open(); };
+  window.__thCartRefresh = function(){ render(); };
+
   function isOpen(){
     return SIDEBAR
       ? (document.body.classList.contains('th-cart-open') || document.body.classList.contains('th-cart-over'))

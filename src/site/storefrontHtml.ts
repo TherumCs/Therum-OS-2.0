@@ -213,6 +213,9 @@ async function addToCart(variantId,qty=1,btn){
     const body={variantId,quantity:qty};if(tok())body.cartToken=tok();
     const r=await api('/cart/items',{method:'POST',body:JSON.stringify(body)});
     setTok(r.token);await refreshCount();
+    // Reveal the cart. Without this the badge ticked up and nothing else
+    // happened, so adding from a product page felt like it had failed.
+    if(window.__thCartOpen)window.__thCartOpen();
     if(btn){btn.textContent='Added ✓';setTimeout(()=>{btn.disabled=false;btn.textContent='Add to cart'},1200)}
   }catch(e){
     if(btn){btn.disabled=false;btn.textContent='Add to cart'}
