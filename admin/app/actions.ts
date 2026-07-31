@@ -72,6 +72,15 @@ export async function selectProvider(id: string, provider: string): Promise<void
 // revalidating, so the page always re-fetches the freshly-saved step server-
 // side — same reasoning as the rest of this file, plain Route-Handler-style
 // mutations, no client state to keep in sync.
+/** Turn a CAPABILITY on or off from the wizard. Counter (commerce) and Content
+ *  are capabilities with no Studio app of their own, so without this the wizard
+ *  could not offer the main thing the product does. */
+export async function onboardingToggleCapability(id: string, enabled: boolean): Promise<void> {
+  await apiSend('PATCH', `/api/capabilities/${id}`, { enabled });
+  revalidatePath('/onboarding');
+  redirect('/onboarding');
+}
+
 /** Turn a Studio app on or off from the wizard. Same endpoint the Studio uses. */
 export async function onboardingToggleAddon(id: string, enabled: boolean): Promise<void> {
   await apiSend('PATCH', `/api/studio-apps/${id}`, { enabled });

@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { apiGet } from '../../../lib/api';
 import { BASE_PATH } from '../../../lib/session';
-import { onboardingSetEdition, onboardingSetStep, onboardingSaveBranding, onboardingComplete, onboardingToggleAddon } from '../../actions';
+import { onboardingSetEdition, onboardingSetStep, onboardingSaveBranding, onboardingComplete, onboardingToggleAddon, onboardingToggleCapability } from '../../actions';
 import { DEFAULT_LOGIN_BRANDING, type LoginBranding } from '../../../lib/loginBranding';
 import { DEFAULT_APPEARANCE, type Appearance } from '../../../lib/appearance';
 
@@ -14,6 +14,31 @@ interface Onboarding {
 const ONBOARDING_DEFAULTS: Onboarding = { step: 'account', completed: false };
 
 interface StudioApp { id: string; name: string; description: string; enabled: boolean; navHref?: string }
+interface Capability { id: string; label?: string; name?: string; description?: string; enabled: boolean }
+
+/** What the picker offers, whichever registry it came from. */
+interface Module {
+  id: string;
+  kind: 'app' | 'capability';
+  name: string;
+  description: string;
+  enabled: boolean;
+  setupHref?: string;
+}
+
+// THE TWO REGISTRIES OVERLAP. Nexus is the Connections capability, Milieus is
+// Memberships, Cluster is Merged Products — listing both sides would show the
+// same thing twice under two names. These three are represented by their
+// Studio app and skipped here.
+//
+// Commerce (Counter) and Content have NO Studio app, so without this they
+// never appeared in setup at all: you could not choose the main thing the
+// product does.
+const CAPABILITY_ONLY: Record<string, { name: string; setupHref: string }> = {
+  commerce: { name: 'Counter', setupHref: '/customization' },
+  content: { name: 'Content', setupHref: '/pages' },
+};
+const COVERED_BY_APP = new Set(['connections', 'memberships', 'merged-products']);
 interface Me { username: string }
 interface CommerceSettings { currency: string; locale: string }
 
@@ -58,12 +83,13 @@ function StepFooter({ children }: { children: ReactNode }) {
 // banner resumes exactly where it left off.
 export default async function OnboardingPage() {
   const onboarding = await apiGet<Onboarding>('/api/settings/onboarding').catch(() => ONBOARDING_DEFAULTS);
-  const [edition, seo, branding, appearance, studioApps, me, commerce, site] = await Promise.all([
+  const [edition, seo, branding, appearance, studioApps, capabilities, me, commerce, site] = await Promise.all([
     apiGet<{ edition: 'pure' | 'unlocked' }>('/api/edition').catch(() => ({ edition: 'pure' as const })),
     apiGet<SeoDefaults>('/api/settings/seo-defaults').catch(() => SEO_DEFAULTS),
     apiGet<LoginBranding>('/api/settings/login-branding').catch(() => DEFAULT_LOGIN_BRANDING),
     apiGet<Appearance>('/api/settings/appearance').catch(() => DEFAULT_APPEARANCE),
     apiGet<StudioApp[]>('/api/studio-apps').catch((): StudioApp[] => []),
+    apiGet<Capability[]>('/api/capabilities').catch((): Capability[] => []),
     apiGet<Me>('/api/me').catch((): Me => ({ username: 'admin' })),
     apiGet<CommerceSettings>('/api/settings/commerce').catch(() => ({ currency: 'USD', locale: 'en-US' })),
     apiGet<{ siteName: string }>('/api/settings/site').catch(() => ({ siteName: '' })),
@@ -76,7 +102,23 @@ export default async function OnboardingPage() {
   const RETIRED: Record<string, (typeof STEPS)[number]> = { connections: 'addons', store: 'configure' };
   const current = (RETIRED[onboarding.step] ?? onboarding.step) as (typeof STEPS)[number];
   const stepIndex = STEPS.indexOf(current);
-  const enabledApps = studioApps.filter((a) => a.enabled);
+  // One list, both registries, deduped — see CAPABILITY_ONLY.
+  const modules: Module[] = [
+    ...capabilities
+      .filter((c) => CAPABILITY_ONLY[c.id] && !COVERED_BY_APP.has(c.id))
+      .map((c): Module => ({
+        id: c.id,
+        kind: 'capability',
+        name: CAPABILITY_ONLY[c.id]!.name,
+        description: c.description ?? '',
+        enabled: c.enabled,
+        setupHref: CAPABILITY_ONLY[c.id]!.setupHref,
+      })),
+    ...studioApps.map((a): Module => ({
+      id: a.id, kind: 'app', name: a.name, description: a.description, enabled: a.enabled, setupHref: a.navHref,
+    })),
+  ];
+  const enabledApps = modules.filter((m) => m.enabled);
 
   return (
     <section style={{ maxWidth: 640 }}>
@@ -151,14 +193,17 @@ export default async function OnboardingPage() {
 
         {current === 'addons' && (
           <>
-            <h2 style={{ marginTop: 0 }}>Which Studio apps do you want?</h2>
+            <h2 style={{ marginTop: 0 }}>What is this install for?</h2>
             <p className="muted">
-              Each one adds a section to the sidebar and its own features. Off means the code stays installed and simply
-              does not appear — turn any of them on later in Studio.
+              Counter is the store; the rest add their own section to the sidebar. Off means the code stays installed
+              and simply does not appear — turn any of them on later in Studio.
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--th-space-8)' }}>
-              {studioApps.map((a) => (
-                <form key={a.id} action={onboardingToggleAddon.bind(null, a.id, !a.enabled)}>
+              {modules.map((a) => (
+                <form
+                  key={`${a.kind}-${a.id}`}
+                  action={(a.kind === 'capability' ? onboardingToggleCapability : onboardingToggleAddon).bind(null, a.id, !a.enabled)}
+                >
                   <button
                     type="submit"
                     className={'th-onb-app' + (a.enabled ? ' is-on' : '')}
@@ -172,7 +217,7 @@ export default async function OnboardingPage() {
                   </button>
                 </form>
               ))}
-              {!studioApps.length && <p className="muted">No Studio apps are registered on this install.</p>}
+              {!modules.length && <p className="muted">Nothing is registered on this install.</p>}
             </div>
             <StepFooter>
               <form action={onboardingSetStep.bind(null, 'edition')}>
@@ -199,19 +244,19 @@ export default async function OnboardingPage() {
             </p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--th-space-8)' }}>
               {enabledApps.map((a) => (
-                <div key={a.id} className="th-onb-app" style={{ cursor: 'default' }}>
+                <div key={`${a.kind}-${a.id}`} className="th-onb-app" style={{ cursor: 'default' }}>
                   <span className="th-onb-app__check" aria-hidden="true">✓</span>
                   <span style={{ flex: 1 }}>
                     <strong>{a.name}</strong>
                     <span className="th-hint" style={{ display: 'block' }}>{a.description}</span>
                   </span>
-                  {a.navHref && (
+                  {a.setupHref && (
                     /* Opens in a new tab ON PURPOSE — sending someone out of a
                        wizard to configure something is how they lose their
                        place in it. */
                     <a
                       className="th-btn th-btn--xs"
-                      href={`${BASE_PATH}${a.navHref}`}
+                      href={`${BASE_PATH}${a.setupHref}`}
                       target="_blank"
                       rel="noreferrer"
                       style={{ flex: '0 0 auto', alignSelf: 'center' }}
