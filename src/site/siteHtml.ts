@@ -91,7 +91,13 @@ export const PORTED_DOC_CSS = `
 /* The column. Everything in these pages lives inside it. */
 #brx-content > .brxe-container,#brx-content > .brxe-section,
 #brx-content > .brxe-block{
-  max-width:1180px;margin-left:auto;margin-right:auto;padding-left:40px;padding-right:40px}
+  max-width:var(--th-site-max,1400px);margin-left:auto;margin-right:auto;
+  padding-left:40px;padding-right:40px}
+/* The ported header hard-codes its own 1170px column. Content wider than the
+   header reads as misaligned rather than roomy, so the header is pulled onto
+   the SAME variable — one number moves both. */
+.c-header--desktop,.c-header--mobile,.c-header__inner,.c-shop-header__inner{
+  max-width:var(--th-site-max,1400px)!important;margin-left:auto;margin-right:auto}
 /* Nested containers must not re-pad — the column already has its gutters. */
 #brx-content .brxe-container .brxe-container{padding-left:0;padding-right:0}
 #brx-content h1,#brx-content h2,#brx-content h3,#brx-content h4{
@@ -133,6 +139,8 @@ export interface SitePage {
   chromeHeader?: string;
   chromeFooter?: string;
   chromeCssUrl?: string;
+  /** Settings > Site > Content width. Drives --th-site-max. */
+  contentWidth?: 'narrow' | 'normal' | 'wide' | 'full';
   /** Front-end admin dock, rendered only for a signed-in admin. */
   dock?: { markup: string; styles: string; script: string };
   /** Settings > Performance, applied to the delivered HTML. */
@@ -159,7 +167,18 @@ export interface SitePage {
   pageCss?: string;
 }
 
+// The one place the storefront column width is decided. It used to be a
+// literal 1180px inside the stylesheet, which is why it kept reverting: every
+// fix was applied somewhere else and this constant won.
+const SITE_WIDTHS: Record<string, string> = {
+  narrow: '1180px',
+  normal: '1320px',
+  wide: '1440px',
+  full: '100%',
+};
+
 export function sitePage(p: SitePage): string {
+  const siteMax = SITE_WIDTHS[p.contentWidth ?? 'wide'] ?? SITE_WIDTHS.wide;
   const nav = p.nav.map((n) => `<a href="${esc(n.href)}"${n.current ? ' class="current"' : ''}>${esc(n.label)}</a>`).join('');
   const hasChrome = Boolean(p.chromeHeader || p.chromeFooter);
   const header = p.chromeHeader
@@ -181,7 +200,7 @@ ${p.body}
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(p.title)}</title>
 ${p.headExtra ?? ''}
-<style>${CSS}${BANNER_STYLES}${hasChrome ? HEADER_CART_CSS + PORTED_DOC_CSS : ''}</style>
+<style>:root{--th-site-max:${siteMax}}${CSS}${BANNER_STYLES}${hasChrome ? HEADER_CART_CSS + PORTED_DOC_CSS : ''}</style>
 ${p.dock ? `<style>${p.dock.styles}</style>` : ''}
 ${p.chromeCssUrl ? `<link rel="stylesheet" href="${esc(p.chromeCssUrl)}">` : ''}
 ${p.pageCss ? `<style>${p.pageCss}</style>` : ''}

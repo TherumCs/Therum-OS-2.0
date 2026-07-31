@@ -292,6 +292,10 @@ export type OnboardingInput = z.infer<typeof OnboardingInput>;
 // Site identity + Base Theme wiring (public frontend). homepageSlug names the
 // published page served at bare / — null falls back to the built-in landing.
 export const SiteSettingsInput = z.object({
+  /** How wide the storefront's content column runs. This was a hardcoded
+   *  1180px in siteHtml.ts, which is why it kept coming back after being
+   *  "fixed" elsewhere — the constant always won. It is a setting now. */
+  contentWidth: z.enum(['narrow', 'normal', 'wide', 'full']).optional(),
   siteName: z.string().min(1).max(80).optional(),
   tagline: z.string().max(160).optional(),
   homepageSlug: z.string().max(200).nullable().optional(),

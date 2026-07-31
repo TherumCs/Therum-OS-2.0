@@ -311,16 +311,17 @@ export async function counterAdminRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Fulfilment ---------------------------------------------------------------
-  // Pull the catalog FROM Printful. Idempotent by Printful's sync-product id,
-  // so this is safe to re-run — that is the point of a sync.
-  app.get('/counter/sync/printful/status', { preHandler: [app.authenticate, requireBundle('manage-settings')] }, async (_req, reply) => {
-    const { printfulSyncService } = await import('../../counter/printfulSync.js');
-    reply.send({ available: await printfulSyncService.available() });
+  // Pull a catalog FROM any connected provider. Provider-agnostic on purpose:
+  // adding one is a registry entry in catalogSync.ts, not another route.
+  app.get('/counter/sync/providers', { preHandler: [app.authenticate, requireBundle('manage-settings')] }, async (_req, reply) => {
+    const { catalogSyncService } = await import('../../counter/catalogSync.js');
+    reply.send({ providers: await catalogSyncService.providers() });
   });
 
-  app.post('/counter/sync/printful', { preHandler: [app.authenticate, requireBundle('manage-settings')] }, async (_req, reply) => {
-    const { printfulSyncService } = await import('../../counter/printfulSync.js');
-    reply.send(await printfulSyncService.run());
+  app.post('/counter/sync/:provider', { preHandler: [app.authenticate, requireBundle('manage-settings')] }, async (req, reply) => {
+    const { provider } = req.params as { provider: string };
+    const { catalogSyncService } = await import('../../counter/catalogSync.js');
+    reply.send(await catalogSyncService.run(provider));
   });
 
   app.get('/counter/orders/:orderId/shipments', async (req, reply) => {

@@ -1,6 +1,6 @@
 import { CatalogTabs } from '../CatalogTabs';
 import { ImportClient } from './ImportClient';
-import { PrintfulSync } from './PrintfulSync';
+import { ProviderSync } from './ProviderSync';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,7 +14,7 @@ export default function ImportPage() {
         each of its columns means. Prices, nested categories (<code>snacks/japan</code>), tags and images all come
         across, and nothing is written until you press Import.
       </p>
-      <PrintfulSync />
+      <ProviderSync />
       <ImportClient />
     </section>
   );

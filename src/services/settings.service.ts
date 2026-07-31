@@ -539,6 +539,8 @@ async function write(key: string, value: object): Promise<void> {
 }
 
 export interface SiteSettings {
+  /** Storefront content column width. See SiteSettingsInput. */
+  contentWidth: 'narrow' | 'normal' | 'wide' | 'full';
   siteName: string;
   tagline: string;
   homepageSlug: string | null;
@@ -554,7 +556,7 @@ export interface SiteSettings {
   showPageTitles: boolean;
 }
 const SITE_KEY = 'site';
-const SITE_DEFAULTS: SiteSettings = { siteName: 'Therum Site', tagline: '', homepageSlug: null, menu: null, chromeHeaderSlug: null, chromeFooterSlug: null, chromeCssUrl: null, showPageTitles: true };
+const SITE_DEFAULTS: SiteSettings = { contentWidth: 'wide', siteName: 'Therum Site', tagline: '', homepageSlug: null, menu: null, chromeHeaderSlug: null, chromeFooterSlug: null, chromeCssUrl: null, showPageTitles: true };
 
 export const settingsService = {
   // Site identity + Base Theme wiring (public frontend, C-site).
