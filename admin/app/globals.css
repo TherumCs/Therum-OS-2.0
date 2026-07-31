@@ -1916,3 +1916,47 @@ tr:hover .th-rowactions, tr:focus-within .th-rowactions { opacity: 1; }
 @media (prefers-reduced-motion: reduce) {
   .th-navbar { transition: opacity 120ms ease; }
 }
+
+/* ── Studio assistant card ─────────────────────────────────────────────
+   A chat squeezed into a bento tile fights the grid at every size, so the
+   compact state is just an input plus a status line; the transcript expands
+   under it. Runs are server-side jobs, so collapsing this or navigating away
+   does not stop the work. */
+.th-agent { display: flex; flex-direction: column; gap: var(--th-space-10); min-width: 0; }
+.th-agent__idle { margin: 0; font-size: var(--th-fs-xs); }
+.th-agent__ask { display: flex; gap: var(--th-space-8); }
+.th-agent__input {
+  flex: 1; min-width: 0;
+  padding: var(--th-space-8) var(--th-space-10);
+  border: 1px solid var(--th-line); border-radius: var(--th-r-sm);
+  background: var(--th-bg); color: var(--th-ink);
+  font-family: inherit; font-size: var(--th-fs-xs);
+}
+.th-agent__input:focus { outline: none; border-color: var(--th-accent); }
+.th-agent__error { margin: 0; font-size: var(--th-fs-xs); color: var(--th-danger-ink); background: var(--th-danger-bg); padding: var(--th-space-8) var(--th-space-10); border-radius: var(--th-r-sm); }
+.th-agent__run { display: flex; flex-direction: column; gap: var(--th-space-8); min-width: 0; }
+.th-agent__meta { display: flex; align-items: center; gap: var(--th-space-8); flex-wrap: wrap; font-size: var(--th-fs-2xs); }
+.th-agent__status { text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+.th-agent__status--running { color: var(--th-warning-ink); }
+.th-agent__status--done { color: var(--th-success-ink); }
+.th-agent__status--error, .th-agent__status--stopped { color: var(--th-danger-ink); }
+.th-agent__toggle { margin-left: auto; background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: var(--th-fs-2xs); color: var(--th-accent-text); text-decoration: underline; }
+
+.th-agent__steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--th-space-6); max-height: 340px; overflow-y: auto; }
+.th-agent__step { font-size: var(--th-fs-xs); color: var(--th-ink-2); border-left: 2px solid var(--th-line); padding-left: var(--th-space-8); }
+.th-agent__step p { margin: 0; }
+.th-agent__step--tool { border-left-color: var(--th-accent-border); }
+.th-agent__step.is-bad { border-left-color: var(--th-danger-text); }
+.th-agent__tool { font-family: var(--th-font-mono); font-size: var(--th-fs-2xs); color: var(--th-accent-text); }
+.th-agent__args { font-family: var(--th-font-mono); font-size: var(--th-fs-2xs); color: var(--th-muted); margin-left: var(--th-space-6); }
+/* Tool output and diffs must wrap, not scroll sideways — half a line off the
+   right edge of a dashboard tile is not reviewable. */
+.th-agent__result, .th-agent__diff {
+  margin: var(--th-space-4) 0 0; padding: var(--th-space-8);
+  background: var(--th-surface-2); border-radius: var(--th-r-sm);
+  font-family: var(--th-font-mono); font-size: var(--th-fs-2xs); color: var(--th-ink-2);
+  white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow-y: auto;
+}
+.th-agent__answer { font-size: var(--th-fs-sm); color: var(--th-ink); white-space: pre-wrap; }
+.th-agent__proposal { border: 1px solid var(--th-line); border-radius: var(--th-r-sm); padding: var(--th-space-10); display: flex; flex-direction: column; gap: var(--th-space-6); }
+.th-agent__warn { margin: 0; font-size: var(--th-fs-2xs); color: var(--th-warning-ink); }

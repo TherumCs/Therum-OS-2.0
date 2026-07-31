@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { apiGet } from '../../lib/api';
 import { CardResizeHandle } from './CardResizeHandle';
+import { StudioAgentCard } from './StudioAgentCard';
 import { DASHBOARD_PRESETS, activePreset, type PresetKey } from './dashboardPresets';
 import { timeAgo } from '../../lib/types';
 import type { Paged, Product, Order, Extension } from '../../lib/types';
@@ -152,6 +153,7 @@ export default async function Home() {
     { id: 'posts', size: 'xs' },
     { id: 'products', size: 'xs' },
     { id: 'users', size: 'xs' },
+    { id: 'studio-agent', size: 'md' },
     { id: 'recent-activity', size: 'md' },
     { id: 'site-health', size: 'xs' },
   ]).filter((c) => (c.id === 'products' ? commerceActive : true));
@@ -309,6 +311,13 @@ export default async function Home() {
               <CardShell key={c.id} id="users" title="Users" size={c.size} layout={layout} viewAllHref="/users">
                 <div className="th-stat-val">{users?.length ?? '—'}</div>
                 <div className="muted" style={{ fontSize: 'var(--th-fs-2xs)' }}>Registered users</div>
+              </CardShell>
+            );
+          }
+          if (c.id === 'studio-agent') {
+            return (
+              <CardShell key={c.id} id="studio-agent" title="Studio assistant" size={c.size} layout={layout}>
+                <StudioAgentCard />
               </CardShell>
             );
           }

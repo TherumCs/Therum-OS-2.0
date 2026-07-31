@@ -171,6 +171,11 @@ const ListFilesInput = z.object({ root: z.string().optional() });
 const ReadFileInput = z.object({ root: z.string().min(1), path: z.string().min(1) });
 const ProposeEditInput = z.object({ root: z.string().min(1), path: z.string().min(1), content: z.string() });
 const ApplyEditInput = z.object({ proposalId: z.string().min(1) });
+const ListProductsInput = z.object({
+  status: z.enum(['draft', 'active', 'archived']).optional(),
+  q: z.string().optional(),
+  limit: z.number().int().min(1).max(100).optional(),
+});
 
 mcpTools.push(
   {
@@ -247,6 +252,53 @@ mcpTools.push(
       } catch (e) {
         return fail(e instanceof Error ? e.message : String(e));
       }
+    },
+  },
+  {
+    // Added after the assistant answered "I don't have a tool that lists the
+    // product catalog" — correct behaviour, and a real gap on a store. Prices
+    // are minor units everywhere in this codebase; they are converted here so
+    // the model is not left inferring whether 5400 means $54 or $5400.
+    name: 'list_products',
+    description:
+      'List products in the catalog with status, slug and price. Prices are returned in both minor units (cents) and a decimal amount.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['draft', 'active', 'archived'] },
+        q: { type: 'string', description: 'Search product names.' },
+        limit: { type: 'number', description: 'Default 20, max 100.' },
+      },
+    },
+    async handler(args) {
+      const input = ListProductsInput.parse(args ?? {});
+      const { productService } = await import('../services/product.service.js');
+      const page = await productService.list({ limit: input.limit ?? 20, ...(input.status ? { status: input.status } : {}), ...(input.q ? { q: input.q } : {}) } as never);
+      const items = (page as { items?: unknown[] }).items ?? [];
+      return ok({
+        total: (page as { total?: number }).total ?? items.length,
+        products: items.map((p) => {
+          const row = p as {
+            id: string; name: string; slug: string; status: string;
+            variants?: { price: number; inventory: number; sku: string | null }[];
+          };
+          // Price lives on the VARIANT as `price`, in minor units — there is no
+          // priceMinor on the product. The lowest variant is the "from" price,
+          // which is what the admin list shows.
+          const prices = (row.variants ?? []).map((v) => v.price).filter((n) => typeof n === 'number');
+          const fromMinor = prices.length ? Math.min(...prices) : null;
+          return {
+            id: row.id,
+            name: row.name,
+            slug: row.slug,
+            status: row.status,
+            fromPriceMinor: fromMinor,
+            fromPrice: fromMinor === null ? null : (fromMinor / 100).toFixed(2),
+            variants: row.variants?.length ?? 0,
+            inventory: (row.variants ?? []).reduce((sum, v) => sum + (v.inventory ?? 0), 0),
+          };
+        }),
+      });
     },
   },
   {
