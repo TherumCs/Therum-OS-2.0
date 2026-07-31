@@ -324,7 +324,15 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS): st
         <!-- Quick checkout completes HERE. The shopper never leaves the card,
              which is the whole point: the previous flow ended by handing the
              variant to checkoutFlow.ts, which opened the cart drawer. -->
+        <!-- Wallets first: Apple/Google Pay return the payer's contact and
+             shipping address themselves, so the fast path needs no form at
+             all. The card path below is the fallback. -->
         <div class="card-pay__wallets" data-pay-wallets hidden></div>
+        <div class="card-pay__or" data-pay-or hidden>or pay by card</div>
+        <!-- The gateway's own hosted card field mounts here. Raw card numbers
+             are never collected by our inputs — that is what keeps this out of
+             PCI scope, and it is why there is no card-number input below. -->
+        <div class="card-pay__cardfield" data-pay-cardfield hidden></div>
         <input class="card-pay__in" data-pay-email type="email" placeholder="Email for your receipt" autocomplete="email">
         <input class="card-pay__in" data-pay-name placeholder="Full name" autocomplete="shipping name">
         <input class="card-pay__in" data-pay-line1 placeholder="Street address" autocomplete="shipping address-line1">
@@ -590,6 +598,7 @@ export const CARD_EVOLVE_RUNTIME = `
     // ── Quick checkout: it completes here ────────────────────────────────
     var payEl = root.querySelector('[data-evolve-face=\"pay\"]');
     var chosenVariant = null;
+    var payProvider = null;
 
     function payQ(sel){ return payEl ? payEl.querySelector(sel) : null; }
     function say(msg, bad){
@@ -636,7 +645,7 @@ export const CARD_EVOLVE_RUNTIME = `
         // supports it. A not-ready session comes back WITH a reason, which is
         // worth showing rather than presenting a button that cannot work.
         var w = await api('/shop/checkout/wallet-session', {
-          orderNumber: order.orderNumber, accessToken: order.accessToken
+          orderNumber: order.orderNumber, accessToken: order.accessToken, provider: payProvider || 'square'
         }).catch(function(){ return { ready: false, reason: 'Wallet payments are not set up yet.' }; });
 
         if (w && w.ready) {
@@ -655,6 +664,40 @@ export const CARD_EVOLVE_RUNTIME = `
       }
     }
 
+    var walletsLoaded = false;
+    async function loadWallets(){
+      if (walletsLoaded) return;
+      walletsLoaded = true;
+      var box = payQ('[data-pay-wallets]');
+      var or = payQ('[data-pay-or]');
+      if (!box) return;
+      try {
+        var res = await fetch('/api/shop/wallets');
+        var data = await res.json();
+        var ready = (data.providers || []).filter(function(p){ return p.ready; });
+        if (ready.length === 0) {
+          // Say WHY rather than rendering nothing — an empty area reads as a
+          // broken page, and the reason is actionable for the operator.
+          var why = (data.providers || []).map(function(p){ return p.reason; }).filter(Boolean)[0];
+          box.hidden = false;
+          box.innerHTML = '<p class="card-pay__msg">' + (why || 'Wallet payments are not available yet.') + '</p>';
+          return;
+        }
+        box.hidden = false;
+        if (or) or.hidden = false;
+        box.innerHTML = ready.map(function(p){
+          return p.wallets.map(function(w){
+            return '<button class="card-btn card-btn--solid" type="button" data-wallet="' + w
+              + '" data-wallet-provider="' + p.provider + '">'
+              + (w === 'apple_pay' ? 'Pay' : w === 'google_pay' ? 'Google Pay' : w) + '</button>';
+          }).join('');
+        }).join('');
+      } catch (e) {
+        box.hidden = false;
+        box.innerHTML = '<p class="card-pay__msg">Could not check wallet availability.</p>';
+      }
+    }
+
     confirm.addEventListener('click', function(){
       if (confirm.disabled || !chosenVariant) return;
       var sum = payQ('[data-pay-sum]');
@@ -663,12 +706,21 @@ export const CARD_EVOLVE_RUNTIME = `
           + (chosenVariant.c || chosenVariant.s ? ' — ' : '') + money(chosenVariant.p);
       }
       face('pay');
+      loadWallets();
     });
     if (payEl) {
       var back = payQ('[data-pay-back]');
       if (back) back.addEventListener('click', function(){ face('pick'); });
       var goBtn = payQ('[data-pay-go]');
       if (goBtn) goBtn.addEventListener('click', function(){ pay(); });
+      payEl.addEventListener('click', function(e){
+        var w = e.target.closest('[data-wallet]');
+        if (!w) return;
+        // The wallet sheet supplies contact and address itself, so the form is
+        // not required on this path — that is what makes it the fast one.
+        payProvider = w.getAttribute('data-wallet-provider');
+        pay();
+      });
     }
   });
 })();
@@ -879,6 +931,8 @@ export const PRODUCT_GRID_FALLBACK_CSS = `
   border:1px solid var(--ln,#e5e7eb);border-radius:8px}
 .card-pay__in:focus{outline:none;border-color:var(--tx,#111)}
 .card-pay__wallets{display:flex;flex-direction:column;gap:6px}
+.card-pay__or{font-size:11px;color:var(--tx3,#6b7280);text-align:center;position:relative}
+.card-pay__cardfield:not(:empty){border:1px solid var(--ln,#e5e7eb);border-radius:8px;padding:8px;min-height:38px}
 .card-pay__msg{font-size:11px;line-height:1.4;margin:0;color:var(--tx3,#6b7280)}
 .card-pay__msg.is-bad{color:#b3261e}
 .card-picker{display:flex;flex-direction:column;gap:8px}

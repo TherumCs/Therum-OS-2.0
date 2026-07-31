@@ -240,6 +240,15 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
   // the storefront checkout — a shopper paying for their order is not a
   // logged-in customer, and requiring an account here would break guest
   // checkout, which is the whole point of wallet payments being fast.
+  // Public, because the shop CARD needs to know which wallets it can offer
+  // before any order exists — the admin-only /counter/wallets/providers cannot
+  // be called from a storefront page. Nothing secret leaves: a publishable key
+  // is publishable by definition, and a not-ready provider returns its reason
+  // so the card can say why instead of showing a button that cannot work.
+  app.get('/shop/wallets', async (_req, reply) => {
+    reply.send({ providers: await walletPayments.availableProviders() });
+  });
+
   app.post('/shop/checkout/wallet-session', async (req, reply) => {
     const input = z.object({
       orderNumber: z.string().min(1).max(60),
