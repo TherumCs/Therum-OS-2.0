@@ -556,8 +556,6 @@ body { letter-spacing: var(--th-letter-spacing); line-height: var(--th-line-heig
   --th-app-bg-image: radial-gradient(ellipse at top left, color-mix(in srgb, var(--th-accent) 4%, transparent) 0%, transparent 55%);
 }
 
-/* Motion > Page transitions — consumed by #th-content in globals.css. */
-@keyframes th-content-fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
 /* Content defaults > Card layout — consumed by .th-lp-card-meta in
    globals.css. */

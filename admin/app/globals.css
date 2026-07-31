@@ -225,7 +225,10 @@ h1 { font-size: var(--th-fs-xl); margin: 0 0 var(--th-space-16); letter-spacing:
    32/64/80 rhythm without needing its own wrapper (pages were rendering
    flush against the sidebar; .th-dash used to carry this padding alone). */
 #th-content { flex: 1; min-width: 0; max-width: var(--th-content-max-width); margin: 0 auto; width: 100%; padding: var(--th-space-32) var(--th-space-64) var(--th-space-80); box-sizing: border-box; }
-[data-page-transitions='on'] #th-content { animation: th-content-fade-in 0.2s ease; }
+/* Page entry motion lives with .th-page-enter (see PageMotion.tsx and the
+   block near the end of this file). The rule that used to sit here keyed off
+   [data-page-transitions='on'] — plural, and a value we never write — so it
+   matched nothing and no page has ever animated in. */
 
 /* Sidebar style variants (Appearance setting) — 'default' is the existing
    baseline above; these two are real structural differences, not a re-skin
@@ -1657,61 +1660,38 @@ input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: 
   transition: none !important;
   animation: none !important;
 }
-#th-shell[data-motion='off'] { view-transition-name: none; }
-
-/* The OS-level preference wins outright. Someone who set reduce-motion in
-   their system did not come here to negotiate it. */
-@media (prefers-reduced-motion: reduce) {
-  #th-shell, #th-shell * { transition: none !important; animation: none !important; }
-  ::view-transition-group(*), ::view-transition-old(*), ::view-transition-new(*) { animation: none !important; }
-}
-
 /* ── Page transitions ──────────────────────────────────────────────────
-   One screen BECOMING the next, rather than one vanishing and another
-   appearing. The instant swap is what made client-side navigation read as a
-   page reload even though nothing was reloading.
+   The new screen animates IN on arrival. PageMotion.tsx adds .th-page-enter
+   after each navigation; these rules decide what that looks like.
 
-   ViewTransitions.tsx decides when; these decide what it looks like. The
-   easing is the same expressive curve used for the cart shift — a fast start
-   that settles, which is what reads as physical rather than linear. */
-::view-transition-old(root),
-::view-transition-new(root) { animation-duration: var(--th-dur, 220ms); animation-timing-function: var(--th-ease, cubic-bezier(.32,.72,0,1)); }
+   This replaced a View Transition implementation. That API holds a snapshot of
+   the page while its callback is pending, and this admin's navigations are
+   server round-trips (~450ms measured), so every click froze the old screen
+   for the length of the fetch. Animating the arrival instead means the click
+   is never blocked — the thing Bam kept describing as "freezing".
 
-/* FADE — the quietest. Old and new cross-dissolve. */
-#th-shell[data-page-transition='fade'] { view-transition-name: none; }
-[data-page-transition='fade']::view-transition-old(root) { animation: th-vt-out-fade var(--th-dur, 220ms) both; }
-[data-page-transition='fade']::view-transition-new(root) { animation: th-vt-in-fade var(--th-dur, 220ms) both; }
+   Duration is --th-dur, so Appearance > Transition speed drives these the same
+   way it drives everything else. */
+#th-shell[data-page-transition='fade'] .th-page-enter { animation: th-page-fade var(--th-dur) var(--th-ease) both; }
+#th-shell[data-page-transition='slide'] .th-page-enter { animation: th-page-slide var(--th-dur) var(--th-ease) both; }
+#th-shell[data-page-transition='scale'] .th-page-enter { animation: th-page-scale var(--th-dur) var(--th-ease) both; }
+#th-shell[data-page-transition='morph'] .th-page-enter { animation: th-page-morph var(--th-dur) var(--th-ease) both; }
+/* Motion off, or no style chosen, means no animation at all — PageMotion also
+   refuses to add the class, so this is belt and braces. */
+#th-shell[data-motion='off'] .th-page-enter { animation: none !important; }
 
-/* SLIDE — content moves in from the side, so navigation has a direction. */
-[data-page-transition='slide']::view-transition-old(root) { animation: th-vt-out-slide var(--th-dur, 220ms) var(--th-ease) both; }
-[data-page-transition='slide']::view-transition-new(root) { animation: th-vt-in-slide var(--th-dur, 220ms) var(--th-ease) both; }
+@keyframes th-page-fade  { from { opacity: 0 } }
+@keyframes th-page-slide { from { opacity: 0; transform: translateX(10px) } }
+@keyframes th-page-scale { from { opacity: 0; transform: scale(.99) } }
+/* 'morph' is the default: a small rise, which reads as the content settling
+   into place rather than appearing from nowhere. */
+@keyframes th-page-morph { from { opacity: 0; transform: translateY(8px) } }
 
-/* SCALE — the new screen settles forward out of the old one. */
-[data-page-transition='scale']::view-transition-old(root) { animation: th-vt-out-scale var(--th-dur, 220ms) var(--th-ease) both; }
-[data-page-transition='scale']::view-transition-new(root) { animation: th-vt-in-scale var(--th-dur, 220ms) var(--th-ease) both; }
-
-/* MORPH — the default, and the one worth having. Anything carrying a
-   view-transition-name is tracked ACROSS the navigation, so a card you click
-   travels to become the header of the page it opens instead of disappearing
-   and being redrawn somewhere else. */
-[data-page-transition='morph']::view-transition-old(root) { animation: th-vt-out-morph var(--th-dur, 220ms) var(--th-ease) both; }
-[data-page-transition='morph']::view-transition-new(root) { animation: th-vt-in-morph var(--th-dur, 220ms) var(--th-ease) both; }
-[data-page-transition='morph'] ::view-transition-group(*) {
-  animation-duration: var(--th-dur, 220ms);
-  animation-timing-function: var(--th-ease, cubic-bezier(.32,.72,0,1));
+@media (prefers-reduced-motion: reduce) {
+  .th-page-enter { animation: none !important; }
 }
-
-@keyframes th-vt-out-fade  { to   { opacity: 0 } }
-@keyframes th-vt-in-fade   { from { opacity: 0 } }
-@keyframes th-vt-out-slide { to   { opacity: 0; transform: translateX(-2%) } }
-@keyframes th-vt-in-slide  { from { opacity: 0; transform: translateX(3%) } }
-@keyframes th-vt-out-scale { to   { opacity: 0; transform: scale(.985) } }
-@keyframes th-vt-in-scale  { from { opacity: 0; transform: scale(1.012) } }
-@keyframes th-vt-out-morph { to   { opacity: 0; transform: scale(.99) translateY(4px) } }
-@keyframes th-vt-in-morph  { from { opacity: 0; transform: scale(1.006) translateY(-6px) } }
 
 /* The old on/off rule this replaces, kept working for the fade case. */
-[data-page-transition] #th-content { animation: th-content-fade-in var(--th-dur, 220ms) var(--th-ease) both; }
 
 /* ── Product Studio — the three-column editor ──────────────────────────
    Left: what the product IS. Centre: what the customer SEES. Right: whatever
@@ -1901,3 +1881,38 @@ tr:hover .th-rowactions, tr:focus-within .th-rowactions { opacity: 1; }
 .th-adv__skip summary { cursor: pointer; }
 .th-adv__skip ul { margin: var(--th-space-8) 0 0; padding-left: var(--th-space-16); display: flex; flex-direction: column; gap: var(--th-space-4); }
 .th-adv__skip code { font-family: var(--th-font-mono); color: var(--th-ink-2); }
+
+/* ── Navigation feedback ───────────────────────────────────────────────
+   A click has to acknowledge itself immediately. Warm navigations on this
+   admin measure 740-1000ms and there is no loading.tsx, so without this the
+   old page simply sits there for a second — which is what "it looks like it
+   freezes" actually was, and is not something removing the View Transition
+   could fix on its own. */
+.th-navbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--th-accent);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  /* Slow creep out, quick snap home. The long ease is what makes the bar
+     look like progress rather than a loading loop. */
+  transition: transform 900ms cubic-bezier(.15, .8, .3, 1), opacity 200ms ease;
+  opacity: 0;
+  z-index: 9999;
+  pointer-events: none;
+}
+.th-navbar.is-loading { opacity: 1; }
+/* Arrival: cover the remaining distance fast, then fade out. */
+.th-navbar.is-done { transition: transform 160ms ease-out, opacity 220ms ease 120ms; opacity: 0; }
+
+/* Optimistic active state — the rail responds on click, rather than a second
+   later when usePathname finally updates. React overwrites this on the next
+   render, which is the point: a failed navigation corrects itself. */
+.th-sb-item.is-pending { background: var(--th-sidebar-active-bg); color: var(--th-sidebar-ink); }
+.th-sb-item.is-pending svg { color: var(--th-sidebar-ink); }
+
+#th-shell[data-motion='off'] .th-navbar { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .th-navbar { transition: opacity 120ms ease; }
+}
