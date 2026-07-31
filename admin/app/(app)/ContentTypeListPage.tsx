@@ -31,8 +31,8 @@ const SORTS: SortOption[] = [
 // setting existed and was saved but nothing ever read it.
 const PER_PAGE_FALLBACK = 24;
 
-interface ListPrefs { itemsPerPage: number; thumbnailSource: string }
-const LIST_PREF_FALLBACK: ListPrefs = { itemsPerPage: PER_PAGE_FALLBACK, thumbnailSource: 'auto' };
+interface ListPrefs { itemsPerPage: number; thumbnailSource: string; cardImage: string }
+const LIST_PREF_FALLBACK: ListPrefs = { itemsPerPage: PER_PAGE_FALLBACK, thumbnailSource: 'auto', cardImage: 'gradient' };
 
 async function listPrefs(): Promise<ListPrefs> {
   return apiGet<ListPrefs>('/api/settings/appearance').catch(() => LIST_PREF_FALLBACK);
@@ -148,7 +148,7 @@ export async function ContentTypeListPage({
         <>
           <div className={`th-lp-list th-lp-list-${view}`}>
             {items.map((item) => (
-              <ContentCard key={item.id} item={item} variant={view} thumbnailSource={prefs.thumbnailSource} />
+              <ContentCard key={item.id} item={item} variant={view} thumbnailSource={prefs.thumbnailSource} cardImage={prefs.cardImage} />
             ))}
           </div>
           <ListPager nextCursor={data.nextCursor} shown={items.length} total={data.total} />

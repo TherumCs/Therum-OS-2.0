@@ -54,11 +54,14 @@
   --sidebar-w: 256px;
   --topbar-h: 72px;
 
-  /* Sidebar is a dark rail regardless of the light main canvas — confirmed
+  /* Sidebar is a dark rail against the light main canvas — confirmed
      against a live 1.9.44 install (bamleon.me), not the base stylesheet's own
      fallback (which reads --bg/--sf and would be light if --sb-bg were
      unset). Values match theme-00's documented dark-sidebar spec, the
-     closest sourced values available for this exact look. */
+     closest sourced values available for this exact look.
+
+     Dark mode INVERTS this pair rather than darkening both halves: a light
+     rail against a dark canvas. See the dark block below. */
   --sb-bg: #16181e;
   --sb-tx: #c7ccd6;
   --sb-tx2: rgba(255, 255, 255, 0.68);
@@ -66,12 +69,36 @@
   --sb-bd: rgba(255, 255, 255, 0.08);
   --sb-active-bg: rgba(255, 255, 255, 0.07);
 
+  /* Raised fills ON the sidebar (search box, hover, small buttons). These
+     were 13 hardcoded rgba(255,255,255,x) values in globals.css, which is
+     white-on-dark by assumption — every one of them turned invisible the
+     moment the rail became light. Naming the role instead of the colour is
+     what lets the rail flip. */
+  --sb-wash-1: rgba(255, 255, 255, 0.04);
+  --sb-wash-2: rgba(255, 255, 255, 0.06);
+  --sb-wash-3: rgba(255, 255, 255, 0.09);
+  --sb-wash-4: rgba(255, 255, 255, 0.12);
+
   /* ---- --th-* aliases onto the real values above ---- */
-  --th-accent: var(--ac);
+  /* The accent before Accent-intensity is applied. Intensity has to derive
+     the final accent FROM something, and deriving it from --th-accent itself
+     is a self-referential custom property — a cycle, which makes --th-accent
+     compute to the guaranteed-invalid value (empty) on every element under
+     the shell. That poisoned every color-mix() built on it: background
+     patterns computed to `none`, accent gradients vanished. A separate base
+     breaks the cycle. Custom accents are written here (see
+     appearanceInlineVars) so intensity still applies to them. */
+  --th-accent-base: var(--ac);
+  --th-accent: var(--th-accent-base);
   --th-accent-hover: var(--ac-h);
   --th-accent-tint: var(--ac-s);
   --th-accent-border: rgba(232, 59, 59, 0.24);
-  --th-accent-on-dark: var(--ac);
+  /* Accent used as TEXT, as opposed to as a fill. Identical to --th-accent in
+     light mode; dark mode lightens it, because the brand red reads at 3.6:1
+     on a dark card — below AA — while still being the right colour for a
+     filled button. Replaces --th-accent-on-dark, which named this exact idea
+     but was never referenced by a single rule. */
+  --th-accent-text: var(--ac);
   /* Buttons are blue independent of --ac (see the real-values block above) —
      component CSS needs its own semantic name for that, not a reason to
      reach for --ac-btn directly. */
@@ -88,6 +115,10 @@
   --th-sidebar-ink-2: var(--sb-tx2);
   --th-sidebar-ink-3: var(--sb-tx3);
   --th-sidebar-active-bg: var(--sb-active-bg);
+  --th-sidebar-wash-1: var(--sb-wash-1);
+  --th-sidebar-wash-2: var(--sb-wash-2);
+  --th-sidebar-wash-3: var(--sb-wash-3);
+  --th-sidebar-wash-4: var(--sb-wash-4);
   --th-ink: var(--tx);            /* text / primary */
   --th-ink-2: var(--tx2);         /* text-2 */
   --th-muted: var(--tx3);         /* text-3 */
@@ -122,6 +153,15 @@
   --th-warning-text: var(--wrn);
   --th-danger-bg: #fee2e2;
   --th-danger-text: var(--err);
+  /* Status colour used as TEXT ON its own pastel chip, as opposed to as a
+     saturated dot fill (which is what --th-*-text stays for). The pill rules
+     used --th-*-text on --th-*-bg, which measured 1.93:1 for pending and
+     2.31:1 for active — the label was the least readable thing on the row.
+     Splitting the two roles is what lets the chip darken without turning
+     every status dot muddy. */
+  --th-success-ink: #065f46;
+  --th-warning-ink: #92400e;
+  --th-danger-ink: #991b1b;
 
   /* type — display: Inter Tight, body: system stack, mono: JetBrains Mono */
   --th-font-display: 'Inter Tight', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -227,8 +267,9 @@
   --th-density-table-pad: 15px 18px;
 }
 
-/* Card style — flat/shadow/glass. 'shadow' matches the existing baseline
-   (--th-shadow-sm, opaque surface); flat and glass are real alternatives. */
+/* Card style — flat/shadow. 'shadow' matches the existing baseline
+   (--th-shadow-sm, opaque surface); flat is the real alternative. Glass was
+   removed 2026-07-30 and belongs to the theme store. */
 :root, [data-card-style='shadow'] {
   --th-card-shadow: var(--th-shadow-sm);
   --th-card-bg: var(--th-surface);
@@ -240,12 +281,6 @@
   --th-card-bg: var(--th-surface);
   --th-card-border: 1px solid var(--th-line);
   --th-card-backdrop: none;
-}
-[data-card-style='glass'] {
-  --th-card-shadow: 0 8px 24px rgba(16, 24, 40, 0.08);
-  --th-card-bg: rgba(var(--th-glass-tint), 0.72);
-  --th-card-border: 1px solid rgba(var(--th-glass-tint), 0.5);
-  --th-card-backdrop: blur(var(--th-glass-blur)) saturate(160%);
 }
 
 /* Color mode — dark is a real alternate palette (not just an inverted
@@ -272,6 +307,41 @@ body:has([data-color-mode='dark']),
   --th-accent-hover: #c92e2e;
   --th-accent-tint: rgba(232, 59, 59, 0.18);
   --th-accent-border: rgba(232, 59, 59, 0.32);
+  --th-accent-text: #ff8585;
+
+  /* Status pills kept their light-mode pastels here — #dcfce7 behind #10b981
+     measured 2.31:1 on a dark page, and the pending pill 1.93:1. Tinted
+     fills with light text instead. */
+  --th-success-bg: rgba(16, 185, 129, 0.18);
+  --th-success-text: #6ee7b7;
+  --th-warning-bg: rgba(245, 158, 11, 0.18);
+  --th-warning-text: #fcd34d;
+  --th-danger-bg: rgba(239, 68, 68, 0.18);
+  --th-danger-text: #fca5a5;
+  --th-success-ink: #6ee7b7;
+  --th-warning-ink: #fcd34d;
+  --th-danger-ink: #fca5a5;
+
+  /* THE RAIL INVERTS. Dark mode is the inverse of light, not light with the
+     brightness turned down: light mode is a dark rail on a light canvas, so
+     dark mode is a light rail on a dark canvas. Before this, the dark block
+     never touched --sb-*, so the rail stayed #16181e in both modes and
+     switching to dark only changed the middle of the screen.
+
+     Overriding the --sb-* primitives rather than the --th-sidebar-* aliases
+     is deliberate: the sidebar rules in globals.css reach for the raw
+     primitives in places, so setting the aliases alone would leave those
+     rules on the light-mode value. */
+  --sb-bg: #eef0f4;
+  --sb-tx: #1e293b;
+  --sb-tx2: rgba(15, 23, 42, 0.72);
+  --sb-tx3: rgba(15, 23, 42, 0.5);
+  --sb-bd: rgba(15, 23, 42, 0.1);
+  --sb-active-bg: rgba(15, 23, 42, 0.08);
+  --sb-wash-1: rgba(15, 23, 42, 0.04);
+  --sb-wash-2: rgba(15, 23, 42, 0.06);
+  --sb-wash-3: rgba(15, 23, 42, 0.09);
+  --sb-wash-4: rgba(15, 23, 42, 0.12);
 }
 /* 'system' isn't its own palette — it's "dark, only if the OS prefers dark."
    Without this block it would silently render as light regardless of the
@@ -286,10 +356,36 @@ body:has([data-color-mode='dark']),
     --th-surface: #1e293b;
     --th-surface-2: #243447;
     --th-card-bg: #1e293b;
-    --th-accent: #5b7cfa;
-    --th-accent-hover: #7c97ff;
-    --th-accent-tint: rgba(91, 124, 250, 0.18);
-    --th-accent-border: rgba(91, 124, 250, 0.32);
+    /* Same accent as the explicit-dark block above. These were #5b7cfa
+       (blue) here and #e83b3b (red) there, so "Dark" and "Match system on a
+       dark Mac" rendered as two different themes. */
+    --th-accent: #e83b3b;
+    --th-accent-hover: #c92e2e;
+    --th-accent-tint: rgba(232, 59, 59, 0.18);
+    --th-accent-border: rgba(232, 59, 59, 0.32);
+    --th-accent-text: #ff8585;
+
+    --th-success-bg: rgba(16, 185, 129, 0.18);
+    --th-success-text: #6ee7b7;
+    --th-warning-bg: rgba(245, 158, 11, 0.18);
+    --th-warning-text: #fcd34d;
+    --th-danger-bg: rgba(239, 68, 68, 0.18);
+    --th-danger-text: #fca5a5;
+    --th-success-ink: #6ee7b7;
+    --th-warning-ink: #fcd34d;
+    --th-danger-ink: #fca5a5;
+
+    /* The rail inverts here too — see the explicit-dark block. */
+    --sb-bg: #eef0f4;
+    --sb-tx: #1e293b;
+    --sb-tx2: rgba(15, 23, 42, 0.72);
+    --sb-tx3: rgba(15, 23, 42, 0.5);
+    --sb-bd: rgba(15, 23, 42, 0.1);
+    --sb-active-bg: rgba(15, 23, 42, 0.08);
+    --sb-wash-1: rgba(15, 23, 42, 0.04);
+    --sb-wash-2: rgba(15, 23, 42, 0.06);
+    --sb-wash-3: rgba(15, 23, 42, 0.09);
+    --sb-wash-4: rgba(15, 23, 42, 0.12);
   }
 }
 
@@ -308,7 +404,7 @@ body:has([data-color-mode='dark']),
       same trick the 2026-07-07 design-system pass documented for dark mode.
    2. Genuinely new concepts get a new token here + a real consuming rule,
       either right below or in globals.css where the selector is component-
-      specific (dashboard grid gap, glass blur/tint, hover-lift amount).
+      specific (dashboard grid gap, hover-lift amount).
    ════════════════════════════════════════════════════════════════════════ */
 
 :root {
@@ -329,10 +425,12 @@ body:has([data-color-mode='dark']),
   --th-content-max-width: none;
   --th-card-grid-gap: var(--th-space-16);
 
-  /* Surfaces */
-  --th-glass-blur: 16px;
-  --th-glass-tint: 255, 255, 255; /* r,g,b triplet — composed into rgba() below */
+  /* Surfaces — two independent background layers composed by #th-shell:
+     the wash (Background) and the texture (Background pattern). */
   --th-app-bg-image: none;
+  --th-app-bg-size: auto;
+  --th-bg-pattern: none;
+  --th-bg-pattern-size: auto;
 
   /* Typography */
   --th-letter-spacing: normal;
@@ -402,9 +500,6 @@ body { letter-spacing: var(--th-letter-spacing); line-height: var(--th-line-heig
    still fires (just to a 0px destination) rather than snapping. */
 [data-hover-lift='off'] { --th-hover-lift: 0px; }
 
-/* Accessibility > Reduce transparency — forces glass off regardless of
-   which cardStyle is selected, a real override not just a suggestion. */
-[data-reduce-transparency='on'] { --th-card-backdrop: none !important; }
 
 /* Accessibility > Underline links */
 [data-underline-links='on'] a { text-decoration: underline; }
@@ -447,10 +542,6 @@ body { letter-spacing: var(--th-letter-spacing); line-height: var(--th-line-heig
 [data-card-grid-gap='compact']   { --th-card-grid-gap: var(--th-space-10); }
 [data-card-grid-gap='spacious']  { --th-card-grid-gap: var(--th-space-24); }
 
-/* Surfaces > Blur strength — consumed by [data-card-style='glass'] in
-   globals.css, which already has its own backdrop-filter rule. */
-[data-blur-strength='light'] { --th-glass-blur: 8px; }
-[data-blur-strength='heavy'] { --th-glass-blur: 28px; }
 
 /* Surfaces > Shadow style — overrides --th-card-shadow directly, which
    every card-style variant below already builds from, so no changes needed

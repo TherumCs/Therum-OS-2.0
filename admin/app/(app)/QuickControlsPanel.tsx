@@ -143,8 +143,11 @@ function CustomCssField({ initial }: { initial: string }) {
   }
   return (
     <Field label="Custom CSS" help="Applies to your own admin view only. Sanitized on save (@import, expression(), script-bearing url()s are stripped).">
+      {/* th-code is what Appearance > Advanced > Code editor theme selects
+          on. This is the admin's only code field, and it did not carry the
+          class, so that setting had nothing to colour. */}
       <textarea
-        className="settings-text-input"
+        className="settings-text-input th-code"
         style={{ fontFamily: 'var(--th-font-mono)', fontSize: 'var(--th-fs-xs)', minHeight: 160, resize: 'vertical', maxWidth: 'none' }}
         value={value}
         disabled={busy}
@@ -286,7 +289,7 @@ export function QuickControlsPanel({
                       <SelectField domain="appearance" field="sidebarStyle" initial={appearance.sidebarStyle} options={[['default', 'Default'], ['pills', 'Pills'], ['minimal', 'Minimal']]} />
                     </Field>
                     <Field label="Card style">
-                      <SelectField domain="appearance" field="cardStyle" initial={appearance.cardStyle} options={[['flat', 'Flat'], ['shadow', 'Shadow (default)'], ['glass', 'Glass']]} />
+                      <SelectField domain="appearance" field="cardStyle" initial={appearance.cardStyle} options={[['flat', 'Flat'], ['shadow', 'Shadow (default)']]} />
                     </Field>
                     <Field label="Color mode" help="The sun icon in the topbar quick-toggles light/dark — pick 'Match system' here to follow the OS instead.">
                       <SelectField domain="appearance" field="colorMode" initial={appearance.colorMode} options={[['light', 'Light'], ['dark', 'Dark'], ['system', 'Match system']]} />
@@ -315,12 +318,6 @@ export function QuickControlsPanel({
                   </Group>
 
                   <Group title="Surfaces">
-                    <Field label="Glass tint" help="Only visible when Card style (below) is Glass.">
-                      <TextInput domain="appearance" field="glassTint" initial={appearance.glassTint} type="color" />
-                    </Field>
-                    <Field label="Blur strength">
-                      <SelectField domain="appearance" field="blurStrength" initial={appearance.blurStrength} options={[['light', 'Light'], ['medium', 'Medium'], ['heavy', 'Heavy']]} />
-                    </Field>
                     <Field label="Background">
                       <SelectField domain="appearance" field="background" initial={appearance.background} options={[['solid', 'Solid'], ['subtle-gradient', 'Subtle gradient']]} />
                     </Field>
@@ -387,9 +384,6 @@ export function QuickControlsPanel({
                   </Group>
 
                   <Group title="Accessibility">
-                    <ToggleRow label="Reduce transparency" help="Forces glass surfaces off regardless of Card style.">
-                      <Toggle domain="appearance" field="reduceTransparency" initial={appearance.reduceTransparency} />
-                    </ToggleRow>
                     <ToggleRow label="Underline links">
                       <Toggle domain="appearance" field="underlineLinks" initial={appearance.underlineLinks} />
                     </ToggleRow>

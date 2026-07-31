@@ -51,7 +51,17 @@ const STATUS_DOT_CLASS: Record<string, string> = { published: 'is-published', dr
 // The differences that are purely visual live in globals.css under
 // .th-lp-list-<view>; only the parts that change WHICH chrome renders are
 // branched here, so all four keep the same kebab menu and actions.
-export function ContentCard({ item, variant = 'card', thumbnailSource = 'auto' }: { item: ContentCardItem; variant?: ListView; thumbnailSource?: string }) {
+export function ContentCard({
+  item,
+  variant = 'card',
+  thumbnailSource = 'auto',
+  cardImage = 'gradient',
+}: {
+  item: ContentCardItem;
+  variant?: ListView;
+  thumbnailSource?: string;
+  cardImage?: string;
+}) {
   const router = useRouter();
   const [menuOpen, setMenuOpen] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -125,11 +135,23 @@ export function ContentCard({ item, variant = 'card', thumbnailSource = 'auto' }
 
   // Appearance > Lists & cards: 'cover-only' suppresses the generated
   // gradient stand-in, leaving a plain surface when a page has no cover.
+  //
+  // The no-cover placeholder is chosen HERE rather than in CSS. Appearance >
+  // Card image used to be styled by `.th-lp-card-thumb:empty` rules, which
+  // could never match (the thumb always contains the kebab menu) and would
+  // have lost anyway — this inline background beats any stylesheet rule. Only
+  // 'gradient' needs an inline value; the rest are classes so CSS can paint.
+  // 'cover-only' suppresses EVERY generated stand-in, not just the gradient
+  // one — otherwise picking a wireframe or pattern placeholder quietly
+  // re-enabled the very thing cover-only exists to turn off.
+  const placeholder = item.coverImage || thumbnailSource === 'cover-only' ? null : cardImage;
   const bg = item.coverImage
     ? { backgroundImage: `url(${item.coverImage})` }
-    : thumbnailSource === 'cover-only'
-      ? undefined
-      : { background: cardGradient(item.id) };
+    : placeholder === 'gradient'
+      ? { background: cardGradient(item.id) }
+      : undefined;
+  const thumbClass =
+    'th-lp-card-thumb' + (placeholder && placeholder !== 'gradient' ? ` th-lp-card-thumb--${placeholder}` : '');
 
   // List view is a text row — an image band there would just be a coloured
   // stripe on every line. Grid view drops the excerpt so the tiles stay even.
@@ -183,7 +205,7 @@ export function ContentCard({ item, variant = 'card', thumbnailSource = 'auto' }
   return (
     <div className={`th-lp-card th-lp-card-${variant}`} aria-busy={busy}>
       {showThumb && (
-        <div className="th-lp-card-thumb" style={bg}>
+        <div className={thumbClass} style={bg}>
           {kebab}
         </div>
       )}

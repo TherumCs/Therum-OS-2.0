@@ -139,6 +139,9 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
   // with no matching target in a given shell (e.g. [data-card-grid-gap] has
   // nothing to select inside DesktopShell) are simply inert there, not wrong.
   const dataAttrs = appearanceDataAttrs(appearance);
+  // Server-rendered so a folded rail is already folded at first paint —
+  // setting it from the client would unfold-then-fold on every load.
+  if (appearance.sidebarFoldable && me.sidebarFolded) dataAttrs['data-sidebar-folded'] = 'on';
   const inlineVars = appearanceInlineVars(appearance);
 
   if (me.desktopModeEnabled) {
@@ -163,7 +166,7 @@ export default async function AppLayout({ children }: { children: ReactNode }) {
       {/* Gated by Appearance > Workspace > Keyboard shortcuts. */}
       <CommandPalette enabled={appearance.keyboardShortcuts} />
       <aside id="th-sb">
-        <Sidebar sections={sections} siteName={siteName} siteHost={siteHost} version={about.version} database={about.database} />
+        <Sidebar sections={sections} siteName={siteName} siteHost={siteHost} version={about.version} database={about.database} startFolded={me.sidebarFolded} />
       </aside>
       <div id="th-main">
         <Topbar

@@ -185,8 +185,8 @@ export function Switch({
   );
 }
 
-/** Colour with a "use the theme's own" empty state — accent and glass tint
-    both treat '' as "inherit", so a plain colour input can't express it. */
+/** Colour with a "use the theme's own" empty state — the accent picker
+    treats '' as "inherit", which a plain colour input can't express. */
 export function ColorField({
   label,
   help,

@@ -19,7 +19,7 @@ export interface Behavior {
 export interface Appearance {
   density: 'compact' | 'comfortable' | 'breathing';
   sidebarStyle: 'default' | 'pills' | 'floating' | 'solid' | 'minimal' | 'dividers';
-  cardStyle: 'flat' | 'shadow' | 'glass';
+  cardStyle: 'flat' | 'shadow';
   colorMode: 'light' | 'dark' | 'system';
   contrast: 'normal' | 'high';
 
@@ -30,8 +30,6 @@ export interface Appearance {
   contentWidth: 'full' | 'normal' | 'narrow';
   cardGridGap: 'compact' | 'comfortable' | 'spacious';
 
-  glassTint: string;
-  blurStrength: 'light' | 'medium' | 'heavy';
   background: 'solid' | 'subtle-gradient';
   shadowStyle: 'none' | 'subtle' | 'pronounced';
 
@@ -55,7 +53,6 @@ export interface Appearance {
   listViewDefault: 'grid' | 'table';
   itemsPerPage: number;
 
-  reduceTransparency: boolean;
   underlineLinks: boolean;
   alwaysVisibleFocusRings: boolean;
   largerClickTargets: boolean;
@@ -68,16 +65,12 @@ export interface Appearance {
   sidebarLayout: 'both' | 'icons' | 'text';
   sidebarFoldable: boolean;
 
-  glass: boolean;
-  glassTintMode: 'auto' | 'dark' | 'light' | 'color';
-  surfaceEffect: 'none' | 'glass-light' | 'glass-dark' | 'glass-colored' | 'gradient' | 'blurred';
   bgImage: 'none' | 'mesh' | 'grid' | 'noise' | 'dots';
 
   cardTemplate: 'hero' | 'detailed' | 'list-1' | 'list-2' | 'list-3';
   cardImage: 'gradient' | 'featured' | 'stock' | 'wireframe' | 'pattern';
 
   bentoGap: number;
-  autoSave: boolean;
   showGrips: boolean;
   desktopMode: boolean;
   codeEditorTheme: 'therum' | 'github' | 'monokai' | 'solarized' | 'nord';
@@ -97,8 +90,6 @@ export const DEFAULT_APPEARANCE: Appearance = {
   contentWidth: 'full',
   cardGridGap: 'comfortable',
 
-  glassTint: '',
-  blurStrength: 'medium',
   background: 'solid',
   shadowStyle: 'subtle',
 
@@ -122,7 +113,6 @@ export const DEFAULT_APPEARANCE: Appearance = {
   listViewDefault: 'grid',
   itemsPerPage: 20,
 
-  reduceTransparency: false,
   underlineLinks: false,
   alwaysVisibleFocusRings: false,
   largerClickTargets: false,
@@ -133,16 +123,12 @@ export const DEFAULT_APPEARANCE: Appearance = {
   sidebarLayout: 'both',
   sidebarFoldable: false,
 
-  glass: false,
-  glassTintMode: 'dark',
-  surfaceEffect: 'none',
   bgImage: 'none',
 
   cardTemplate: 'hero',
   cardImage: 'gradient',
 
   bentoGap: 16,
-  autoSave: true,
   showGrips: false,
   desktopMode: false,
   codeEditorTheme: 'therum',
@@ -151,7 +137,7 @@ export const DEFAULT_APPEARANCE: Appearance = {
 // data-* attribute values for #th-shell — one shared builder so the "omit
 // when at CSS baseline" convention (see therum-tokens.css) can't drift
 // between call sites. Every value here is either the literal field value
-// (density/cardStyle/blurStrength/etc — therum-tokens.css scopes their
+// (density/cardStyle/etc — therum-tokens.css scopes their
 // baseline block as `:root, [data-x='default-value']` so an omitted
 // attribute and an explicit default-value attribute render identically) or
 // `undefined` for booleans/enums where the non-default case is the only one
@@ -176,7 +162,6 @@ export function appearanceDataAttrs(a: Appearance): Record<string, string | unde
     'data-topbar-style': a.topbarBehavior === 'default' ? undefined : a.topbarBehavior,
     'data-content-width': a.contentWidth === 'full' ? undefined : a.contentWidth,
     'data-card-grid-gap': a.cardGridGap === 'comfortable' ? undefined : a.cardGridGap,
-    'data-blur-strength': a.blurStrength === 'medium' ? undefined : a.blurStrength,
     'data-background': a.background === 'solid' ? undefined : a.background,
     'data-shadow-style': a.shadowStyle === 'subtle' ? undefined : a.shadowStyle,
     'data-base-size': a.baseSize === 'md' ? undefined : a.baseSize,
@@ -197,7 +182,6 @@ export function appearanceDataAttrs(a: Appearance): Record<string, string | unde
     // no selector at all.
     'data-page-transition': pageTransitionStyle(a.pageTransitions),
     'data-hover-lift': a.hoverLift ? undefined : 'off',
-    'data-reduce-transparency': a.reduceTransparency ? 'on' : undefined,
     'data-underline-links': a.underlineLinks ? 'on' : undefined,
     'data-always-focus': a.alwaysVisibleFocusRings ? 'on' : undefined,
     'data-larger-targets': a.largerClickTargets ? 'on' : undefined,
@@ -207,15 +191,10 @@ export function appearanceDataAttrs(a: Appearance): Record<string, string | unde
     // an unset attribute and an explicit default render identically.
     'data-sidebar-layout': a.sidebarLayout === 'both' ? undefined : a.sidebarLayout,
     'data-sidebar-foldable': a.sidebarFoldable ? 'on' : undefined,
-    'data-glass': a.glass ? 'on' : undefined,
-    'data-glass-tint-mode': a.glassTintMode === 'dark' ? undefined : a.glassTintMode,
-    'data-surface-effect': a.surfaceEffect === 'none' ? undefined : a.surfaceEffect,
     'data-bg-image': a.bgImage === 'none' ? undefined : a.bgImage,
     'data-card-template': a.cardTemplate === 'hero' ? undefined : a.cardTemplate,
-    'data-card-image': a.cardImage === 'gradient' ? undefined : a.cardImage,
     'data-show-grips': a.showGrips ? 'on' : undefined,
     // Defaults on, so only the off case needs a selector.
-    'data-autosave': a.autoSave ? undefined : 'off',
     'data-code-theme': a.codeEditorTheme === 'therum' ? undefined : a.codeEditorTheme,
     'data-desktop-mode': a.desktopMode ? 'on' : undefined,
     // Defaults on, so only the off case needs a selector.
@@ -229,26 +208,14 @@ export function appearanceDataAttrs(a: Appearance): Record<string, string | unde
 // "no override," matching every free-form field's own '' default above.
 export function appearanceInlineVars(a: Appearance): Record<string, string> {
   const vars: Record<string, string> = {};
-  if (a.accent) vars['--th-accent'] = a.accent;
-  // --th-glass-tint is consumed inside an rgba(var(--th-glass-tint), alpha)
-  // in globals.css, so it needs "r, g, b" component form, not a hex string —
-  // a <input type="color"> naturally produces hex, so convert here rather
-  // than at the CSS layer (no native hex->rgb function in plain CSS).
-  if (a.glassTint) {
-    const rgb = hexToRgbTriplet(a.glassTint);
-    if (rgb) vars['--th-glass-tint'] = rgb;
-  }
+  // --th-accent-base, not --th-accent: intensity derives the final accent
+  // from the base (see therum-tokens.css), so writing --th-accent directly
+  // would silently disable Accent intensity for any custom colour.
+  if (a.accent) vars['--th-accent-base'] = a.accent;
   // Dashboard bento gap — a free number, so a var rather than an attribute.
   if (a.bentoGap !== 16) vars['--th-bento-gap'] = `${a.bentoGap}px`;
   if (a.bodyFont) vars['--th-font-body'] = a.bodyFont;
   if (a.displayFont) vars['--th-font-display'] = a.displayFont;
   if (a.monoFont) vars['--th-font-mono'] = a.monoFont;
   return vars;
-}
-
-function hexToRgbTriplet(hex: string): string | null {
-  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return null;
-  const int = parseInt(m[1]!, 16);
-  return `${(int >> 16) & 255}, ${(int >> 8) & 255}, ${int & 255}`;
 }

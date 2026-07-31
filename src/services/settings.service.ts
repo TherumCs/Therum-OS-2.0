@@ -37,7 +37,7 @@ const SEO_DEFAULTS_DEFAULTS: SeoDefaults = { siteName: '', siteDescription: '', 
 export interface Appearance {
   density: 'compact' | 'comfortable' | 'breathing';
   sidebarStyle: 'default' | 'pills' | 'floating' | 'solid' | 'minimal' | 'dividers';
-  cardStyle: 'flat' | 'shadow' | 'glass';
+  cardStyle: 'flat' | 'shadow';
   colorMode: 'light' | 'dark' | 'system';
   contrast: 'normal' | 'high';
 
@@ -52,10 +52,6 @@ export interface Appearance {
   // shrink every existing page.
   cardGridGap: 'compact' | 'comfortable' | 'spacious';
 
-  // Surfaces — glass on/off is deliberately NOT a separate field here:
-  // that's exactly what cardStyle:'glass' already is (see CHANGELOG).
-  glassTint: string; // hex; '' = built-in tint
-  blurStrength: 'light' | 'medium' | 'heavy';
   background: 'solid' | 'subtle-gradient';
   shadowStyle: 'none' | 'subtle' | 'pronounced';
 
@@ -84,7 +80,6 @@ export interface Appearance {
   itemsPerPage: number;
 
   // Accessibility — contrast above already covers normal/high contrast.
-  reduceTransparency: boolean;
   underlineLinks: boolean;
   alwaysVisibleFocusRings: boolean;
   largerClickTargets: boolean;
@@ -99,10 +94,6 @@ export interface Appearance {
   sidebarLayout: 'both' | 'icons' | 'text';
   sidebarFoldable: boolean;
 
-  glass: boolean;
-  /** Mode; `glassTint` above holds the custom colour used when this is 'color'. */
-  glassTintMode: 'auto' | 'dark' | 'light' | 'color';
-  surfaceEffect: 'none' | 'glass-light' | 'glass-dark' | 'glass-colored' | 'gradient' | 'blurred';
   bgImage: 'none' | 'mesh' | 'grid' | 'noise' | 'dots';
 
   /** Card TEMPLATE — a different axis from cardLayout (density) and cardStyle (surface). */
@@ -110,7 +101,6 @@ export interface Appearance {
   cardImage: 'gradient' | 'featured' | 'stock' | 'wireframe' | 'pattern';
 
   bentoGap: number;
-  autoSave: boolean;
   showGrips: boolean;
   desktopMode: boolean;
   codeEditorTheme: 'therum' | 'github' | 'monokai' | 'solarized' | 'nord';
@@ -131,8 +121,6 @@ const APPEARANCE_DEFAULTS: Appearance = {
   contentWidth: 'full',
   cardGridGap: 'comfortable',
 
-  glassTint: '',
-  blurStrength: 'medium',
   background: 'solid',
   shadowStyle: 'subtle',
 
@@ -156,7 +144,6 @@ const APPEARANCE_DEFAULTS: Appearance = {
   listViewDefault: 'grid',
   itemsPerPage: 20,
 
-  reduceTransparency: false,
   underlineLinks: false,
   alwaysVisibleFocusRings: false,
   largerClickTargets: false,
@@ -167,16 +154,12 @@ const APPEARANCE_DEFAULTS: Appearance = {
   sidebarLayout: 'both',
   sidebarFoldable: false,
 
-  glass: false,
-  glassTintMode: 'dark',
-  surfaceEffect: 'none',
   bgImage: 'none',
 
   cardTemplate: 'hero',
   cardImage: 'gradient',
 
   bentoGap: 16,
-  autoSave: true,
   showGrips: false,
   desktopMode: false,
   codeEditorTheme: 'therum',
@@ -570,7 +553,18 @@ export const settingsService = {
   },
 
   async getAppearance(): Promise<Appearance> {
-    return read(APPEARANCE_KEY, APPEARANCE_DEFAULTS);
+    // Projected onto the known key set, not a plain merge. `read` spreads the
+    // stored row over the defaults, so every key ever written survives
+    // forever — a field removed from the product (glass, autoSave) kept being
+    // served from the old row and kept appearing in the API response after
+    // its code was gone. Anything not in APPEARANCE_DEFAULTS is no longer a
+    // setting, so it does not come back.
+    const stored = await read(APPEARANCE_KEY, APPEARANCE_DEFAULTS);
+    const out = {} as Appearance;
+    for (const key of Object.keys(APPEARANCE_DEFAULTS) as (keyof Appearance)[]) {
+      out[key] = stored[key] as never;
+    }
+    return out;
   },
 
   async setAppearance(input: AppearanceInput): Promise<Appearance> {

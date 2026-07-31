@@ -6,7 +6,14 @@ import { z } from 'zod';
 export const AppearanceInput = z.object({
   density: z.enum(['compact', 'comfortable', 'breathing']).optional(),
   sidebarStyle: z.enum(['default', 'pills', 'floating', 'solid', 'minimal', 'dividers']).optional(),
-  cardStyle: z.enum(['flat', 'shadow', 'glass']).optional(),
+  // Glass was removed 2026-07-30 — it belongs to the theme store, not the
+  // core admin. A row still holding 'glass' is coerced to 'shadow' rather
+  // than rejected: an appearance row that fails to parse takes the whole
+  // admin down (same reason pageTransitions coerces its old boolean).
+  cardStyle: z
+    .enum(['flat', 'shadow', 'glass'])
+    .transform((v) => (v === 'glass' ? ('shadow' as const) : v))
+    .optional(),
   colorMode: z.enum(['light', 'dark', 'system']).optional(),
   contrast: z.enum(['normal', 'high']).optional(),
 
@@ -17,8 +24,6 @@ export const AppearanceInput = z.object({
   contentWidth: z.enum(['full', 'normal', 'narrow']).optional(),
   cardGridGap: z.enum(['compact', 'comfortable', 'spacious']).optional(),
 
-  glassTint: z.string().max(20).optional(),
-  blurStrength: z.enum(['light', 'medium', 'heavy']).optional(),
   background: z.enum(['solid', 'subtle-gradient']).optional(),
   shadowStyle: z.enum(['none', 'subtle', 'pronounced']).optional(),
 
@@ -48,7 +53,6 @@ export const AppearanceInput = z.object({
   listViewDefault: z.enum(['grid', 'table']).optional(),
   itemsPerPage: z.number().int().min(5).max(100).optional(),
 
-  reduceTransparency: z.boolean().optional(),
   underlineLinks: z.boolean().optional(),
   alwaysVisibleFocusRings: z.boolean().optional(),
   largerClickTargets: z.boolean().optional(),
@@ -64,11 +68,6 @@ export const AppearanceInput = z.object({
   sidebarLayout: z.enum(['both', 'icons', 'text']).optional(),
   sidebarFoldable: z.boolean().optional(),
 
-  glass: z.boolean().optional(),
-  // The MODE, distinct from `glassTint` above which stores the custom colour
-  // used when this is 'color'.
-  glassTintMode: z.enum(['auto', 'dark', 'light', 'color']).optional(),
-  surfaceEffect: z.enum(['none', 'glass-light', 'glass-dark', 'glass-colored', 'gradient', 'blurred']).optional(),
   bgImage: z.enum(['none', 'mesh', 'grid', 'noise', 'dots']).optional(),
 
   // 1.9.44's card TEMPLATE, a different axis from `cardLayout` (which is only
@@ -77,7 +76,6 @@ export const AppearanceInput = z.object({
   cardImage: z.enum(['gradient', 'featured', 'stock', 'wireframe', 'pattern']).optional(),
 
   bentoGap: z.number().int().min(0).max(48).optional(),
-  autoSave: z.boolean().optional(),
   showGrips: z.boolean().optional(),
   desktopMode: z.boolean().optional(),
   codeEditorTheme: z.enum(['therum', 'github', 'monokai', 'solarized', 'nord']).optional(),

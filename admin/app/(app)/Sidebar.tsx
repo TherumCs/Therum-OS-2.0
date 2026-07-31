@@ -21,15 +21,18 @@ export function Sidebar({
   siteHost,
   version,
   database,
+  startFolded,
 }: {
   sections: NavSection[];
   siteName: string;
   siteHost: string;
   version: string;
   database: string;
+  startFolded: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const [folded, setFolded] = useState(startFolded);
 
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<NavSection[]>(sections);
@@ -51,6 +54,24 @@ export function Sidebar({
   function toggleEditing(): void {
     if (editing) stopEditing();
     else startEditing();
+  }
+
+  // The attribute goes on the shell rather than the rail because the collapse
+  // has to move #th-main's margin too, and that is a sibling — a class on the
+  // sidebar alone could never reach it. Written directly instead of via
+  // router.refresh() so the rail moves on the click, not a round-trip later;
+  // the PATCH just makes it survive a reload.
+  function toggleFolded(): void {
+    const next = !folded;
+    setFolded(next);
+    const shell = document.getElementById('th-shell');
+    if (next) shell?.setAttribute('data-sidebar-folded', 'on');
+    else shell?.removeAttribute('data-sidebar-folded');
+    void fetch(`${BASE_PATH}/api/me/behavior`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ sidebarFolded: next }),
+    });
   }
 
   function toggleCollapsed(id: string): void {
@@ -140,6 +161,21 @@ export function Sidebar({
           <div className="th-site-name">{siteName}</div>
           <div className="th-site-host">{siteHost}</div>
         </div>
+        {/* Appearance > Sidebar > Foldable is what shows this button (the
+            rule hiding .th-sb-fold lives in globals.css), and Behavior >
+            "Sidebar starts folded" is the initial state. Both settings were
+            stored and had controls, but nothing ever rendered a fold
+            affordance, so neither did anything. */}
+        <button
+          type="button"
+          className="th-sb-fold"
+          onClick={toggleFolded}
+          aria-pressed={folded}
+          aria-label={folded ? 'Unfold sidebar' : 'Fold sidebar'}
+          title={folded ? 'Unfold sidebar' : 'Fold sidebar'}
+        >
+          <Icon.chevron width={14} height={14} />
+        </button>
       </div>
 
       <div className="th-sb-search">

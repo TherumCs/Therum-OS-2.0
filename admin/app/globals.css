@@ -27,7 +27,19 @@ h1 { font-size: var(--th-fs-xl); margin: 0 0 var(--th-space-16); letter-spacing:
    silently stayed light-mode-colored regardless of the toggle. Confirmed
    live: before this line, #th-main/#th-content have no background of their
    own, so dark mode's entire main content area showed light gray through. */
-#th-shell { position: relative; min-height: 100vh; background: var(--th-bg) var(--th-app-bg-image); }
+/* TWO settings paint here — Surfaces > Background (a wash) and Surfaces >
+   Background pattern (a texture) — so they are composed as two layers rather
+   than each declaring `background-image` on #th-shell. They did the latter at
+   equal specificity, which meant whichever rule sat later in this file won
+   outright and the other setting did nothing at all. */
+#th-shell {
+  position: relative;
+  min-height: 100vh;
+  background-color: var(--th-bg);
+  background-image: var(--th-app-bg-image), var(--th-bg-pattern);
+  background-size: var(--th-app-bg-size), var(--th-bg-pattern-size);
+  background-repeat: repeat, repeat;
+}
 
 /* Sidebar is a dark rail (confirmed against a live 1.9.44 install) — every
    rule below intentionally uses the dark-scoped --th-sidebar-* tokens, not
@@ -62,22 +74,22 @@ h1 { font-size: var(--th-fs-xl); margin: 0 0 var(--th-space-16); letter-spacing:
   align-items: center;
   gap: var(--th-space-10);
   padding: var(--th-space-10) var(--th-space-12) var(--th-space-10) var(--th-space-14);
-  background: rgba(255, 255, 255, 0.06);
+  background: var(--th-sidebar-wash-2);
   border: 1px solid var(--th-sidebar-line);
   border-radius: var(--th-r-pill);
   transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.25s ease;
   cursor: text;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: inset 0 1px 0 var(--th-sidebar-wash-1);
   overflow: hidden;
 }
-.th-sb-search-box:hover { border-color: var(--th-sidebar-ink-2); background: rgba(255, 255, 255, 0.09); }
+.th-sb-search-box:hover { border-color: var(--th-sidebar-ink-2); background: var(--th-sidebar-wash-3); }
 .th-sb-search-box:focus-within {
   border-color: var(--th-accent);
-  background: rgba(255, 255, 255, 0.09);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 0 3px rgba(232, 59, 59, 0.16), 0 4px 14px rgba(232, 59, 59, 0.12);
+  background: var(--th-sidebar-wash-3);
+  box-shadow: inset 0 1px 0 var(--th-sidebar-wash-1), 0 0 0 3px rgba(232, 59, 59, 0.16), 0 4px 14px rgba(232, 59, 59, 0.12);
 }
 .th-sb-search-box svg { color: var(--th-sidebar-ink-3); flex-shrink: 0; width: var(--th-space-14); height: var(--th-space-14); transition: color 0.2s ease, transform 0.25s ease; }
-.th-sb-search-box:focus-within svg { color: var(--th-accent); transform: scale(1.05); }
+.th-sb-search-box:focus-within svg { color: var(--th-accent-text); transform: scale(1.05); }
 .th-sb-search-box input {
   border: none;
   outline: none;
@@ -107,7 +119,7 @@ h1 { font-size: var(--th-fs-xl); margin: 0 0 var(--th-space-16); letter-spacing:
   letter-spacing: 0.02em;
   flex-shrink: 0;
   transition: opacity 0.2s ease, transform 0.2s ease;
-  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.04);
+  box-shadow: 0 1px 0 var(--th-sidebar-wash-1);
 }
 .th-sb-search-box:focus-within .th-sb-search-kbd { opacity: 0; transform: scale(0.9); }
 
@@ -122,7 +134,7 @@ h1 { font-size: var(--th-fs-xl); margin: 0 0 var(--th-space-16); letter-spacing:
   color: var(--th-sidebar-ink-2);
 }
 .th-sb-item svg { flex-shrink: 0; color: var(--th-sidebar-ink-3); }
-.th-sb-item:hover { background: rgba(255, 255, 255, 0.05); color: var(--th-sidebar-ink); }
+.th-sb-item:hover { background: var(--th-sidebar-wash-2); color: var(--th-sidebar-ink); }
 .th-sb-item.active { background: var(--th-sidebar-active-bg); color: var(--th-sidebar-ink); font-weight: 600; }
 .th-sb-item.active svg { color: var(--th-sidebar-ink); }
 .th-sb-section { margin-top: var(--th-space-16); display: flex; flex-direction: column; gap: var(--th-space-2); }
@@ -140,24 +152,24 @@ h1 { font-size: var(--th-fs-xl); margin: 0 0 var(--th-space-16); letter-spacing:
 .th-sb-section-label .chev { display: flex; color: var(--th-sidebar-ink-3); transition: transform 0.15s ease; flex-shrink: 0; }
 .th-sb-section-label .chev.collapsed { transform: rotate(-90deg); }
 .th-sb-arrows { display: flex; gap: var(--th-space-2); margin-right: var(--th-space-4); flex-shrink: 0; }
-.th-sb-arrow { width: var(--th-space-20); height: var(--th-space-20); display: flex; align-items: center; justify-content: center; border: 1px solid var(--th-sidebar-line); background: rgba(255, 255, 255, 0.06); border-radius: 4px; color: var(--th-sidebar-ink-2); font-size: 10px; line-height: 1; cursor: pointer; flex-shrink: 0; padding: 0; }
+.th-sb-arrow { width: var(--th-space-20); height: var(--th-space-20); display: flex; align-items: center; justify-content: center; border: 1px solid var(--th-sidebar-line); background: var(--th-sidebar-wash-2); border-radius: 4px; color: var(--th-sidebar-ink-2); font-size: 10px; line-height: 1; cursor: pointer; flex-shrink: 0; padding: 0; }
 .th-sb-arrow:disabled { opacity: 0.35; cursor: default; }
 .th-sb-arrow:not(:disabled):hover { color: var(--th-sidebar-ink); border-color: var(--th-sidebar-ink-2); }
 .th-sb-section-rename, .th-sb-section-x { width: var(--th-space-20); height: var(--th-space-20); display: flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--th-sidebar-ink-3); flex-shrink: 0; cursor: pointer; margin-left: var(--th-space-2); padding: 0; }
 .th-sb-section-rename:hover { color: var(--th-sidebar-ink); }
 .th-sb-section-x:hover { color: var(--th-danger-text); }
-.th-sb-section-rename-input { flex: 1; min-width: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--th-accent); border-radius: 4px; padding: var(--th-space-2) var(--th-space-6); color: var(--th-sidebar-ink); font-family: inherit; }
+.th-sb-section-rename-input { flex: 1; min-width: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; background: var(--th-sidebar-wash-3); border: 1px solid var(--th-accent); border-radius: 4px; padding: var(--th-space-2) var(--th-space-6); color: var(--th-sidebar-ink); font-family: inherit; }
 
 .th-add-section { display: flex; align-items: center; gap: var(--th-space-8); margin: var(--th-space-8) var(--th-space-8) 0; padding: var(--th-space-10) var(--th-space-20); border-radius: var(--th-r); border: 1px dashed var(--th-sidebar-line); background: transparent; color: var(--th-sidebar-ink-3); font-size: 13px; cursor: pointer; }
 .th-add-section:hover { color: var(--th-sidebar-ink); border-color: var(--th-sidebar-ink-2); }
 
 .th-sb-edit-toggle { display: flex; align-items: center; gap: var(--th-space-4); padding: var(--th-space-8) var(--th-space-14); border-top: 1px solid var(--th-sidebar-line); }
-.th-sb-edit-btn { display: flex; align-items: center; gap: var(--th-space-6); padding: var(--th-space-6) var(--th-space-8); border-radius: var(--th-r-sm); border: 1px solid var(--th-sidebar-line); background: rgba(255, 255, 255, 0.06); color: var(--th-sidebar-ink-2); font-size: 12px; cursor: pointer; flex: 1; min-width: 0; }
-.th-sb-edit-btn:hover { background: rgba(255, 255, 255, 0.12); color: var(--th-sidebar-ink); }
+.th-sb-edit-btn { display: flex; align-items: center; gap: var(--th-space-6); padding: var(--th-space-6) var(--th-space-8); border-radius: var(--th-r-sm); border: 1px solid var(--th-sidebar-line); background: var(--th-sidebar-wash-2); color: var(--th-sidebar-ink-2); font-size: 12px; cursor: pointer; flex: 1; min-width: 0; }
+.th-sb-edit-btn:hover { background: var(--th-sidebar-wash-4); color: var(--th-sidebar-ink); }
 .th-sb-view-site { justify-content: flex-end; flex: 0 0 auto; }
-.th-sb-edit-bar { display: flex; align-items: center; gap: var(--th-space-8); padding: var(--th-space-8) var(--th-space-14); border-top: 1px solid var(--th-sidebar-line); background: rgba(255, 255, 255, 0.04); }
+.th-sb-edit-bar { display: flex; align-items: center; gap: var(--th-space-8); padding: var(--th-space-8) var(--th-space-14); border-top: 1px solid var(--th-sidebar-line); background: var(--th-sidebar-wash-1); }
 .th-sb-reset, .th-sb-done { flex: 1; display: flex; align-items: center; justify-content: center; gap: var(--th-space-6); padding: var(--th-space-8) var(--th-space-10); border-radius: var(--th-r-sm); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
-.th-sb-reset { background: rgba(255, 255, 255, 0.06); border: 1px solid var(--th-sidebar-line); color: var(--th-sidebar-ink-2); }
+.th-sb-reset { background: var(--th-sidebar-wash-2); border: 1px solid var(--th-sidebar-line); color: var(--th-sidebar-ink-2); }
 .th-sb-reset:hover { border-color: var(--th-sidebar-ink-2); color: var(--th-sidebar-ink); }
 .th-sb-done { background: var(--th-accent-btn); border: 1px solid var(--th-accent-btn); color: var(--th-text-inverse); }
 .th-sb-done:hover { filter: brightness(1.08); }
@@ -221,18 +233,20 @@ h1 { font-size: var(--th-fs-xl); margin: 0 0 var(--th-space-16); letter-spacing:
 [data-sidebar-style='pills'] .th-sb-item { border-radius: var(--th-r-pill); padding-left: var(--th-space-16); padding-right: var(--th-space-16); }
 [data-sidebar-style='minimal'] .th-sb-item { background: transparent; }
 [data-sidebar-style='minimal'] .th-sb-item:hover { background: transparent; color: var(--th-ink); }
-[data-sidebar-style='minimal'] .th-sb-item.active { background: transparent; color: var(--th-accent); border-left: 2px solid var(--th-accent); padding-left: var(--th-space-8); }
+[data-sidebar-style='minimal'] .th-sb-item.active { background: transparent; color: var(--th-accent-text); border-left: 2px solid var(--th-accent); padding-left: var(--th-space-8); }
 
 table { width: 100%; border-collapse: collapse; background: var(--th-card-bg); border-radius: var(--th-r-lg); overflow: hidden; box-shadow: var(--th-card-shadow); border: var(--th-card-border); backdrop-filter: var(--th-card-backdrop); }
 th, td { text-align: left; padding: var(--th-density-table-pad); font-size: var(--th-fs-sm); border-bottom: 1px solid var(--th-bg); }
-th { background: #f8fafc; font-size: var(--th-fs-2xs); text-transform: uppercase; letter-spacing: 0.4px; color: var(--th-muted); }
+/* --th-surface-2, not a literal: #f8fafc stayed near-white in dark mode, so
+   every table kept a bright header strip across dark pages. */
+th { background: var(--th-surface-2); font-size: var(--th-fs-2xs); text-transform: uppercase; letter-spacing: 0.4px; color: var(--th-muted); }
 td .sub { color: var(--th-muted); font-size: var(--th-fs-2xs); }
 .muted { color: var(--th-muted); }
 
 .pill { display: inline-block; padding: var(--th-space-2) var(--th-space-8); border-radius: 999px; font-size: var(--th-fs-2xs); font-weight: 600; background: var(--th-bg); color: var(--th-ink-2); }
-.pill-active, .pill-paid, .pill-processing, .pill-delivered, .pill-ok { background: var(--th-success-bg); color: var(--th-success-text); }
-.pill-pending { background: var(--th-warning-bg); color: var(--th-warning-text); }
-.pill-failed, .pill-cancelled, .pill-archived, .pill-unhealthy { background: var(--th-danger-bg); color: var(--th-danger-text); }
+.pill-active, .pill-paid, .pill-processing, .pill-delivered, .pill-ok { background: var(--th-success-bg); color: var(--th-success-ink); }
+.pill-pending { background: var(--th-warning-bg); color: var(--th-warning-ink); }
+.pill-failed, .pill-cancelled, .pill-archived, .pill-unhealthy { background: var(--th-danger-bg); color: var(--th-danger-ink); }
 
 .row-form { display: flex; gap: var(--th-space-8); margin-bottom: var(--th-space-16); }
 .row-form input { padding: var(--th-space-8) var(--th-space-10); border: 1px solid var(--th-line); border-radius: var(--th-r); font-size: var(--th-fs-sm); }
@@ -271,8 +285,8 @@ button:disabled { opacity: 0.5; cursor: default; }
 }
 #th-content :where(textarea) { resize: vertical; min-height: 80px; }
 button.ghost { background: var(--th-surface); color: var(--th-ink-2); border-color: var(--th-line); }
-button.ghost:hover { background: #f8fafc; border-color: #cbd5e1; }
-.notice { background: var(--th-warning-bg); color: var(--th-warning-text); padding: var(--th-space-12) var(--th-space-14); border-radius: var(--th-r); font-size: var(--th-fs-sm); margin-bottom: var(--th-space-14); }
+button.ghost:hover { background: var(--th-surface-2); border-color: var(--th-line-2); }
+.notice { background: var(--th-warning-bg); color: var(--th-warning-ink); padding: var(--th-space-12) var(--th-space-14); border-radius: var(--th-r); font-size: var(--th-fs-sm); margin-bottom: var(--th-space-14); }
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: var(--th-space-14); margin-bottom: var(--th-space-8); }
 .card { background: var(--th-card-bg); border-radius: var(--th-r-lg); padding: var(--th-density-card-pad); box-shadow: var(--th-card-shadow); border: var(--th-card-border); backdrop-filter: var(--th-card-backdrop); }
 .card .n { font-size: 28px; font-weight: 700; }
@@ -383,7 +397,7 @@ button.ghost:hover { background: #f8fafc; border-color: #cbd5e1; }
 .th-card.dash-card[data-size='lg'] { padding: var(--th-space-32); }
 .th-card-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: var(--th-space-10); gap: var(--th-space-4) var(--th-space-8); min-width: 0; }
 .th-card-label { margin: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--th-muted); white-space: nowrap; }
-.th-card-link { font-size: 12px; color: var(--th-accent); white-space: nowrap; }
+.th-card-link { font-size: 12px; color: var(--th-accent-text); white-space: nowrap; }
 .th-card-link:hover { text-decoration: underline; }
 .dash-card-controls { display: flex; gap: var(--th-space-4); opacity: 0.35; transition: opacity var(--th-transition); }
 #th-edit-toggle:checked ~ .th-bento .dash-card-controls,
@@ -431,14 +445,14 @@ button.ghost:hover { background: #f8fafc; border-color: #cbd5e1; }
 .settings-rail { display: flex; flex-direction: column; gap: var(--th-space-2); }
 .settings-rail-item { padding: var(--th-space-10) var(--th-space-10); border-radius: var(--th-r); display: flex; align-items: flex-start; gap: var(--th-space-10); }
 .settings-rail-item svg { flex-shrink: 0; margin-top: 1px; color: var(--th-ink-2); }
-.settings-rail-item.active svg { color: var(--th-accent); }
+.settings-rail-item.active svg { color: var(--th-accent-text); }
 .settings-rail-item:hover { background: var(--th-bg); }
 .settings-rail-item.active { background: var(--th-accent-tint); }
 .settings-rail-text { display: flex; flex-direction: column; gap: var(--th-space-2); min-width: 0; }
 /* Explicit ink, not inherited: the rail sits on the page background, and
    an inherited colour left these near-black on the dark background. */
 .settings-rail-label { font-size: var(--th-fs-sm); font-weight: 600; color: var(--th-ink); }
-.settings-rail-item.active .settings-rail-label { color: var(--th-accent); }
+.settings-rail-item.active .settings-rail-label { color: var(--th-accent-text); }
 .settings-rail-desc { font-size: var(--th-fs-2xs); color: var(--th-muted); }
 .settings-rail-empty { padding: var(--th-space-10); font-size: var(--th-fs-xs); color: var(--th-muted); }
 .settings-content { background: var(--th-card-bg); border-radius: var(--th-r-lg); padding: var(--th-space-24) var(--th-space-24); box-shadow: var(--th-card-shadow); border: var(--th-card-border); }
@@ -446,7 +460,7 @@ button.ghost:hover { background: #f8fafc; border-color: #cbd5e1; }
 .settings-field { max-width: 480px; }
 .settings-radio-group { display: flex; gap: var(--th-space-8); flex-wrap: wrap; }
 .settings-radio { display: flex; align-items: center; gap: var(--th-space-6); padding: var(--th-space-8) var(--th-space-12); border: 1px solid var(--th-line); border-radius: var(--th-r); font-size: var(--th-fs-sm); cursor: pointer; }
-.settings-radio:has(input:checked) { border-color: var(--th-accent); background: var(--th-accent-tint); color: var(--th-accent); font-weight: 600; }
+.settings-radio:has(input:checked) { border-color: var(--th-accent); background: var(--th-accent-tint); color: var(--th-accent-text); font-weight: 600; }
 .field-help { font-size: var(--th-fs-2xs); color: var(--th-muted); margin: var(--th-space-6) 0 0; line-height: 1.5; }
 .settings-select { padding: var(--th-space-8) var(--th-space-10); border: var(--th-border-width) solid var(--th-line); border-radius: var(--th-r); font-size: var(--th-fs-sm); background: var(--th-surface); color: var(--th-ink); min-width: 220px; }
 .settings-text-input { padding: var(--th-space-8) var(--th-space-10); border: var(--th-border-width) solid var(--th-line); border-radius: var(--th-r); font-size: var(--th-fs-sm); background: var(--th-surface); color: var(--th-ink); width: 100%; max-width: 360px; }
@@ -1154,63 +1168,68 @@ input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: 
 
 /* Sidebar layout — icons-only collapses the rail to its icon column; text-only
    drops the icons. Both keep the accessible label in the DOM. */
-#th-shell[data-sidebar-layout='icons'] #th-sb { width: 68px; }
-#th-shell[data-sidebar-layout='icons'] #th-main { margin-left: 68px; }
+/* Folding reuses icons-only rather than duplicating it: the collapsed rail
+   IS the icons layout, the only difference is that fold is a per-user toggle
+   and layout is a site setting. */
+#th-shell[data-sidebar-layout='icons'] #th-sb,
+#th-shell[data-sidebar-folded='on'] #th-sb { width: 68px; }
+#th-shell[data-sidebar-layout='icons'] #th-main,
+#th-shell[data-sidebar-folded='on'] #th-main { margin-left: 68px; }
 #th-shell[data-sidebar-layout='icons'] .th-sb-item span,
 #th-shell[data-sidebar-layout='icons'] .th-sb-section-label,
 #th-shell[data-sidebar-layout='icons'] .th-sb-search-box,
-#th-shell[data-sidebar-layout='icons'] .th-sb-foot-text { display: none; }
-#th-shell[data-sidebar-layout='icons'] .th-sb-item { justify-content: center; }
+#th-shell[data-sidebar-layout='icons'] .th-sb-foot-text,
+#th-shell[data-sidebar-folded='on'] .th-sb-item span,
+#th-shell[data-sidebar-folded='on'] .th-sb-section-label,
+#th-shell[data-sidebar-folded='on'] .th-sb-search-box,
+#th-shell[data-sidebar-folded='on'] .th-site-info,
+#th-shell[data-sidebar-folded='on'] .th-sb-foot-text { display: none; }
+#th-shell[data-sidebar-layout='icons'] .th-sb-item,
+#th-shell[data-sidebar-folded='on'] .th-sb-item { justify-content: center; }
+
+/* The fold button. Hidden unless Appearance > Sidebar > Foldable is on —
+   that rule is above, next to the other sidebar-layout rules. */
+.th-sb-fold {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--th-space-24);
+  height: var(--th-space-24);
+  flex-shrink: 0;
+  border: 1px solid var(--th-sidebar-line);
+  border-radius: var(--th-r-sm);
+  background: var(--th-sidebar-wash-2);
+  color: var(--th-sidebar-ink-2);
+  cursor: pointer;
+  padding: 0;
+}
+.th-sb-fold:hover { background: var(--th-sidebar-wash-4); color: var(--th-sidebar-ink); }
+.th-sb-fold svg { transform: rotate(180deg); transition: transform var(--th-dur, .18s) var(--th-ease, ease); }
+#th-shell[data-sidebar-folded='on'] .th-sb-fold svg { transform: rotate(0deg); }
+#th-shell[data-sidebar-folded='on'] .th-sb-fold { margin-left: 0; }
 #th-shell[data-sidebar-layout='text'] .th-sb-item svg { display: none; }
 
 /* Foldable shows the collapse affordance; without it the control is hidden. */
 #th-shell:not([data-sidebar-foldable='on']) .th-sb-fold { display: none; }
 
-/* Glass — frosted surfaces independent of the card-style picker. */
-#th-shell[data-glass='on'] .card,
-#th-shell[data-glass='on'] .th-card,
-#th-shell[data-glass='on'] .th-ap-group {
-  background: rgba(var(--th-glass-tint, 16, 16, 16), .06);
-  backdrop-filter: blur(var(--th-blur, 14px));
-  -webkit-backdrop-filter: blur(var(--th-blur, 14px));
-}
-#th-shell[data-glass-tint-mode='light'] { --th-glass-tint: 255, 255, 255; }
-#th-shell[data-glass-tint-mode='dark'] { --th-glass-tint: 16, 16, 16; }
-/* 'auto' follows the colour mode rather than pinning one tint. */
-#th-shell[data-glass-tint-mode='auto'] { --th-glass-tint: 255, 255, 255; }
-#th-shell[data-glass-tint-mode='auto'][data-color-mode='dark'] { --th-glass-tint: 16, 16, 16; }
-/* 'color' deliberately sets nothing — appearanceInlineVars already wrote the
-   custom --th-glass-tint from the colour field, and a rule here would win. */
-
-/* Surface effect — backdrop atmosphere on cards, sidebar and topbar. */
-#th-shell[data-surface-effect='glass-light'] .card,
-#th-shell[data-surface-effect='glass-light'] .th-card { background: rgba(255,255,255,.55); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
-#th-shell[data-surface-effect='glass-dark'] .card,
-#th-shell[data-surface-effect='glass-dark'] .th-card { background: rgba(16,16,16,.45); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); color: #f5f5f5; }
-#th-shell[data-surface-effect='glass-colored'] .card,
-#th-shell[data-surface-effect='glass-colored'] .th-card { background: color-mix(in srgb, var(--th-accent) 12%, transparent); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
-#th-shell[data-surface-effect='gradient'] .card,
-#th-shell[data-surface-effect='gradient'] .th-card { background-image: linear-gradient(160deg, color-mix(in srgb, var(--th-accent) 7%, transparent), transparent 60%); }
-#th-shell[data-surface-effect='blurred'] .card,
-#th-shell[data-surface-effect='blurred'] .th-card { backdrop-filter: blur(18px) saturate(1.4); -webkit-backdrop-filter: blur(18px) saturate(1.4); }
-
 /* Background pattern — painted on the shell behind everything. */
 #th-shell[data-bg-image] { background-attachment: fixed; }
 #th-shell[data-bg-image='mesh'] {
-  background-image:
+  --th-bg-pattern:
     radial-gradient(at 20% 15%, color-mix(in srgb, var(--th-accent) 14%, transparent) 0, transparent 45%),
     radial-gradient(at 82% 70%, color-mix(in srgb, var(--th-accent) 10%, transparent) 0, transparent 45%);
 }
 #th-shell[data-bg-image='grid'] {
-  background-image: linear-gradient(var(--th-line) 1px, transparent 1px), linear-gradient(90deg, var(--th-line) 1px, transparent 1px);
-  background-size: 32px 32px;
+  --th-bg-pattern: linear-gradient(var(--th-line) 1px, transparent 1px), linear-gradient(90deg, var(--th-line) 1px, transparent 1px);
+  --th-bg-pattern-size: 32px 32px, 32px 32px;
 }
 #th-shell[data-bg-image='dots'] {
-  background-image: radial-gradient(var(--th-line) 1px, transparent 1px);
-  background-size: 20px 20px;
+  --th-bg-pattern: radial-gradient(var(--th-line) 1px, transparent 1px);
+  --th-bg-pattern-size: 20px 20px;
 }
 #th-shell[data-bg-image='noise'] {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");
+  --th-bg-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");
 }
 
 /* Card template — the card's shape in content lists. `hero` is the baseline
@@ -1223,29 +1242,37 @@ input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: 
 #th-shell[data-card-template='detailed'] .th-lp-card-meta { padding-bottom: var(--th-space-16); border-top: 1px solid var(--th-line); }
 
 /* Card image — what fills a thumbnail with no cover image of its own. */
-#th-shell[data-card-image='wireframe'] .th-lp-card-thumb:empty,
-#th-shell[data-card-image='pattern'] .th-lp-card-thumb:empty { background-color: var(--th-bg); }
-#th-shell[data-card-image='pattern'] .th-lp-card-thumb:empty {
-  background-image: repeating-linear-gradient(45deg, var(--th-line) 0 2px, transparent 2px 10px);
+/* Card image — what a card with no cover picture shows instead. Selected by
+   ContentCard, which writes .th-lp-card-thumb--<value>; these used to be
+   `:empty` rules that could never match, since the thumb always holds the
+   kebab menu. 'gradient' is the default and stays an inline style there. */
+.th-lp-card-thumb--featured { background: var(--th-bg); }
+.th-lp-card-thumb--stock { background: linear-gradient(135deg, #cbd5e1, #94a3b8); }
+.th-lp-card-thumb--wireframe {
+  background-color: var(--th-bg);
+  background-image:
+    linear-gradient(var(--th-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--th-line) 1px, transparent 1px);
+  background-size: 16px 16px;
 }
-#th-shell[data-card-image='wireframe'] .th-lp-card-thumb:empty {
-  background-image: linear-gradient(var(--th-line) 2px, transparent 2px), linear-gradient(90deg, var(--th-line) 2px, transparent 2px);
-  background-size: 24px 24px;
+.th-lp-card-thumb--pattern {
+  background-color: var(--th-bg);
+  background-image: radial-gradient(var(--th-line-2) 1.5px, transparent 1.5px);
+  background-size: 12px 12px;
 }
-#th-shell[data-card-image='stock'] .th-lp-card-thumb:empty { background: linear-gradient(135deg, #cbd5e1, #94a3b8); }
-#th-shell[data-card-image='featured'] .th-lp-card-thumb:empty { background: var(--th-bg); }
 
 /* Drag grips — hidden unless asked for, which is why the toggle exists. */
-#th-shell:not([data-show-grips='on']) .th-grip { opacity: 0; }
-#th-shell[data-show-grips='on'] .th-grip { opacity: .6; }
+/* Show grips — the dashboard's resize grip is normally hover-only; this
+   pins it visible without entering Edit layout mode. Targets
+   .dash-card-resize, the element that actually exists (the old rules named
+   .th-grip, which nothing renders). */
+#th-shell[data-show-grips='on'] .dash-card-resize { opacity: .6; }
 
 /* Desktop mode — bare screens, no sidebar or topbar. */
 #th-shell[data-desktop-mode='on'] #th-sb,
 #th-shell[data-desktop-mode='on'] #th-topbar { display: none; }
 #th-shell[data-desktop-mode='on'] #th-main { margin-left: 0; }
 
-/* Autosave off surfaces the manual-save affordances that autosave hides. */
-#th-shell[data-autosave='off'] .th-save-hint { display: inline-flex; }
 
 /* Code editor theme — syntax colours for the custom-CSS and code fields. */
 #th-shell[data-code-theme='github'] .th-code { background: #f6f8fa; color: #24292f; }
@@ -1253,8 +1280,11 @@ input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: 
 #th-shell[data-code-theme='solarized'] .th-code { background: #fdf6e3; color: #657b83; }
 #th-shell[data-code-theme='nord'] .th-code { background: #2e3440; color: #d8dee9; }
 
-/* Bento gap — appearanceInlineVars writes --th-bento-gap when it is not 16. */
-.th-bento { gap: var(--th-bento-gap, var(--th-space-16)); }
+/* Bento gap — appearanceInlineVars writes --th-bento-gap only when it is not
+   the 16px default. Falling back to --th-card-grid-gap rather than a literal
+   is what lets Card grid gap reach the dashboard: this rule sits later in the
+   file at equal specificity, so a literal here silently beat it. */
+.th-bento { gap: var(--th-bento-gap, var(--th-card-grid-gap)); }
 
 /* Sidebar styles 1.9.44 had that 2.0's 3-value enum never carried. */
 #th-shell[data-sidebar-style='floating'] #th-sb { margin: var(--th-space-10); height: calc(100vh - var(--th-space-20)); border-radius: var(--th-r-lg); }
@@ -1525,11 +1555,14 @@ input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: 
   --th-ink: #fff; --th-ink-2: #f0f0f0; --th-muted: #c4c4c4;
   --th-line: rgba(255, 255, 255, 0.38);
 }
-#th-shell[data-intensity='subtle'] { --th-accent: color-mix(in srgb, var(--th-accent) 62%, var(--th-muted)); }
-#th-shell[data-intensity='vivid']  { --th-accent: color-mix(in srgb, var(--th-accent) 100%, #fff 0%); filter: saturate(1.18); }
+/* Derived from --th-accent-base, never from --th-accent itself: a property
+   that reads its own name is a cycle, and a cycle makes the property invalid
+   (empty) rather than falling back. See the note in therum-tokens.css. */
+#th-shell[data-intensity='subtle'] { --th-accent: color-mix(in srgb, var(--th-accent-base) 62%, var(--th-muted)); }
+#th-shell[data-intensity='vivid']  { --th-accent: var(--th-accent-base); filter: saturate(1.18); }
 
 #th-shell[data-background='subtle-gradient'] {
-  background-image: linear-gradient(180deg, color-mix(in srgb, var(--th-accent) 5%, transparent), transparent 46%);
+  --th-app-bg-image: linear-gradient(180deg, color-mix(in srgb, var(--th-accent) 5%, transparent), transparent 46%);
   background-attachment: fixed;
 }
 
@@ -1540,27 +1573,16 @@ input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: 
 
 #th-shell[data-card-style='flat']   :is(.th-card, .th-panel) { box-shadow: none; border: 1px solid var(--th-line); }
 #th-shell[data-card-style='shadow'] :is(.th-card, .th-panel) { box-shadow: var(--th-shadow, 0 1px 3px rgba(0,0,0,.08)); }
-#th-shell[data-card-style='glass']  :is(.th-card, .th-panel) {
-  background: color-mix(in srgb, var(--th-surface) 72%, transparent);
-  backdrop-filter: blur(var(--th-blur, 12px));
-  border: 1px solid color-mix(in srgb, var(--th-line) 70%, transparent);
-}
-
-#th-shell[data-blur-strength='light'] { --th-blur: 6px; }
-#th-shell[data-blur-strength='heavy'] { --th-blur: 22px; }
-
-/* Accessibility: transparency is a preference, and a real one for some people. */
-#th-shell[data-reduce-transparency='on'] :is(.th-card, .th-panel, .th-modal, .th-sheet) {
-  backdrop-filter: none !important;
-  background: var(--th-surface) !important;
-}
-
 /* ── Layout ────────────────────────────────────────────────────────── */
 #th-shell[data-content-width='normal'] main > * { max-width: 1180px; margin-inline: auto; }
 #th-shell[data-content-width='narrow'] main > * { max-width: 900px;  margin-inline: auto; }
 
-#th-shell[data-card-grid-gap='compact']  .th-grid { gap: var(--th-space-8); }
-#th-shell[data-card-grid-gap='spacious'] .th-grid { gap: var(--th-space-32); }
+/* The card grids that actually exist: list/media/content pages render
+   .th-lp-view-grid, the dashboard renders .th-bento. These two rules used to
+   target `.th-grid`, a class no component has ever rendered, so Card grid gap
+   was inert everywhere. Both now read --th-card-grid-gap, which
+   therum-tokens.css sets per value. */
+.th-lp-view-grid { gap: var(--th-card-grid-gap); }
 
 #th-shell[data-card-layout='compact'] :is(.th-card, .th-panel) { padding: var(--th-space-10); }
 

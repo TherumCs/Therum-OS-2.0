@@ -138,7 +138,7 @@ const SECTIONS: Record<string, { title: string; sub: string; render: (a: Appeara
             label="Card style"
             field="cardStyle"
             initial={a.cardStyle}
-            options={[['flat', 'Flat'], ['shadow', 'Shadow'], ['glass', 'Glass']]}
+            options={[['flat', 'Flat'], ['shadow', 'Shadow']]}
           />
           <Segmented
             label="Shadow"
@@ -146,42 +146,6 @@ const SECTIONS: Record<string, { title: string; sub: string; render: (a: Appeara
             field="shadowStyle"
             initial={a.shadowStyle}
             options={[['none', 'None'], ['subtle', 'Subtle'], ['pronounced', 'Pronounced']]}
-          />
-          <ColorField
-            label="Glass tint"
-            help="The frost colour, when card style is Glass."
-            field="glassTint"
-            initial={a.glassTint}
-            fallback="#101010"
-          />
-          <Segmented
-            label="Blur strength"
-            help="How much backdrop blur Glass uses."
-            field="blurStrength"
-            initial={a.blurStrength}
-            options={[['light', 'Light'], ['medium', 'Medium'], ['heavy', 'Heavy']]}
-          />
-          <Switch label="Glass" help="Frosted backdrop on cards and modals." field="glass" initial={a.glass} />
-          <Segmented
-            label="Glass tint mode"
-            help="Auto follows the light/dark toggle. Color uses the tint above."
-            field="glassTintMode"
-            initial={a.glassTintMode}
-            options={[['auto', 'Auto'], ['dark', 'Dark'], ['light', 'Light'], ['color', 'Color']]}
-          />
-          <Choice
-            label="Surface effect"
-            help="Backdrop atmosphere for cards, sidebar and topbar. Stacks on any theme."
-            field="surfaceEffect"
-            initial={a.surfaceEffect}
-            options={[
-              ['none', 'None'],
-              ['glass-light', 'Light Glass'],
-              ['glass-dark', 'Dark Glass'],
-              ['glass-colored', 'Colored Glass'],
-              ['gradient', 'Gradient'],
-              ['blurred', 'Blurred'],
-            ]}
           />
           <Choice
             label="Background pattern"
@@ -329,12 +293,6 @@ const SECTIONS: Record<string, { title: string; sub: string; render: (a: Appeara
             initial={a.contrast}
             options={[['normal', 'Normal'], ['high', 'High']]}
           />
-          <Switch
-            label="Reduce transparency"
-            help="Replaces glass and blur with solid surfaces."
-            field="reduceTransparency"
-            initial={a.reduceTransparency}
-          />
           <Switch label="Underline links" field="underlineLinks" initial={a.underlineLinks} />
           <Switch
             label="Always-visible focus rings"
@@ -358,7 +316,6 @@ const SECTIONS: Record<string, { title: string; sub: string; render: (a: Appeara
             field="debugOverlays"
             initial={a.debugOverlays}
           />
-          <Switch label="Autosave" help="Save edits as you work, without pressing Save." field="autoSave" initial={a.autoSave} />
           <Switch
             label="Drag grips"
             help="Show the drag handle on reorderable rows and dashboard cards."
