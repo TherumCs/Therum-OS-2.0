@@ -52,6 +52,31 @@ export const stripeGateway: PaymentGateway = {
   displayName: () => 'Stripe',
   supports: (c) => ['refunds', 'partial_refunds', 'webhooks', 'card', 'wallet_apple', 'wallet_google'].includes(c),
 
+  // In-page payment from a Stripe.js payment-method id. Same reasoning as
+  // Square's: tokenised in the browser, confirmed here, no PAN in this system.
+  async payWithToken(order: OrderForPayment, credential: string, token: string, idempotencyKey: string): Promise<string> {
+    const res = await fetch('https://api.stripe.com/v1/payment_intents', {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${credential}`,
+        'content-type': 'application/x-www-form-urlencoded',
+        'Idempotency-Key': idempotencyKey,
+      },
+      body: new URLSearchParams({
+        amount: String(order.total),
+        currency: order.currency.toLowerCase(),
+        payment_method: token,
+        confirm: 'true',
+        'automatic_payment_methods[enabled]': 'true',
+        'automatic_payment_methods[allow_redirects]': 'never',
+        description: `Order ${order.number}`,
+      }),
+    });
+    const body = (await res.json()) as { id?: string; error?: { message?: string } };
+    if (!res.ok || !body.id) throw new Error(body.error?.message ?? `Stripe returned ${res.status}`);
+    return body.id;
+  },
+
   async createIntent(order: OrderForPayment, credential: string): Promise<PaymentIntentResult> {
     const pi = await stripePost('/payment_intents', credential, {
       amount: String(order.total),

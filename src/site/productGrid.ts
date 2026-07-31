@@ -648,15 +648,24 @@ export const CARD_EVOLVE_RUNTIME = `
           orderNumber: order.orderNumber, accessToken: order.accessToken, provider: payProvider || 'square'
         }).catch(function(){ return { ready: false, reason: 'Wallet payments are not set up yet.' }; });
 
-        if (w && w.ready) {
-          say('Order ' + order.orderNumber + ' created — continue with your wallet.');
-          var box = payQ('[data-pay-wallets]');
-          if (box) { box.hidden = false; box.setAttribute('data-session', JSON.stringify(w)); }
-        } else {
-          // Honest dead-end rather than a button that does nothing: the order
-          // exists, so say so and hand over the receipt link.
-          say('Order ' + order.orderNumber + ' placed. ' + ((w && w.reason) || 'Payment is not connected yet.'));
+        // Settle in place. The token comes from the provider's own field or
+        // wallet sheet; only the token reaches us.
+        var token = null;
+        try { token = await tokenize(); } catch (e) { throw e; }
+
+        if (token && payReady) {
+          var paid = await api('/shop/checkout/pay-token', {
+            orderNumber: order.orderNumber, accessToken: order.accessToken,
+            provider: payReady.provider, token: token
+          });
+          say('Paid — order ' + paid.orderNumber + ' confirmed. Receipt on its way.');
+          if (go) go.textContent = 'Done';
+          return;
         }
+
+        // No card field mounted means no connected provider. The order still
+        // exists, so say so with the reason rather than failing silently.
+        say('Order ' + order.orderNumber + ' placed. ' + ((w && w.reason) || 'Payment is not connected yet.'));
         if (go) go.textContent = 'Done';
       } catch (e) {
         say(e.message || String(e), true);
@@ -665,6 +674,65 @@ export const CARD_EVOLVE_RUNTIME = `
     }
 
     var walletsLoaded = false;
+    var payReady = null;      // the first ready provider + its client config
+    var sqCard = null;        // Square Web Payments card instance, once mounted
+
+    // Load a provider's browser SDK once. Which SDK, and the keys it needs,
+    // both come from whatever is connected in Nexus — nothing here is
+    // hardcoded to one processor.
+    function loadSdk(src){
+      return new Promise(function(resolve, reject){
+        if (document.querySelector('script[data-pay-sdk=\"' + src + '\"]')) return resolve();
+        var el = document.createElement('script');
+        el.src = src; el.async = true;
+        el.setAttribute('data-pay-sdk', src);
+        el.onload = function(){ resolve(); };
+        el.onerror = function(){ reject(new Error('Could not load the payment SDK.')); };
+        document.head.appendChild(el);
+      });
+    }
+
+    // The gateway's own hosted card field. Card numbers are entered into the
+    // provider's iframe, never our inputs, so no PAN reaches this system.
+    async function mountCardField(){
+      var host = payQ('[data-pay-cardfield]');
+      if (!host || !payReady || sqCard) return;
+      var c = payReady.client || {};
+      try {
+        if (payReady.provider === 'square' && c.publishableKey && c.locationId) {
+          await loadSdk(c.environment === 'live'
+            ? 'https://web.squarecdn.com/v1/square.js'
+            : 'https://sandbox.web.squarecdn.com/v1/square.js');
+          var payments = window.Square.payments(c.publishableKey, c.locationId);
+          sqCard = await payments.card();
+          host.hidden = false;
+          await sqCard.attach(host);
+        } else if (payReady.provider === 'stripe' && c.publishableKey) {
+          await loadSdk('https://js.stripe.com/v3/');
+          var stripe = window.Stripe(c.publishableKey);
+          var elements = stripe.elements();
+          sqCard = elements.create('card');
+          host.hidden = false;
+          sqCard.mount(host);
+          sqCard._stripe = stripe;
+        }
+      } catch (e) {
+        say('Card payments could not start: ' + (e.message || e), true);
+      }
+    }
+
+    /** Ask the mounted field for a token. Null means "no card path available". */
+    async function tokenize(){
+      if (!sqCard || !payReady) return null;
+      if (payReady.provider === 'square') {
+        var r = await sqCard.tokenize();
+        if (r.status !== 'OK') throw new Error((r.errors && r.errors[0] && r.errors[0].message) || 'Card was not accepted.');
+        return r.token;
+      }
+      var out = await sqCard._stripe.createPaymentMethod({ type: 'card', card: sqCard });
+      if (out.error) throw new Error(out.error.message);
+      return out.paymentMethod.id;
+    }
     async function loadWallets(){
       if (walletsLoaded) return;
       walletsLoaded = true;
@@ -685,6 +753,8 @@ export const CARD_EVOLVE_RUNTIME = `
         }
         box.hidden = false;
         if (or) or.hidden = false;
+        payReady = ready[0];
+        mountCardField();
         box.innerHTML = ready.map(function(p){
           return p.wallets.map(function(w){
             return '<button class="card-btn card-btn--solid" type="button" data-wallet="' + w

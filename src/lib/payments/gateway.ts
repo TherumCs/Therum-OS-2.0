@@ -61,4 +61,16 @@ export interface PaymentGateway {
   // Poll the provider for an intent's current status — the /checkout/return
   // path for redirect gateways (the endpoint 1.x never registered).
   intentStatus(intentId: string, credential: string): Promise<string>;
+
+  // IN-PAGE payment, from a token the provider's browser SDK produced.
+  //
+  // Optional, because not every gateway can do it: createIntent above returns
+  // a hosted link, which means LEAVING the page. Quick checkout completes
+  // inside the product card, so it needs this instead — the card details (or
+  // the Apple/Google Pay sheet) are tokenised in the browser by the provider's
+  // own SDK, and only the token reaches us. That is also what keeps card
+  // numbers out of this system entirely.
+  //
+  // Returns the provider's payment id. Throws on decline.
+  payWithToken?(order: OrderForPayment, credential: string, token: string, idempotencyKey: string): Promise<string>;
 }

@@ -65,6 +65,24 @@ export const squareGateway: PaymentGateway = {
   displayName: () => 'Square',
   supports: (c) => ['refunds', 'partial_refunds', 'webhooks', 'card', 'cashapp', 'afterpay', 'redirect'].includes(c),
 
+  // In-page card / Apple Pay / Google Pay. The Web Payments SDK tokenises in
+  // the browser and only the token arrives here, so no card number ever
+  // touches this system. idempotency_key is scoped to the order so a retried
+  // submit settles the same payment instead of charging twice.
+  async payWithToken(order: OrderForPayment, credential: string, token: string, idempotencyKey: string): Promise<string> {
+    const cred = parseCredential(credential);
+    const res = await squareCall(cred, 'POST', '/v2/payments', {
+      idempotency_key: idempotencyKey.slice(0, 45),
+      source_id: token,
+      amount_money: { amount: order.total, currency: order.currency },
+      ...(cred.locationId ? { location_id: cred.locationId } : {}),
+      note: `order_id:${order.id}`,
+    });
+    const payment = res.payment as { id?: string; status?: string } | undefined;
+    if (!payment?.id) throw new Error('Square accepted the request but returned no payment id.');
+    return payment.id;
+  },
+
   async createIntent(order: OrderForPayment, credential: string): Promise<PaymentIntentResult> {
     const cred = parseCredential(credential);
     // Payment Link = hosted checkout. idempotency_key scoped to the order so

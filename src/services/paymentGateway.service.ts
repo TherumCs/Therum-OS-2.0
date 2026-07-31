@@ -102,6 +102,31 @@ export const paymentGatewayService = {
     return intent;
   },
 
+  /**
+   * Settle an order from a browser-tokenised payment, without leaving the page.
+   *
+   * The order is re-read by number AND access token, so a token alone cannot
+   * pay for someone else's order, and a non-pending order is refused rather
+   * than charged twice.
+   */
+  async payWithToken(orderNumber: string, accessToken: string, providerId: string, token: string) {
+    const order = await orderByNumberAndToken(orderNumber, accessToken);
+    if (order.status !== 'pending') throw new ConflictError(`Order is ${order.status}, not payable.`, 'order');
+    const { gateway, credential } = await requireGateway(providerId);
+    if (!gateway.payWithToken) {
+      throw new ValidationError(`${gateway.displayName()} cannot take an in-page payment — it uses a hosted checkout.`);
+    }
+    const paymentId = await gateway.payWithToken(
+      { id: order.id, number: order.number, total: order.total, currency: order.currency },
+      credential,
+      token,
+      `tok_${order.id}`,
+    );
+    await db.payment.update({ where: { orderId: order.id }, data: { txnId: paymentId, method: providerId, status: 'paid' } });
+    await db.order.update({ where: { id: order.id }, data: { status: 'processing' } });
+    return { orderNumber: order.number, paymentId, status: 'paid' as const };
+  },
+
   // The /checkout/return path for redirect gateways — the endpoint 1.x's
   // providers built URLs to but never registered. Verifies with the
   // provider (never trusts the query string), finalizes, and hands back the

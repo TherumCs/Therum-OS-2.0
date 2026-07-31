@@ -246,7 +246,27 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
   // is publishable by definition, and a not-ready provider returns its reason
   // so the card can say why instead of showing a button that cannot work.
   app.get('/shop/wallets', async (_req, reply) => {
-    reply.send({ providers: await walletPayments.availableProviders() });
+    const providers = await walletPayments.availableProviders();
+    // Include the client config: the card cannot load a provider's SDK
+    // without its publishable key, and that key is public by definition.
+    const withClient = await Promise.all(
+      providers.map(async (p) => ({ ...p, client: await walletPayments.clientConfig(p.provider) })),
+    );
+    reply.send({ providers: withClient });
+  });
+
+  // Settle in place, from a token the provider's browser SDK produced. Public
+  // like the rest of the storefront checkout: the order's own access token is
+  // the credential, exactly as wallet-session works.
+  app.post('/shop/checkout/pay-token', async (req, reply) => {
+    const input = z.object({
+      orderNumber: z.string().min(1).max(60),
+      accessToken: z.string().min(1).max(200),
+      provider: z.enum(['stripe', 'square']),
+      token: z.string().min(1).max(500),
+    }).parse(req.body);
+    const { paymentGatewayService } = await import('../../services/paymentGateway.service.js');
+    reply.send(await paymentGatewayService.payWithToken(input.orderNumber, input.accessToken, input.provider, input.token));
   });
 
   app.post('/shop/checkout/wallet-session', async (req, reply) => {
