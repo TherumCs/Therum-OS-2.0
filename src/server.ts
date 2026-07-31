@@ -26,6 +26,7 @@ import { capabilityRoutes } from './api/routes/capabilities.js';
 import { editionRoutes } from './api/routes/edition.js';
 import { settingsRoutes } from './api/routes/settings.js';
 import { systemRoutes } from './api/routes/system.js';
+import { hostRoutes } from './api/routes/host.js';
 import { meRoutes } from './api/routes/me.js';
 import { wooCompatRoutes } from './api/routes/wooCompat.js';
 import { shopifyCompatRoutes } from './api/routes/shopifyCompat.js';
@@ -215,6 +216,7 @@ export async function buildServer() {
   await app.register(editionRoutes, { prefix: '/api' });
   await app.register(settingsRoutes, { prefix: '/api' });
   await app.register(systemRoutes, { prefix: '/api' });
+  await app.register(hostRoutes, { prefix: '/api' });
   await app.register(meRoutes, { prefix: '/api' });
   // Inbound store bridges — partners call these paths verbatim, so they are
   // registered at the root rather than under /api.

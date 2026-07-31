@@ -26,6 +26,9 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   // ecosystem, so it was always going to render empty. Comes back if/when
   // there's an extension system to actually be compatible with something.
   { id: 'security', label: 'Security', description: 'Hardening this install actually has.', icon: 'shield' },
+  // Reports on the HOST, where Security above configures the APP. Kept next to
+  // it because that is where you look when the question is "is this box ok".
+  { id: 'advisor', label: 'Advisor', description: 'Scans this machine for security, compression and performance issues.', icon: 'gauge' },
   { id: 'permissions', label: 'Permissions', description: 'Role capabilities.', icon: 'users' },
   { id: 'performance', label: 'Performance', description: 'Cache, lazy load, defer JS.', icon: 'gauge' },
   { id: 'editor-defaults', label: 'Editor Defaults', description: 'Content builder preferences.', icon: 'edit2' },
