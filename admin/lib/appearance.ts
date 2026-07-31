@@ -27,7 +27,7 @@ export interface Appearance {
   intensity: 'subtle' | 'normal' | 'vivid';
 
   topbarBehavior: 'default' | 'sticky';
-  contentWidth: 'full' | 'normal' | 'narrow';
+  contentWidth: 'expanded' | 'full' | 'normal' | 'narrow';
   cardGridGap: 'compact' | 'comfortable' | 'spacious';
 
   background: 'solid' | 'subtle-gradient';

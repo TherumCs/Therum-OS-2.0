@@ -26,6 +26,13 @@ import { BASE_PATH } from '../../lib/session';
 // running browser HAS it — redeclaring the shape conflicts with the built-in.
 type StartViewTransition = (cb: () => void | Promise<void>) => unknown;
 
+// The longest the old screen may stay frozen waiting for the new one. A view
+// transition holds a snapshot of the page while its callback is pending, so
+// this is a cap on perceived hang, not a style choice. Roughly one animation
+// length: past that the transition is no longer covering a swap, it is just
+// stopping the UI from responding.
+const MAX_FREEZE_MS = 250;
+
 export function ViewTransitions() {
   const router = useRouter();
 
@@ -83,10 +90,38 @@ export function ViewTransitions() {
       try {
         start.call(document, () => {
           go();
-          // Resolving on the next frame lets React commit before the captured
-          // "new" state is taken; without it the transition snapshots the old
-          // screen twice and nothing appears to move.
-          return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+          // WAIT FOR THE CONTENT TO ACTUALLY CHANGE, with a ceiling.
+          //
+          // This used to resolve after a single requestAnimationFrame, on the
+          // theory that one frame was enough for React to commit. It is not:
+          // router.push in the App Router kicks off a server round-trip, so a
+          // frame later the DOM still holds the OLD page. The transition
+          // therefore captured old -> old, animated nothing visible, and the
+          // real content snapped in afterwards — while the browser held a
+          // frozen snapshot for the whole animation. That is exactly the
+          // "everything freezes" symptom.
+          //
+          // Resolving when #th-content actually mutates makes the animation
+          // play on the real new screen. The timeout is the important half:
+          // without it a slow route would hold the frozen snapshot for as
+          // long as the fetch takes, turning a slow page into a hung one.
+          // Past the cap we resolve anyway and let the rest stream in.
+          return new Promise<void>((resolve) => {
+            const target = document.getElementById('th-content');
+            if (!target) { requestAnimationFrame(() => resolve()); return; }
+            let done = false;
+            const finish = (): void => {
+              if (done) return;
+              done = true;
+              observer.disconnect();
+              clearTimeout(timer);
+              // One more frame so the mutation is painted, not just applied.
+              requestAnimationFrame(() => resolve());
+            };
+            const observer = new MutationObserver(finish);
+            observer.observe(target, { childList: true, subtree: true });
+            const timer = setTimeout(finish, MAX_FREEZE_MS);
+          });
         });
       } catch {
         // Transition unavailable or refused — navigate anyway. Motion is the

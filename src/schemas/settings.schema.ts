@@ -21,7 +21,7 @@ export const AppearanceInput = z.object({
   intensity: z.enum(['subtle', 'normal', 'vivid']).optional(),
 
   topbarBehavior: z.enum(['default', 'sticky']).optional(),
-  contentWidth: z.enum(['full', 'normal', 'narrow']).optional(),
+  contentWidth: z.enum(['expanded', 'full', 'normal', 'narrow']).optional(),
   cardGridGap: z.enum(['compact', 'comfortable', 'spacious']).optional(),
 
   background: z.enum(['solid', 'subtle-gradient']).optional(),

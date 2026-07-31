@@ -1576,6 +1576,13 @@ input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: 
 /* ── Layout ────────────────────────────────────────────────────────── */
 #th-shell[data-content-width='normal'] main > * { max-width: 1180px; margin-inline: auto; }
 #th-shell[data-content-width='narrow'] main > * { max-width: 900px;  margin-inline: auto; }
+/* Expanded is wider than Full. Full is already uncapped, so the only width
+   left to reclaim on a large display is the 64px page gutter — which is why
+   this is a padding change rather than another max-width tier. */
+#th-shell[data-content-width='expanded'] #th-content {
+  padding-left: var(--th-space-24);
+  padding-right: var(--th-space-24);
+}
 
 /* The card grids that actually exist: list/media/content pages render
    .th-lp-view-grid, the dashboard renders .th-bento. These two rules used to
@@ -1605,6 +1612,25 @@ input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: 
 #th-shell { --th-dur: 220ms; --th-ease: cubic-bezier(.32, .72, 0, 1); }
 #th-shell[data-transition-speed='fast'] { --th-dur: 120ms; }
 #th-shell[data-transition-speed='slow'] { --th-dur: 380ms; }
+
+/* The sidebar honours Motion and Transition speed like everything else. It
+   had no transitions at all, so nav items snapped between states while the
+   rest of the admin eased — and neither Appearance > Motion control had any
+   effect on the rail. Colour and background only: transitioning width or
+   padding here would fight the fold. */
+#th-shell #th-sb :is(.th-sb-item, .th-sb-arrow, .th-sb-edit-btn, .th-sb-fold, .th-sb-section-name) {
+  transition: background-color var(--th-dur) var(--th-ease), color var(--th-dur) var(--th-ease),
+    border-color var(--th-dur) var(--th-ease), opacity var(--th-dur) var(--th-ease);
+}
+#th-shell #th-sb .th-sb-item svg { transition: color var(--th-dur) var(--th-ease); }
+/* Folding is the one place a size change should animate — it is a deliberate,
+   user-initiated change of shape, not incidental movement. */
+#th-shell #th-sb { transition: width var(--th-dur) var(--th-ease); }
+#th-shell #th-main { transition: margin-left var(--th-dur) var(--th-ease); }
+/* Motion off means off — including the rail. */
+#th-shell[data-motion='off'] #th-sb,
+#th-shell[data-motion='off'] #th-main,
+#th-shell[data-motion='off'] #th-sb * { transition: none !important; }
 
 #th-shell :is(a, button, .th-btn, .th-card, .th-panel, .th-tab, input, select, .th-swatch) {
   transition:
@@ -1829,3 +1855,49 @@ tr:hover .th-rowactions, tr:focus-within .th-rowactions { opacity: 1; }
 .th-onb-app__check { flex: 0 0 20px; width: 20px; height: 20px; border-radius: 6px; margin-top: 2px;
   border: 1px solid var(--th-line); display: grid; place-items: center; font-size: 12px; }
 .th-onb-app.is-on .th-onb-app__check { background: var(--th-accent-btn, #3858e9); border-color: transparent; color: #fff; }
+
+/* ── Settings > Advisor — host scan findings ───────────────────────────
+   Severity is carried by a left border and a chip rather than by colouring
+   the whole row: a wall of red reads as "everything is broken" and stops
+   being information. */
+.th-adv { display: flex; flex-direction: column; gap: var(--th-space-16); }
+.th-adv__bar { display: flex; align-items: center; gap: var(--th-space-12); flex-wrap: wrap; }
+.th-adv__meta { font-size: var(--th-fs-xs); color: var(--th-muted); }
+.th-adv__idle, .th-adv__clean { font-size: var(--th-fs-sm); color: var(--th-ink-2); margin: 0; max-width: 60ch; }
+.th-adv__error { font-size: var(--th-fs-sm); color: var(--th-danger-ink); background: var(--th-danger-bg); padding: var(--th-space-10) var(--th-space-12); border-radius: var(--th-r-sm); margin: 0; }
+
+.th-adv__counts { display: flex; gap: var(--th-space-8); flex-wrap: wrap; }
+.th-adv__count { display: inline-flex; align-items: baseline; gap: var(--th-space-6); padding: var(--th-space-6) var(--th-space-10); border-radius: var(--th-r-sm); border: 1px solid var(--th-line); font-size: var(--th-fs-xs); color: var(--th-ink-2); }
+.th-adv__count strong { font-size: var(--th-fs-sm); color: var(--th-ink); }
+/* A zero count stays visible but recedes — the shape of the row should not
+   change between scans, or the eye has to re-find everything. */
+.th-adv__count[data-zero='true'] { opacity: .45; }
+.th-adv__count--critical strong, .th-adv__sev--critical { color: var(--th-danger-ink); }
+.th-adv__count--high strong, .th-adv__sev--high { color: var(--th-danger-ink); }
+.th-adv__count--medium strong, .th-adv__sev--medium { color: var(--th-warning-ink); }
+.th-adv__count--low strong, .th-adv__sev--low { color: var(--th-ink-2); }
+.th-adv__count--pass strong { color: var(--th-success-ink); }
+
+.th-adv__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--th-space-8); }
+.th-adv__item { border: 1px solid var(--th-line); border-left-width: 3px; border-radius: var(--th-r-sm); background: var(--th-surface); padding: var(--th-space-12); }
+.th-adv__item--critical, .th-adv__item--high { border-left-color: var(--th-danger-text); }
+.th-adv__item--medium { border-left-color: var(--th-warning-text); }
+.th-adv__item--low { border-left-color: var(--th-line-2); }
+
+.th-adv__head { display: flex; align-items: center; gap: var(--th-space-10); width: 100%; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.th-adv__sev { font-size: var(--th-fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; flex-shrink: 0; }
+.th-adv__title { font-size: var(--th-fs-sm); font-weight: 600; color: var(--th-ink); flex: 1; min-width: 0; }
+.th-adv__axis { font-size: var(--th-fs-2xs); color: var(--th-muted); flex-shrink: 0; }
+.th-adv__detail { margin: var(--th-space-6) 0 0; font-size: var(--th-fs-xs); color: var(--th-ink-2); font-family: var(--th-font-mono); }
+
+.th-adv__body { margin-top: var(--th-space-12); padding-top: var(--th-space-12); border-top: 1px solid var(--th-line); }
+.th-adv__why { margin: 0 0 var(--th-space-10); font-size: var(--th-fs-sm); color: var(--th-ink-2); max-width: 70ch; }
+.th-adv__fixlabel { font-size: var(--th-fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--th-muted); margin-bottom: var(--th-space-6); }
+/* Fixes are commands and config blocks — they must wrap rather than scroll
+   sideways, or half the line is invisible on a narrow settings column. */
+.th-adv__fix { margin: 0; padding: var(--th-space-10) var(--th-space-12); background: var(--th-surface-2); border: 1px solid var(--th-line); border-radius: var(--th-r-sm); font-family: var(--th-font-mono); font-size: var(--th-fs-xs); color: var(--th-ink); white-space: pre-wrap; word-break: break-word; }
+
+.th-adv__skip { font-size: var(--th-fs-xs); color: var(--th-muted); }
+.th-adv__skip summary { cursor: pointer; }
+.th-adv__skip ul { margin: var(--th-space-8) 0 0; padding-left: var(--th-space-16); display: flex; flex-direction: column; gap: var(--th-space-4); }
+.th-adv__skip code { font-family: var(--th-font-mono); color: var(--th-ink-2); }

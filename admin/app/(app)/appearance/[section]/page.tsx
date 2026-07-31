@@ -77,7 +77,7 @@ const SECTIONS: Record<string, { title: string; sub: string; render: (a: Appeara
             label="Content width"
             field="contentWidth"
             initial={a.contentWidth}
-            options={[['full', 'Full'], ['normal', 'Normal'], ['narrow', 'Narrow']]}
+            options={[['narrow', 'Narrow'], ['normal', 'Normal'], ['full', 'Full'], ['expanded', 'Expanded']]}
           />
           <Segmented
             label="Card grid gap"

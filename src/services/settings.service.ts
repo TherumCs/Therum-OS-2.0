@@ -47,7 +47,7 @@ export interface Appearance {
 
   // Layout
   topbarBehavior: 'default' | 'sticky'; // wires the already-built [data-topbar-style] CSS
-  contentWidth: 'full' | 'normal' | 'narrow'; // 'full' = today's real default (uncapped) — a
+  contentWidth: 'expanded' | 'full' | 'normal' | 'narrow'; // 'full' = today's real default (uncapped) — a
   // narrower reading width is the opt-in, not the other way, so shipping this can't silently
   // shrink every existing page.
   cardGridGap: 'compact' | 'comfortable' | 'spacious';
