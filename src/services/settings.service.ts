@@ -253,6 +253,12 @@ export interface Commerce {
 
 /** Counter's own storefront presentation — see CounterSettingsInput. */
 export interface CounterSettings {
+  /** Offered when no connected provider quotes real rates. */
+  shippingMethods: { id: string; name: string; detail: string; amount: number; enabled: boolean }[];
+  /** Subtotal (minor units) at or above which Standard ships free. 0 = off. */
+  freeShippingOver: number;
+  /** Flat tax percent applied when no provider quotes tax. 0 = none. */
+  taxRatePct: number;
   cartStyle: 'mini' | 'sidebar';
   cartSidebarReveal: 'overlay' | 'push';
   cartSidebarGround: string;
@@ -355,6 +361,15 @@ const COMMERCE_DEFAULTS: Commerce = { currency: 'USD', locale: null, minMarginPc
 
 const COUNTER_KEY = 'counter';
 const COUNTER_DEFAULTS: CounterSettings = {
+  // Matches the checkout preview (previews/checkout-experience.html) so a new
+  // store can sell on day one. A connected provider overrides these entirely.
+  shippingMethods: [
+    { id: 'standard', name: 'Standard', detail: '5–7 business days', amount: 0, enabled: true },
+    { id: 'express', name: 'Express', detail: '2–3 business days', amount: 999, enabled: true },
+    { id: 'overnight', name: 'Overnight', detail: 'Next business day', amount: 2499, enabled: true },
+  ],
+  freeShippingOver: 0,
+  taxRatePct: 0,
   // Sidebar + push: the ported header already ships `c-header__cart--sidebar`
   // and a `js-cart-sidebar-open` hook, so that is the presentation this site's
   // markup was built for, and push is what Bam asked the drawer to do.

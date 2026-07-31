@@ -49,6 +49,11 @@ export const CreateOrderInput = z.object({
   // always have one, and the Woo importer writes its own. The STOREFRONT
   // requires it — see the check in order.service.create.
   shipAddress: ShipAddressInput.optional(),
+  /** Shipping and tax as quoted at checkout, in minor units. Added to the
+   *  order total — without them the order charges the bare item subtotal. */
+  shippingTotal: z.number().int().min(0).optional(),
+  taxTotal: z.number().int().min(0).optional(),
+  shippingMethod: z.string().max(80).optional(),
   items: z.array(OrderItemInput).min(1, 'an order needs at least one item'),
 });
 

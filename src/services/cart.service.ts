@@ -4,6 +4,7 @@ import type { ShipAddressInput } from '../schemas/order.schema.js';
 import { redis } from '../lib/redis.js';
 import { orderService } from './order.service.js';
 import { contextFor, defaultPipeline } from '../counter/totalsPipeline.js';
+import { shippingRateService } from '../counter/shippingRates.js';
 import { settingsService } from './settings.service.js';
 import { couponService } from './coupon.service.js';
 import { milieuService } from './milieu.service.js';
@@ -42,6 +43,14 @@ interface CartState {
    * one is proof of identity, the other is a receipt address.
    */
   customerId?: string | null;
+  /**
+   * Destination and chosen speed, kept on the CART so totals reflect what the
+   * shopper will actually be charged before they pay. Without this, shipping
+   * was quoted only after the order existed — the total agreed to at checkout
+   * was not the total owed.
+   */
+  shipAddress?: ShipAddressInput | null;
+  shippingMethodId?: string | null;
   createdAt: string;
 }
 
@@ -238,6 +247,31 @@ async function computeTotals(state: CartState): Promise<CartTotals> {
     })),
     storeCurrency,
   );
+  // Shipping and tax are set BEFORE the pipeline runs: its shipping/tax steps
+  // round and total whatever is in the context, they do not source it. That is
+  // the seam a provider plugs into.
+  //
+  // Uses the LOCAL subtotal, not ctx.subtotal: subtotalStep runs inside the
+  // pipeline below, so ctx.subtotal is still 0 here. Reading it computed tax on
+  // zero and silently returned 0 for every cart — shipping hid the bug, because
+  // a flat rate does not depend on the subtotal.
+  if (state.shipAddress) {
+    const rates = await shippingRateService.rates({
+      lines: ctx.lines,
+      subtotal,
+      currency: storeCurrency,
+      address: state.shipAddress,
+    });
+    const chosen = rates.find((r) => r.id === state.shippingMethodId) ?? rates[0];
+    if (chosen) {
+      ctx.shipping = chosen.amount;
+      // A provider that quotes its own tax wins over the configured rate.
+      ctx.tax =
+        typeof chosen.taxAmount === 'number'
+          ? chosen.taxAmount
+          : await shippingRateService.tax(Math.max(0, subtotal - (discount?.amount ?? 0)));
+    }
+  }
   await defaultPipeline(candidates).run(ctx);
 
   return {
@@ -364,10 +398,45 @@ export const cartService = {
    * an account (or inherit its member pricing), but a verified session is
    * exactly the proof that rule was waiting for.
    */
+  /**
+   * Destination and chosen speed. Returns the rates that apply so the caller
+   * can render the picker and the recomputed totals in one round trip.
+   */
+  async setShipping(token: string, shipAddress: ShipAddressInput, methodId?: string) {
+    const state = await load(token);
+    state.shipAddress = shipAddress;
+    // A method id from a previous quote may not exist in the new one (a
+    // different country returns different rates), so it is validated against
+    // what this address actually offers rather than trusted.
+    const totalsBefore = await computeTotals(state);
+    const rates = await shippingRateService.rates({
+      lines: totalsBefore.lines.map((l, i) => ({
+        itemId: String(i),
+        productId: l.variantId,
+        variantId: l.variantId,
+        quantity: l.quantity,
+        unitPrice: l.unitPrice,
+        lineTotal: l.lineTotal,
+      })),
+      subtotal: totalsBefore.subtotal,
+      currency: (await settingsService.getCommerce()).currency,
+      address: shipAddress,
+    });
+    const valid = rates.find((r) => r.id === methodId);
+    state.shippingMethodId = valid ? valid.id : (rates[0]?.id ?? null);
+    await save(state);
+    return { rates, selected: state.shippingMethodId, totals: await computeTotals(state) };
+  },
+
   async checkout(token: string, email?: string, customerId?: string, shipAddress?: ShipAddressInput) {
     const state = await load(token);
     if (state.items.length === 0) throw new ValidationError('Cart is empty.', 'cart');
     if (email) state.customerEmail = email;
+    // Adopt the address the caller is checking out with BEFORE computing
+    // totals, so shipping and tax are priced even when the client never called
+    // /cart/shipping first. Otherwise the order is created for the bare item
+    // subtotal and the shopper is undercharged.
+    if (shipAddress) state.shipAddress = shipAddress;
 
     const totals = await computeTotals(state);
     const short = totals.lines.filter((l) => l.available < l.quantity);
@@ -396,6 +465,12 @@ export const cartService = {
       // required here even though the schema allows it to be omitted for
       // admin-created and imported orders.
       ...(shipAddress ? { shipAddress } : {}),
+      // The quoted shipping and tax, carried onto the order. Without these the
+      // order charged the bare item subtotal while checkout displayed the full
+      // amount — the cart said $83.45 and the order was created for $54.00.
+      shippingTotal: totals.shipping,
+      taxTotal: totals.tax,
+      ...(state.shippingMethodId ? { shippingMethod: state.shippingMethodId } : {}),
       ...(customerId ? { customerId } : {}),
       items: state.items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
     });

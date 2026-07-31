@@ -339,7 +339,27 @@ export const CommerceSettingsInput = z.object({
 // currency change and a card-layout change look like the same kind of edit,
 // and the storefront ends up reading a settings blob where two thirds of the
 // keys do not concern it.
+// ── Shipping + tax ────────────────────────────────────────────────────────
+// A connected provider quotes the real rate and wins; these are what the store
+// offers when none does (see counter/shippingRates.ts). Both are settable
+// because a store must be able to sell before it has a fulfillment provider
+// connected, and because some operators price shipping themselves regardless.
+export const ShippingMethodInput = z.object({
+  id: z.string().min(1).max(40),
+  name: z.string().min(1).max(60),
+  detail: z.string().max(120).default(''),
+  /** Minor units, like all money here. */
+  amount: z.number().int().min(0),
+  enabled: z.boolean().default(true),
+});
+
 export const CounterSettingsInput = z.object({
+  shippingMethods: z.array(ShippingMethodInput).max(12).optional(),
+  /** Subtotal (minor units) at or above which Standard ships free. 0 = off. */
+  freeShippingOver: z.number().int().min(0).optional(),
+  /** Flat tax percentage applied when no provider quotes tax. 0 = none. */
+  taxRatePct: z.number().min(0).max(100).optional(),
+
   // ── Cart ────────────────────────────────────────────────────────────────
   /** 'mini' drops a panel under the bag; 'sidebar' opens a full-height drawer. */
   cartStyle: z.enum(['mini', 'sidebar']).optional(),

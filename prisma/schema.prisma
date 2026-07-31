@@ -267,6 +267,14 @@ model Order {
   // minted at creation, accepted by /order-received via constant-time
   // compare — a guest's receipt link works without an account.
   accessToken    String?     @unique @map("access_token")
+  // Shipping and tax as CHARGED, in minor units, and the speed the shopper
+  // picked. Held on the order because `total` is what was actually taken and
+  // must be reproducible from its parts — without these, a receipt could not
+  // explain its own number, and the order total silently dropped both (the
+  // cart said $83.45 and the order was created for $54.00).
+  shippingTotal  Int         @default(0) @map("shipping_total")
+  taxTotal       Int         @default(0) @map("tax_total")
+  shippingMethod String?     @map("shipping_method")
   // Sum of succeeded refunds in minor units; refundable = total - this.
   refundedTotal  Int         @default(0) @map("refunded_total")
   // Guest contact email (Counter C2) — a storefront order's billing email,

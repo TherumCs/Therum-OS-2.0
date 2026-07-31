@@ -157,7 +157,12 @@ export const orderService = {
             // shipmentService reads this to create shipments; without it a
             // shipment is created empty and can never be quoted.
             ...(input.shipAddress ? { shipAddress: input.shipAddress } : {}),
-            total,
+            // Shipping and tax are ADDED to the item total, and stored so the
+            // receipt can explain the number. `total` is what is charged.
+            shippingTotal: input.shippingTotal ?? 0,
+            taxTotal: input.taxTotal ?? 0,
+            shippingMethod: input.shippingMethod ?? null,
+            total: total + (input.shippingTotal ?? 0) + (input.taxTotal ?? 0),
             ...(memberAmount > 0
               ? {
                   discountPct: discount?.pct ?? 0,

@@ -25,6 +25,13 @@ const IdentityInput = z.object({
   email: z.string().email().max(320),
 });
 
+const ShippingInput = z.object({
+  cartToken: TOKEN,
+  shipAddress: ShipAddressInput,
+  /** Omitted on the first call — the cheapest rate is selected by default. */
+  methodId: z.string().max(80).optional(),
+});
+
 const CheckoutInput = z.object({
   cartToken: TOKEN,
   email: z.string().email().max(320).optional(),
@@ -106,6 +113,14 @@ export async function cartRoutes(app: FastifyInstance): Promise<void> {
   // Cart → order. Returns the order number + guest access token — the
   // credentials the storefront needs for /api/checkout/intent and the
   // receipt. Double-submit safe: the cart token is the order idempotency key.
+  // Rates for a destination, and the shopper's chosen speed. Returns the
+  // options AND the recomputed totals together: a picker that shows a price
+  // the summary disagrees with is worse than no picker.
+  app.post('/cart/shipping', async (req, reply) => {
+    const input = ShippingInput.parse(req.body);
+    reply.send(await cartService.setShipping(input.cartToken, input.shipAddress, input.methodId));
+  });
+
   app.post('/cart/checkout', async (req, reply) => {
     const input = CheckoutInput.parse(req.body);
     // A signed-in shopper's order belongs to their account, so it shows up in

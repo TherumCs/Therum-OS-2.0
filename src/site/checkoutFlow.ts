@@ -29,6 +29,17 @@ export const CHECKOUT_FLOW_CSS = `
 .co-field input{display:block;width:100%;box-sizing:border-box;margin-top:8px;padding:10px 12px;
   border:1px solid var(--ln,#e5e7eb);border-radius:8px;font:inherit;font-size:14px}
 .co-row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.co-shiprow{display:flex;align-items:center;gap:12px;padding:12px 14px;margin-top:8px;cursor:pointer;
+  border:1px solid var(--ln,#e5e7eb);border-radius:10px}
+.co-shiprow.active{border-color:var(--tx,#111);box-shadow:inset 0 0 0 1px var(--tx,#111)}
+.co-shipl{display:flex;flex-direction:column;flex:1;min-width:0}
+.co-shipname{font-weight:600;font-size:14px}
+.co-shipsub{font-size:12px;color:var(--tx3,#6b7280)}
+.co-shipprice{font-variant-numeric:tabular-nums;font-size:14px}
+.co-sums{display:flex;flex-direction:column;gap:2px;margin-left:auto;padding-right:14px}
+.co-sumrow{display:flex;gap:14px;justify-content:space-between;font-size:12px;color:var(--tx3,#6b7280);
+  font-variant-numeric:tabular-nums}
+@media (max-width:820px){.co-sums{display:none}}
 @media (max-width:520px){.co-row2{grid-template-columns:1fr}}
 .co-coupon{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0 4px;padding:12px 0;
   border-top:1px solid var(--ln,#e5e7eb)}
@@ -110,6 +121,11 @@ export function checkoutFlowMarkup(): string {
       <div class="co-meta" id="co-mode-label">Cart</div>
       <div class="co-sub" id="co-count">—</div>
     </div>
+    <div class="co-sums" id="co-sums" hidden>
+      <div class="co-sumrow"><span>Subtotal</span><span id="co-sum-sub">—</span></div>
+      <div class="co-sumrow"><span>Shipping</span><span id="co-sum-ship">—</span></div>
+      <div class="co-sumrow" id="co-sum-taxrow" hidden><span>Tax</span><span id="co-sum-tax">—</span></div>
+    </div>
     <div class="co-total" id="co-total">—</div>
     <button id="co-cta" type="button">Checkout</button>
   </div>
@@ -165,6 +181,19 @@ export const CHECKOUT_FLOW_RUNTIME = `
   function setSummary(t, mode){
     if (!el('co-total')) return;
     el('co-total').textContent = fmt(t.total);
+    var sums = el('co-sums');
+    if (sums) {
+      // Shown only once an address exists — before that, shipping and tax are
+      // genuinely unknown, and a breakdown reading "Free" would be a guess.
+      var known = mode === 'pay' && (t.shipping > 0 || t.tax > 0 || SHIP_QUOTED);
+      sums.hidden = !known;
+      if (known) {
+        el('co-sum-sub').textContent = fmt(t.subtotal);
+        el('co-sum-ship').textContent = t.shipping > 0 ? fmt(t.shipping) : 'Free';
+        el('co-sum-taxrow').hidden = !(t.tax > 0);
+        if (t.tax > 0) el('co-sum-tax').textContent = fmt(t.tax);
+      }
+    }
     var n = t.lines.reduce(function(a,l){ return a + l.quantity; }, 0);
     el('co-count').textContent = n + (n === 1 ? ' item' : ' items');
     el('co-mode-label').textContent = mode === 'pay' ? 'Checkout' : 'Cart';
@@ -303,9 +332,61 @@ export const CHECKOUT_FLOW_RUNTIME = `
       + '<div class="co-row2"><input id="co-postal" placeholder="Postal code" autocomplete="shipping postal-code">'
       + '<input id="co-country" placeholder="Country (US)" maxlength="2" autocomplete="shipping country"></div>'
       + '</div>'
+      + '<div class="co-field" id="co-ship-field" hidden><label>Shipping method</label>'
+      + '<div id="co-ship-rows"></div></div>'
       + '<div class="co-field"><label>Payment</label>' + (methods || '<p class="co-vr">No payment methods are connected yet.</p>') + '</div>'
       + '<div class="co-act"><button class="btn" id="co-place" type="button"' + (avail.length ? '' : ' disabled') + '>Place order · ' + fmt(t.total) + '</button></div>'
       + '<div id="co-msg"></div>';
+  }
+
+  var SHIP_QUOTED = false;
+
+  function shipFieldsFrom(scope){
+    function v(id){ var n = scope.querySelector(id); return n && n.value ? n.value.trim() : ''; }
+    var a = { name: v('#co-name'), line1: v('#co-line1'), city: v('#co-city'), country: v('#co-country').toUpperCase() };
+    var l2 = v('#co-line2'); if (l2) a.line2 = l2;
+    var rg = v('#co-region'); if (rg) a.region = rg;
+    var pc = v('#co-postal'); if (pc) a.postalCode = pc;
+    return a;
+  }
+
+  function shipComplete(a){ return !!(a.name && a.line1 && a.city && a.country.length === 2); }
+
+  // Ask for rates once the address is complete enough to quote against. The
+  // server picks the cheapest when no method is passed, so the first render
+  // already has a selection rather than an empty picker.
+  async function quoteShipping(scope, methodId){
+    var addr = shipFieldsFrom(scope);
+    if (!shipComplete(addr)) return;
+    var field = scope.querySelector('#co-ship-field');
+    var rows = scope.querySelector('#co-ship-rows');
+    if (!rows) return;
+    try {
+      var body = { cartToken: tok(), shipAddress: addr };
+      if (methodId) body.methodId = methodId;
+      var out = await api('/cart/shipping', { method:'POST', body: JSON.stringify(body) });
+      SHIP_QUOTED = true;
+      rows.innerHTML = (out.rates || []).map(function(r){
+        return '<label class="co-shiprow' + (r.id === out.selected ? ' active' : '') + '">'
+          + '<input type="radio" name="co-ship" value="' + r.id + '"' + (r.id === out.selected ? ' checked' : '') + '>'
+          + '<span class="co-shipl"><span class="co-shipname">' + r.name + '</span>'
+          + '<span class="co-shipsub">' + (r.detail || '') + '</span></span>'
+          + '<span class="co-shipprice">' + (r.amount > 0 ? fmt(r.amount) : 'Free') + '</span></label>';
+      }).join('');
+      if (field) field.hidden = false;
+      rows.querySelectorAll('input[name=co-ship]').forEach(function(radio){
+        radio.addEventListener('change', function(){ quoteShipping(scope, radio.value); });
+      });
+      setSummary(out.totals, 'pay');
+      var place = scope.querySelector('#co-place');
+      if (place && !place.disabled) {
+        place.textContent = 'Place order · ' + fmt(out.totals.total);
+        setCta(place.textContent, function(){ place.click(); }, false);
+      }
+    } catch (e) {
+      // A quote that fails must not block checkout — the order still carries
+      // the address, and shipping is settled at fulfillment.
+    }
   }
 
   function wirePay(scope){
@@ -313,6 +394,10 @@ export const CHECKOUT_FLOW_RUNTIME = `
     if (back) back.addEventListener('click', function(){ toCart(true); });
     scope.querySelectorAll('input[name=co-method]').forEach(function(r){
       r.addEventListener('change', function(){ F = { id: r.value, provider: r.dataset.p, label: r.dataset.l }; });
+    });
+    ['#co-name','#co-line1','#co-line2','#co-city','#co-region','#co-postal','#co-country'].forEach(function(sel){
+      var n = scope.querySelector(sel);
+      if (n) n.addEventListener('change', function(){ quoteShipping(scope); });
     });
     var place = scope.querySelector('#co-place');
     if (place) setCta(place.textContent, function(){ place.click(); }, place.disabled);
