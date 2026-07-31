@@ -317,6 +317,27 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS): st
         <button class="card-picker__back" type="button" data-evolve-close aria-label="Back">‹</button>
         <div class="card-picker__rows"></div>
         <button class="card-btn card-btn--solid" type="button" data-evolve-confirm disabled>Choose an option</button>
+      </div>
+      <div class="card-pay" data-evolve-face="pay" hidden>
+        <button class="card-picker__back" type="button" data-pay-back aria-label="Back">‹</button>
+        <div class="card-pay__sum" data-pay-sum></div>
+        <!-- Quick checkout completes HERE. The shopper never leaves the card,
+             which is the whole point: the previous flow ended by handing the
+             variant to checkoutFlow.ts, which opened the cart drawer. -->
+        <div class="card-pay__wallets" data-pay-wallets hidden></div>
+        <input class="card-pay__in" data-pay-email type="email" placeholder="Email for your receipt" autocomplete="email">
+        <input class="card-pay__in" data-pay-name placeholder="Full name" autocomplete="shipping name">
+        <input class="card-pay__in" data-pay-line1 placeholder="Street address" autocomplete="shipping address-line1">
+        <div class="card-pay__row">
+          <input class="card-pay__in" data-pay-city placeholder="City" autocomplete="shipping address-level2">
+          <input class="card-pay__in" data-pay-region placeholder="State" autocomplete="shipping address-level1">
+        </div>
+        <div class="card-pay__row">
+          <input class="card-pay__in" data-pay-postal placeholder="ZIP" autocomplete="shipping postal-code">
+          <input class="card-pay__in" data-pay-country placeholder="US" maxlength="2" autocomplete="shipping country">
+        </div>
+        <button class="card-btn card-btn--solid" type="button" data-pay-go>Pay</button>
+        <p class="card-pay__msg" data-pay-msg></p>
       </div>` : '';
 
   const actionBlock = cfg.action === 'none' || cfg.action === 'overlay'
@@ -532,14 +553,16 @@ export const CARD_EVOLVE_RUNTIME = `
         && (colors.length < 2 || chosen.c !== null)
         && (sizes.length < 2 || chosen.s !== null);
       confirm.disabled = !ready;
-      confirm.textContent = ready ? 'Add to cart'
+      confirm.textContent = ready ? 'Buy now'
         : (v && v.a <= 0) ? 'Out of stock'
         : 'Choose an option';
       // The price follows the choice, so a variant that costs more is not a
       // surprise at the sheet.
       if (priceEl) priceEl.textContent = v ? money(v.p) : priceWas;
-      if (ready) confirm.setAttribute('data-quick-buy', v.i);
-      else confirm.removeAttribute('data-quick-buy');
+      // Deliberately NOT data-quick-buy: that attribute is what checkoutFlow
+      // picks up to open the cart drawer, and quick checkout must finish in
+      // the card. The chosen variant is held here instead.
+      chosenVariant = ready ? v : null;
     }
 
     rowsEl.addEventListener('click', function(e){
@@ -554,6 +577,8 @@ export const CARD_EVOLVE_RUNTIME = `
     function face(which){
       rest.hidden = which !== 'rest';
       pick.hidden = which !== 'pick';
+      var payFace = root.querySelector('[data-evolve-face=\"pay\"]');
+      if (payFace) payFace.hidden = which !== 'pay';
       if (which === 'rest' && priceEl) priceEl.textContent = priceWas;
     }
     root.querySelector('[data-evolve-open]').addEventListener('click', function(){ draw(); face('pick'); });
@@ -562,10 +587,89 @@ export const CARD_EVOLVE_RUNTIME = `
     // is a mode, and every mode needs a way out that is not a click target.
     root.addEventListener('keydown', function(e){ if (e.key === 'Escape') face('rest'); });
 
-    // The confirm button carries data-quick-buy once a variant resolves, so
-    // checkoutFlow.ts picks the click up on its own and opens the sheet. This
-    // only puts the card back to rest behind it.
-    confirm.addEventListener('click', function(){ if (!confirm.disabled) setTimeout(function(){ face('rest'); }, 400); });
+    // ── Quick checkout: it completes here ────────────────────────────────
+    var payEl = root.querySelector('[data-evolve-face=\"pay\"]');
+    var chosenVariant = null;
+
+    function payQ(sel){ return payEl ? payEl.querySelector(sel) : null; }
+    function say(msg, bad){
+      var m = payQ('[data-pay-msg]');
+      if (m) { m.textContent = msg || ''; m.className = 'card-pay__msg' + (bad ? ' is-bad' : ''); }
+    }
+
+    function addr(){
+      function v(sel){ var n = payQ(sel); return n && n.value ? n.value.trim() : ''; }
+      var a = { name: v('[data-pay-name]'), line1: v('[data-pay-line1]'), city: v('[data-pay-city]'),
+                country: v('[data-pay-country]').toUpperCase() };
+      var r = v('[data-pay-region]'); if (r) a.region = r;
+      var pc = v('[data-pay-postal]'); if (pc) a.postalCode = pc;
+      return a;
+    }
+
+    async function api(path, body){
+      var res = await fetch('/api' + path, {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+      });
+      var data = await res.json().catch(function(){ return {}; });
+      if (!res.ok) throw new Error((data.error && data.error.message) || ('Request failed (' + res.status + ')'));
+      return data;
+    }
+
+    async function pay(){
+      if (!chosenVariant) return;
+      var email = (payQ('[data-pay-email]') || {}).value || '';
+      var a = addr();
+      if (!email) return say('Add your email so we can send the receipt.', true);
+      if (!a.name || !a.line1 || !a.city || a.country.length !== 2) return say('Add your name, address, city and 2-letter country.', true);
+
+      var go = payQ('[data-pay-go]');
+      if (go) { go.disabled = true; go.textContent = 'Working…'; }
+      say('');
+      try {
+        // A cart of exactly this variant, so quick checkout never drags in
+        // whatever else was already in the bag.
+        var cart = await api('/cart/items', { variantId: chosenVariant.i, quantity: 1 });
+        await api('/cart/shipping', { cartToken: cart.token, shipAddress: a });
+        var order = await api('/cart/checkout', { cartToken: cart.token, email: email, shipAddress: a });
+
+        // Wallets first — Apple/Google Pay is the fast path when the provider
+        // supports it. A not-ready session comes back WITH a reason, which is
+        // worth showing rather than presenting a button that cannot work.
+        var w = await api('/shop/checkout/wallet-session', {
+          orderNumber: order.orderNumber, accessToken: order.accessToken
+        }).catch(function(){ return { ready: false, reason: 'Wallet payments are not set up yet.' }; });
+
+        if (w && w.ready) {
+          say('Order ' + order.orderNumber + ' created — continue with your wallet.');
+          var box = payQ('[data-pay-wallets]');
+          if (box) { box.hidden = false; box.setAttribute('data-session', JSON.stringify(w)); }
+        } else {
+          // Honest dead-end rather than a button that does nothing: the order
+          // exists, so say so and hand over the receipt link.
+          say('Order ' + order.orderNumber + ' placed. ' + ((w && w.reason) || 'Payment is not connected yet.'));
+        }
+        if (go) go.textContent = 'Done';
+      } catch (e) {
+        say(e.message || String(e), true);
+        if (go) { go.disabled = false; go.textContent = 'Pay'; }
+      }
+    }
+
+    confirm.addEventListener('click', function(){
+      if (confirm.disabled || !chosenVariant) return;
+      var sum = payQ('[data-pay-sum]');
+      if (sum) {
+        sum.textContent = [chosenVariant.c, chosenVariant.s].filter(Boolean).join(' · ')
+          + (chosenVariant.c || chosenVariant.s ? ' — ' : '') + money(chosenVariant.p);
+      }
+      face('pay');
+    });
+    if (payEl) {
+      var back = payQ('[data-pay-back]');
+      if (back) back.addEventListener('click', function(){ face('pick'); });
+      var goBtn = payQ('[data-pay-go]');
+      if (goBtn) goBtn.addEventListener('click', function(){ pay(); });
+    }
   });
 })();
 `;
@@ -766,6 +870,17 @@ export const PRODUCT_GRID_FALLBACK_CSS = `
    it flips — a grid that reflows under the shopper's cursor is worse than
    any picker. */
 .card-evolve{position:relative}
+/* Quick checkout's pay step. Sits in the card, so it must stay compact —
+   anything taller than the card turns the grid into a jumping mess. */
+.card-pay{display:flex;flex-direction:column;gap:6px;position:relative;padding-top:4px}
+.card-pay__sum{font-size:12px;font-weight:600}
+.card-pay__row{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.card-pay__in{width:100%;box-sizing:border-box;padding:8px 10px;font:inherit;font-size:12px;
+  border:1px solid var(--ln,#e5e7eb);border-radius:8px}
+.card-pay__in:focus{outline:none;border-color:var(--tx,#111)}
+.card-pay__wallets{display:flex;flex-direction:column;gap:6px}
+.card-pay__msg{font-size:11px;line-height:1.4;margin:0;color:var(--tx3,#6b7280)}
+.card-pay__msg.is-bad{color:#b3261e}
 .card-picker{display:flex;flex-direction:column;gap:8px}
 /* An explicit display beats the hidden ATTRIBUTE's UA display:none, so the
    picker rendered at rest — its Confirm button sitting under the two CTAs on
