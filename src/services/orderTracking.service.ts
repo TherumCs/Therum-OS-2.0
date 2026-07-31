@@ -32,6 +32,14 @@ export interface TrackedOrder {
   status: string;
   placedAt: Date;
   total: number;
+  /** The charge, broken out — a shopper reviewing an order must be able to see
+   *  what each part cost, not just the number that left their account. */
+  itemsSubtotal: number;
+  discountAmount: number;
+  discountLabel: string | null;
+  shippingTotal: number;
+  shippingMethod: string | null;
+  taxTotal: number;
   currency: string;
   /** City + country only. The full address is not needed to say where it is going. */
   destination: string | null;
@@ -64,11 +72,17 @@ export const orderTrackingService = {
       where: { number: number.trim() },
       select: {
         number: true, status: true, createdAt: true, total: true, currency: true,
+        discountAmount: true, discountLabel: true,
+        shippingTotal: true, taxTotal: true, shippingMethod: true,
         guestEmail: true, customerId: true, shipAddress: true,
         customer: { select: { email: true } },
         items: {
+          // priceAtTime, not the variant's current price: an order is a
+          // historical record and must not re-price itself when the catalog
+          // changes.
           select: {
             quantity: true,
+            priceAtTime: true,
             variant: { select: { sku: true, product: { select: { name: true, slug: true, image: true } } } },
           },
         },
@@ -103,6 +117,12 @@ export const orderTrackingService = {
       status: order.status,
       placedAt: order.createdAt,
       total: order.total,
+      itemsSubtotal: order.items.reduce((sum, i) => sum + i.priceAtTime * i.quantity, 0),
+      discountAmount: order.discountAmount,
+      discountLabel: order.discountLabel,
+      shippingTotal: order.shippingTotal,
+      shippingMethod: order.shippingMethod,
+      taxTotal: order.taxTotal,
       currency: order.currency,
       destination: destinationOf(order.shipAddress),
       items,

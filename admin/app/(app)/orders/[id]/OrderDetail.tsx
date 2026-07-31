@@ -9,6 +9,9 @@ export interface FullOrder {
   number: string;
   status: string;
   total: number;
+  shippingTotal: number;
+  taxTotal: number;
+  shippingMethod: string | null;
   currency: string;
   discountAmount: number;
   discountLabel: string | null;
@@ -137,6 +140,16 @@ export function OrderDetail({ order }: { order: FullOrder }) {
           <div className="th-order__row"><span>Items</span><span>{money(itemsTotal)}</span></div>
           {o.discountAmount > 0 && (
             <div className="th-order__row"><span>{o.discountLabel || 'Discount'}</span><span>−{money(o.discountAmount)}</span></div>
+          )}
+          {/* Shipping and tax are part of what was charged. Without them the
+              Items row and the Total row do not reconcile, and whoever is
+              looking at this order cannot tell why. */}
+          <div className="th-order__row">
+            <span>Shipping{o.shippingMethod ? ` · ${o.shippingMethod}` : ''}</span>
+            <span>{o.shippingTotal > 0 ? money(o.shippingTotal) : 'Free'}</span>
+          </div>
+          {o.taxTotal > 0 && (
+            <div className="th-order__row"><span>Tax</span><span>{money(o.taxTotal)}</span></div>
           )}
           {o.refundedTotal > 0 && (
             <div className="th-order__row"><span>Refunded</span><span>−{money(o.refundedTotal)}</span></div>

@@ -740,6 +740,9 @@ document.getElementById('add').addEventListener('click',(e)=>{if(sel)addToCart(s
     if (a.length !== b.length || !timingSafeEqual(a, b)) return await notFound();
 
     const paid = order.status !== 'pending';
+    // What the items alone come to, so the breakdown can show a Subtotal that
+    // the item rows visibly add up to.
+    const itemsSubtotal = order.items.reduce((sum, i) => sum + i.priceAtTime * i.quantity, 0);
     const rows = order.items.map((i) => `
       <div class="row muted"><span>${i.quantity} × ${esc(i.variant?.product?.name ?? 'Item')}${i.variant?.sku ? ` (${esc(i.variant.sku)})` : ''}</span><span class="num">${money(i.priceAtTime * i.quantity, order.currency)}</span></div>`).join('');
 
@@ -754,7 +757,15 @@ document.getElementById('add').addEventListener('click',(e)=>{if(sel)addToCart(s
         <div class="panel">
           <div class="totals">
             ${rows}
+            <!-- Every component of the charge, itemised. A confirmation that
+                 shows only a Total leaves the shopper unable to check what
+                 they were actually billed for — and once shipping and tax are
+                 on the order, the item rows and the Total no longer add up
+                 without these lines. -->
+            ${itemsSubtotal !== order.total ? `<div class="row muted"><span>Subtotal</span><span class="num">${money(itemsSubtotal, order.currency)}</span></div>` : ''}
             ${order.discountAmount > 0 ? `<div class="row muted"><span>${esc(order.discountLabel ?? 'Discount')}</span><span class="num">−${money(order.discountAmount, order.currency)}</span></div>` : ''}
+            ${order.shippingTotal > 0 ? `<div class="row muted"><span>Shipping${order.shippingMethod ? ` · ${esc(order.shippingMethod)}` : ''}</span><span class="num">${money(order.shippingTotal, order.currency)}</span></div>` : `<div class="row muted"><span>Shipping</span><span class="num">Free</span></div>`}
+            ${order.taxTotal > 0 ? `<div class="row muted"><span>Tax</span><span class="num">${money(order.taxTotal, order.currency)}</span></div>` : ''}
             <div class="row grand"><span>Total</span><span class="num">${money(order.total, order.currency)}</span></div>
           </div>
         </div>

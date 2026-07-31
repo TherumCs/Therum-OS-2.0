@@ -54,6 +54,9 @@ export const ORDER_TRACKING_CSS = `
 .ot__item img,.ot__item .ot__ph{width:60px;height:60px;flex:0 0 60px;object-fit:cover;background:rgba(0,0,0,.06)}
 .ot__item-name{display:block;font-size:14px;font-weight:500}
 .ot__item-meta{display:block;font-size:12px;opacity:.55;margin-top:2px}
+.ot__sums{display:flex;flex-direction:column;gap:4px;padding:12px 0;border-top:1px solid var(--ln,#eee)}
+.ot__sum{display:flex;justify-content:space-between;font-size:13px;color:var(--tx3,#6b7280);
+  font-variant-numeric:tabular-nums}
 .ot__foot{border-top:1px solid rgba(0,0,0,.14);margin-top:34px;padding-top:20px;
   display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap;font-size:14px}
 .ot__foot b{font-weight:600}
@@ -161,6 +164,17 @@ export const ORDER_TRACKING_RUNTIME = `
           : '<div class="ot__ship"><h2 class="ot__carrier">Not shipped yet</h2>'
             + '<p class="ot__hint">Nothing has left us yet. This page will show the carrier and tracking link as soon as it does.</p></div>')
       + '<ul class="ot__items">' + (o.items || []).map(itemRow).join('') + '</ul>'
+      // The full breakdown, not just the number that left their account: a
+      // shopper reviewing an order should be able to see what each part cost.
+      + '<div class="ot__sums">'
+      + '<div class="ot__sum"><span>Subtotal</span><span>' + money(o.itemsSubtotal, o.currency) + '</span></div>'
+      + (o.discountAmount > 0
+          ? '<div class="ot__sum"><span>' + esc(o.discountLabel || 'Discount') + '</span><span>−' + money(o.discountAmount, o.currency) + '</span></div>'
+          : '')
+      + '<div class="ot__sum"><span>Shipping' + (o.shippingMethod ? ' · ' + esc(o.shippingMethod) : '') + '</span><span>'
+      + (o.shippingTotal > 0 ? money(o.shippingTotal, o.currency) : 'Free') + '</span></div>'
+      + (o.taxTotal > 0 ? '<div class="ot__sum"><span>Tax</span><span>' + money(o.taxTotal, o.currency) + '</span></div>' : '')
+      + '</div>'
       + '<div class="ot__foot"><span>' + (o.items || []).reduce(function(n,i){ return n + i.quantity; }, 0) + ' item(s)</span>'
       + '<span><b>' + money(o.total, o.currency) + '</b></span></div>';
     root.classList.add('is-found');
