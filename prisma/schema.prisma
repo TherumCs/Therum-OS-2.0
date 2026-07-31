@@ -223,6 +223,7 @@ model CustomerOffer {
   // twice should update the message, not stack duplicates in their account.
   @@unique([customerId, couponId])
   @@index([customerId, status])
+  @@index([couponId])
   @@map("customer_offers")
 }
 
@@ -312,6 +313,7 @@ model OrderItem {
   variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
 
   @@index([orderId])
+  @@index([variantId])
   @@map("order_items")
 }
 
@@ -355,6 +357,7 @@ model Coupon {
   milieu      Milieu?           @relation(fields: [milieuId], references: [id], onDelete: SetNull)
 
   @@index([status])
+  @@index([milieuId])
   @@map("coupons")
 }
 
@@ -374,6 +377,7 @@ model CouponRedemption {
 
   @@unique([couponId, orderId], name: "coupon_order")
   @@index([couponId, email])
+  @@index([orderId])
   @@map("coupon_redemptions")
 }
 
@@ -523,6 +527,7 @@ model AdminUser {
 
   apiTokens ApiToken[]
   role      Role?      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+  @@index([roleId])
 
   @@map("admin_users")
 }
@@ -602,6 +607,7 @@ model ApiToken {
   revokedAt  DateTime? @map("revoked_at")
 
   user AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@index([userId])
 
   @@map("api_tokens")
 }
@@ -969,6 +975,7 @@ model ProductReview {
 
   @@index([productId, status])
   @@index([status])
+  @@index([customerId])
   @@map("product_reviews")
 }
 

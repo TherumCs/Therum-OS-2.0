@@ -26,6 +26,10 @@
 export const CHECKOUT_FLOW_CSS = `
 /* Coupon row. Three states: an input, an applied code, or — for a member —
    no input at all and a line saying why. */
+.co-field input{display:block;width:100%;box-sizing:border-box;margin-top:8px;padding:10px 12px;
+  border:1px solid var(--ln,#e5e7eb);border-radius:8px;font:inherit;font-size:14px}
+.co-row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media (max-width:520px){.co-row2{grid-template-columns:1fr}}
 .co-coupon{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:14px 0 4px;padding:12px 0;
   border-top:1px solid var(--ln,#e5e7eb)}
 .co-coupon input{flex:1;min-width:140px;border:1px solid var(--ln,#e5e7eb);border-radius:9px;
@@ -290,6 +294,15 @@ export const CHECKOUT_FLOW_RUNTIME = `
       + items
       + '<div class="co-field" style="margin-top:18px"><label for="co-email">Email for your receipt</label>'
       + '<input id="co-email" type="email" placeholder="you@example.com" autocomplete="email"></div>'
+      + '<div class="co-field"><label>Shipping address</label>'
+      + '<input id="co-name" placeholder="Full name" autocomplete="shipping name">'
+      + '<input id="co-line1" placeholder="Street address" autocomplete="shipping address-line1">'
+      + '<input id="co-line2" placeholder="Apartment, suite (optional)" autocomplete="shipping address-line2">'
+      + '<div class="co-row2"><input id="co-city" placeholder="City" autocomplete="shipping address-level2">'
+      + '<input id="co-region" placeholder="State / region" autocomplete="shipping address-level1"></div>'
+      + '<div class="co-row2"><input id="co-postal" placeholder="Postal code" autocomplete="shipping postal-code">'
+      + '<input id="co-country" placeholder="Country (US)" maxlength="2" autocomplete="shipping country"></div>'
+      + '</div>'
       + '<div class="co-field"><label>Payment</label>' + (methods || '<p class="co-vr">No payment methods are connected yet.</p>') + '</div>'
       + '<div class="co-act"><button class="btn" id="co-place" type="button"' + (avail.length ? '' : ' disabled') + '>Place order · ' + fmt(t.total) + '</button></div>'
       + '<div id="co-msg"></div>';
@@ -306,10 +319,31 @@ export const CHECKOUT_FLOW_RUNTIME = `
     if (place) place.addEventListener('click', async function(){
       var email = (scope.querySelector('#co-email') || {}).value || '';
       var msg = scope.querySelector('#co-msg');
+      function fieldVal(id){ var n = scope.querySelector(id); return n && n.value ? n.value.trim() : ''; }
+      var ship = {
+        name: fieldVal('#co-name'),
+        line1: fieldVal('#co-line1'),
+        city: fieldVal('#co-city'),
+        country: fieldVal('#co-country').toUpperCase()
+      };
+      var line2 = fieldVal('#co-line2'); if (line2) ship.line2 = line2;
+      var region = fieldVal('#co-region'); if (region) ship.region = region;
+      var postal = fieldVal('#co-postal'); if (postal) ship.postalCode = postal;
+      // Checked here so the shopper gets the message next to the button rather
+      // than a 422 after the order attempt. The server validates it too.
+      var missing = [];
+      if (!ship.name) missing.push('name');
+      if (!ship.line1) missing.push('street address');
+      if (!ship.city) missing.push('city');
+      if (ship.country.length !== 2) missing.push('2-letter country code');
+      if (missing.length) {
+        if (msg) msg.innerHTML = '<p class="notice err">Add your ' + missing.join(', ') + '.</p>';
+        return;
+      }
       place.disabled = true; place.textContent = 'Placing…';
       try {
         if (email) await api('/cart/identity', { method:'POST', body: JSON.stringify({ cartToken: tok(), email: email }) });
-        var out = await api('/cart/checkout', { method:'POST', body: JSON.stringify({ cartToken: tok(), method: F.id, provider: F.provider }) });
+        var out = await api('/cart/checkout', { method:'POST', body: JSON.stringify({ cartToken: tok(), method: F.id, provider: F.provider, shipAddress: ship }) });
         setTok(null); refreshCount();
         location.href = out.redirectUrl || ('/order-received/?order=' + out.number + '&token=' + out.accessToken);
       } catch (e) {

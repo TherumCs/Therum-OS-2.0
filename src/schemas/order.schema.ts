@@ -7,6 +7,29 @@ export const OrderItemInput = z.object({
   quantity: z.number().int().positive(),
 });
 
+// Where the parcel goes. Field names match the Address model and what
+// shipmentService/orderTracking already read (line1/line2/city/region/
+// postalCode/country) — inventing a shape here would mean collecting an
+// address that fulfillment cannot see, which is worse than not collecting one.
+//
+// `name` is the one addition: Address hangs off a Customer who has a name, but
+// a GUEST order has no customer, so the recipient would otherwise be unknown
+// on exactly the orders most likely to be guest checkouts.
+//
+// region and postalCode are optional because plenty of countries have neither;
+// line1, city and country are the irreducible minimum for a label.
+export const ShipAddressInput = z.object({
+  name: z.string().min(1).max(120),
+  line1: z.string().min(1).max(200),
+  line2: z.string().max(200).optional(),
+  city: z.string().min(1).max(120),
+  region: z.string().max(120).optional(),
+  postalCode: z.string().max(32).optional(),
+  // ISO-3166 alpha-2. Uppercased on the way in so 'us' and 'US' are one value.
+  country: z.string().length(2).transform((c) => c.toUpperCase()),
+  phone: z.string().max(40).optional(),
+});
+
 export const CreateOrderInput = z.object({
   customerId: z.string().optional(),
   // Two-decimal currencies only for now — zero-decimal (JPY/KRW/…) needs
@@ -22,6 +45,10 @@ export const CreateOrderInput = z.object({
   // Guest contact email (storefront checkout) — receipt address only, never
   // resolved to a customer account (audit H-1).
   guestEmail: z.string().email().max(320).optional(),
+  // Optional at the schema level: admin-created and imported orders do not
+  // always have one, and the Woo importer writes its own. The STOREFRONT
+  // requires it — see the check in order.service.create.
+  shipAddress: ShipAddressInput.optional(),
   items: z.array(OrderItemInput).min(1, 'an order needs at least one item'),
 });
 
@@ -38,6 +65,7 @@ export const ListOrdersQuery = z.object({
   ...sortFields(['createdAt', 'number', 'status', 'total'], 'createdAt'),
 });
 
+export type ShipAddressInput = z.infer<typeof ShipAddressInput>;
 export type CreateOrderInput = z.infer<typeof CreateOrderInput>;
 export type TransitionOrderInput = z.infer<typeof TransitionOrderInput>;
 export type ListOrdersQuery = z.infer<typeof ListOrdersQuery>;

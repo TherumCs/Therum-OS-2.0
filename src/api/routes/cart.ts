@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
+import { ShipAddressInput } from '../../schemas/order.schema.js';
 import { cartService } from '../../services/cart.service.js';
 import { requireCapability } from '../../middleware/capability.js';
 import { checkRateLimit } from '../../lib/rateLimit.js';
@@ -27,6 +28,10 @@ const IdentityInput = z.object({
 const CheckoutInput = z.object({
   cartToken: TOKEN,
   email: z.string().email().max(320).optional(),
+  // Where the parcel goes. Required by cartService.checkout for a storefront
+  // order — validated here so a malformed address is a 422 at the edge rather
+  // than a half-created order.
+  shipAddress: ShipAddressInput.optional(),
 });
 
 // The cart token is the ONLY credential — it must never land in a URL path,
@@ -108,6 +113,6 @@ export async function cartRoutes(app: FastifyInstance): Promise<void> {
     // SESSION, never from input.email — see cartService.checkout. Optional:
     // guest checkout stays exactly as it was.
     const customer = await resolveCustomer(req);
-    reply.status(201).send(await cartService.checkout(input.cartToken, input.email, customer?.id));
+    reply.status(201).send(await cartService.checkout(input.cartToken, input.email, customer?.id, input.shipAddress));
   });
 }

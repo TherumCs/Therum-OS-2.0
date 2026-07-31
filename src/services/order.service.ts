@@ -151,6 +151,12 @@ export const orderService = {
             // bearer token — 128 bits, constant-time compared on use.
             accessToken: randomBytes(16).toString('hex'),
             guestEmail: input.guestEmail ?? null,
+            // Captured at checkout and stored on the ORDER, not the customer:
+            // an order is a historical record, and a shopper editing their
+            // saved address later must not rewrite where a past parcel went.
+            // shipmentService reads this to create shipments; without it a
+            // shipment is created empty and can never be quoted.
+            ...(input.shipAddress ? { shipAddress: input.shipAddress } : {}),
             total,
             ...(memberAmount > 0
               ? {

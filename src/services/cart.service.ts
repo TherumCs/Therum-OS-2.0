@@ -1,5 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { db } from '../lib/db.js';
+import type { ShipAddressInput } from '../schemas/order.schema.js';
 import { redis } from '../lib/redis.js';
 import { orderService } from './order.service.js';
 import { contextFor, defaultPipeline } from '../counter/totalsPipeline.js';
@@ -363,7 +364,7 @@ export const cartService = {
    * an account (or inherit its member pricing), but a verified session is
    * exactly the proof that rule was waiting for.
    */
-  async checkout(token: string, email?: string, customerId?: string) {
+  async checkout(token: string, email?: string, customerId?: string, shipAddress?: ShipAddressInput) {
     const state = await load(token);
     if (state.items.length === 0) throw new ValidationError('Cart is empty.', 'cart');
     if (email) state.customerEmail = email;
@@ -390,6 +391,11 @@ export const cartService = {
       currency: (await settingsService.getCommerce()).currency,
       idempotencyKey: `cart_${state.id}`,
       guestEmail: state.customerEmail ?? undefined,
+      // A storefront order without an address produces a shipment that can
+      // never be quoted (shipmentService throws on exactly that), so this is
+      // required here even though the schema allows it to be omitted for
+      // admin-created and imported orders.
+      ...(shipAddress ? { shipAddress } : {}),
       ...(customerId ? { customerId } : {}),
       items: state.items.map((i) => ({ variantId: i.variantId, quantity: i.quantity })),
     });
