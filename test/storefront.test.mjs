@@ -135,3 +135,33 @@ test('capability gate: commerce off → closed page, catalog hidden', async () =
     await capabilityService.setEnabled('commerce', true);
   }
 });
+
+test('QUICK CHECKOUT ORDER: details before payment, and the strip is not in the card until then', async () => {
+  const res = await app.inject({ method: 'GET', url: '/shop' });
+  assert.equal(res.statusCode, 200);
+
+  // The shopper's order is: options, then where it ships, then how it is paid.
+  // The first build rendered the payment strip above the address, which asked
+  // "how are you paying" before "where are we sending it" — and led with a row
+  // of disabled pills when no provider was connected.
+  const details = res.body.indexOf('data-pay-step="details"');
+  const payment = res.body.indexOf('data-pay-step="payment"');
+  assert.ok(details > -1 && payment > -1, 'the pay face is split into two steps');
+  assert.ok(details < payment, 'details comes before payment in the markup');
+
+  // The address fields belong to step one, the pay button to step two.
+  const stepOne = res.body.slice(details, payment);
+  for (const field of ['data-pay-email', 'data-pay-line1', 'data-pay-city', 'data-pay-postal']) {
+    assert.ok(stepOne.includes(field), `${field} is on the details step`);
+  }
+  assert.ok(stepOne.includes('data-pay-next'), 'details ends with Continue, not Pay');
+  assert.ok(!stepOne.includes('data-pay-go'), 'the Pay button is NOT on the details step');
+
+  // The payment step is hidden until the shopper gets there, and the method
+  // strip is fetched at that point rather than rendered into the card up front.
+  assert.match(res.body.slice(payment, payment + 200), /hidden/, 'payment starts hidden');
+  // The strip is fetched when the shopper reaches the payment step, so its
+  // host ships EMPTY. Asserted on the element rather than on the string
+  // "data-mgroup", which also appears in the inline script that builds it.
+  assert.match(res.body, /data-pay-methodwrap><\/div>/, 'the method host ships empty and fills on demand');
+});

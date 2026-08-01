@@ -353,24 +353,43 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS): st
         <!-- Wallets first: Apple/Google Pay return the payer's contact and
              shipping address themselves, so the fast path needs no form at
              all. The card path below is the fallback. -->
-        <div class="card-pay__wallets" data-pay-wallets hidden></div>
-        <div class="card-pay__or" data-pay-or hidden>or pay by card</div>
-        <!-- The gateway's own hosted card field mounts here. Raw card numbers
-             are never collected by our inputs — that is what keeps this out of
-             PCI scope, and it is why there is no card-number input below. -->
-        <div class="card-pay__cardfield" data-pay-cardfield hidden></div>
-        <input class="card-pay__in" data-pay-email type="email" placeholder="Email for your receipt" autocomplete="email">
-        <input class="card-pay__in" data-pay-name placeholder="Full name" autocomplete="shipping name">
-        <input class="card-pay__in" data-pay-line1 placeholder="Street address" autocomplete="shipping address-line1">
-        <div class="card-pay__row">
-          <input class="card-pay__in" data-pay-city placeholder="City" autocomplete="shipping address-level2">
-          <input class="card-pay__in" data-pay-region placeholder="State" autocomplete="shipping address-level1">
+        <!-- TWO STEPS, in the order a shopper thinks in: where it goes, then
+             how it is paid for. The first build put the method strip above the
+             address, which asked "how are you paying" before "where are we
+             sending it" — and showed a wall of disabled payment pills as the
+             first thing in the card.
+
+             Wallets are the exception and sit on top: Apple and Google Pay
+             return the payer's contact AND shipping address themselves, so
+             that path skips the form rather than filling it in. -->
+        <div class="card-pay__step" data-pay-step="details">
+          <div class="card-pay__wallets" data-pay-wallets hidden></div>
+          <div class="card-pay__or" data-pay-or hidden>or enter your details</div>
+          <input class="card-pay__in" data-pay-email type="email" placeholder="Email for your receipt" autocomplete="email">
+          <input class="card-pay__in" data-pay-name placeholder="Full name" autocomplete="shipping name">
+          <input class="card-pay__in" data-pay-line1 placeholder="Street address" autocomplete="shipping address-line1">
+          <div class="card-pay__row">
+            <input class="card-pay__in" data-pay-city placeholder="City" autocomplete="shipping address-level2">
+            <input class="card-pay__in" data-pay-region placeholder="State" autocomplete="shipping address-level1">
+          </div>
+          <div class="card-pay__row">
+            <input class="card-pay__in" data-pay-postal placeholder="ZIP" autocomplete="shipping postal-code">
+            <input class="card-pay__in" data-pay-country placeholder="US" maxlength="2" autocomplete="shipping country">
+          </div>
+          <button class="card-btn card-btn--solid" type="button" data-pay-next>Continue to payment</button>
         </div>
-        <div class="card-pay__row">
-          <input class="card-pay__in" data-pay-postal placeholder="ZIP" autocomplete="shipping postal-code">
-          <input class="card-pay__in" data-pay-country placeholder="US" maxlength="2" autocomplete="shipping country">
+
+        <div class="card-pay__step" data-pay-step="payment" hidden>
+          <!-- Where it is going, echoed back. Changing it is one tap, so the
+               shopper never has to guess whether the address took. -->
+          <div class="card-pay__shipto" data-pay-shipto></div>
+          <div class="card-pay__methodwrap" data-pay-methodwrap></div>
+          <!-- The gateway's own hosted card field mounts here. Raw card numbers
+               are never collected by our inputs — that is what keeps this out of
+               PCI scope, and it is why there is no card-number input above. -->
+          <div class="card-pay__cardfield" data-pay-cardfield hidden></div>
+          <button class="card-btn card-btn--solid" type="button" data-pay-go>Pay</button>
         </div>
-        <button class="card-btn card-btn--solid" type="button" data-pay-go>Pay</button>
         <p class="card-pay__msg" data-pay-msg></p>
       </div>` : '';
 
@@ -765,10 +784,11 @@ export const CARD_EVOLVE_RUNTIME = `
     // grouped, with unconnected ones disabled rather than hidden so the
     // shopper can see what the store supports.
     var chosenMethod = null;
+    var methodsLoaded = false;
     async function loadMethods(){
-      if (walletsLoaded) return;
-      walletsLoaded = true;
-      var box = payQ('[data-pay-wallets]');
+      if (methodsLoaded) return;
+      methodsLoaded = true;
+      var box = payQ('[data-pay-methodwrap]');
       if (!box) return;
       try {
         var res = await fetch('/api/checkout/methods');
@@ -830,6 +850,37 @@ export const CARD_EVOLVE_RUNTIME = `
       }
     }
 
+    // The express path, and the ONLY payment thing shown before the form.
+    // Apple and Google Pay hand back the payer's contact and shipping address
+    // from the sheet, so taking this route skips the details step rather than
+    // pre-filling it. When nothing is connected this renders nothing at all,
+    // and the flow is simply options -> details -> payment.
+    var walletLabels = { apple_pay: ' Apple Pay', google_pay: 'G Pay', link: 'Link', shop_pay: 'Shop Pay' };
+    async function loadWallets(){
+      if (walletsLoaded) return;
+      walletsLoaded = true;
+      var box = payQ('[data-pay-wallets]');
+      if (!box) return;
+      try {
+        var res = await fetch('/api/shop/wallets');
+        var data = await res.json();
+        var ready = (data.providers || []).filter(function(p){ return p.ready; });
+        var buttons = [];
+        ready.forEach(function(p){
+          (p.wallets || []).forEach(function(w){
+            if (!walletLabels[w]) return;
+            buttons.push('<button type="button" class="card-pay__wallet" data-wallet="' + w
+              + '" data-wallet-provider="' + p.provider + '">' + walletLabels[w] + '</button>');
+          });
+        });
+        if (buttons.length === 0) return;   // stays hidden; no empty express row
+        box.innerHTML = buttons.join('');
+        box.hidden = false;
+        var or = payQ('[data-pay-or]');
+        if (or) or.hidden = false;
+      } catch (e) { /* express is a shortcut; losing it costs nothing */ }
+    }
+
     async function loadClientAndMount(provider){
       try {
         var res = await fetch('/api/shop/wallets');
@@ -847,11 +898,51 @@ export const CARD_EVOLVE_RUNTIME = `
           + (chosenVariant.c || chosenVariant.s ? ' — ' : '') + money(chosenVariant.p);
       }
       face('pay');
-      loadMethods();
+      payStep('details');
+      // Wallets only — the express path needs to be visible before the form,
+      // because taking it means never filling the form in. The method strip
+      // waits for the payment step.
+      loadWallets();
     });
+
+    /** Which half of the pay face is showing. */
+    function payStep(name){
+      if (!payEl) return;
+      payEl.querySelectorAll('[data-pay-step]').forEach(function(el){
+        el.hidden = el.getAttribute('data-pay-step') !== name;
+      });
+      payEl.setAttribute('data-step', name);
+    }
+
     if (payEl) {
+      // Back walks the steps rather than leaving: payment → details → options.
+      // Dropping straight out of payment would throw away a typed address.
       var back = payQ('[data-pay-back]');
-      if (back) back.addEventListener('click', function(){ face('pick'); });
+      if (back) back.addEventListener('click', function(){
+        if (payEl.getAttribute('data-step') === 'payment') return payStep('details');
+        face('pick');
+      });
+
+      var next = payQ('[data-pay-next]');
+      if (next) next.addEventListener('click', function(){
+        var email = (payQ('[data-pay-email]') || {}).value || '';
+        var a = addr();
+        // Validated HERE, before the payment step, so a missing ZIP is caught
+        // while the field is still on screen instead of after a method is
+        // chosen.
+        if (!email) return say('Add your email so we can send the receipt.', true);
+        if (!a.name || !a.line1 || !a.city || a.country.length !== 2) {
+          return say('Add your name, address, city and 2-letter country.', true);
+        }
+        say('');
+        var to = payQ('[data-pay-shipto]');
+        if (to) to.textContent = 'Shipping to ' + [a.name, a.line1, a.city, a.region, a.postal].filter(Boolean).join(', ');
+        payStep('payment');
+        // Fetched only now: a shopper who never reaches this step never pays
+        // for the request.
+        loadMethods();
+      });
+
       var goBtn = payQ('[data-pay-go]');
       if (goBtn) goBtn.addEventListener('click', function(){ pay(); });
       payEl.addEventListener('click', function(e){
@@ -1072,6 +1163,12 @@ export const PRODUCT_GRID_FALLBACK_CSS = `
   border:1px solid var(--ln,#e5e7eb);border-radius:8px}
 .card-pay__in:focus{outline:none;border-color:var(--tx,#111)}
 .card-pay__wallets{display:flex;flex-direction:column;gap:6px}
+.card-pay__wallet{display:block;width:100%;padding:12px;border:0;border-radius:var(--radius-pill,999px);background:#000;color:#fff;font:600 13px var(--f,inherit);cursor:pointer}
+.card-pay__step{display:flex;flex-direction:column;gap:8px}
+/* Where it is going, echoed on the payment step. Small and quiet — it is a
+   confirmation, not a heading. */
+.card-pay__shipto{font-size:11px;color:var(--tx3,#6b7280);line-height:1.4;padding-bottom:2px}
+.card-pay__methodwrap{display:flex;flex-direction:column;gap:8px}
 .card-pay__or{font-size:11px;color:var(--tx3,#6b7280);text-align:center;position:relative}
 /* The method strip, same shape as the full checkout's — tabs across the top,
    the group's methods under it. Scrolls horizontally because a card is narrow
