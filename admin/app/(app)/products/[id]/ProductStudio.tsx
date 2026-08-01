@@ -99,7 +99,7 @@ export function ProductStudio({
     setTermName('');
     setAdding('');
   }
-  const [newVariant, setNewVariant] = useState({ sku: '', price: '', color: '', size: '', inventory: '0' });
+  const [newVariant, setNewVariant] = useState({ sku: '', price: '', color: '', size: '', inventory: '0', stockStatus: 'in_stock' });
 
   async function call(method: string, path: string, body?: unknown): Promise<unknown> {
     setBusy(true);
@@ -410,18 +410,39 @@ export function ProductStudio({
           </label>
           <label className="th-studio__field">
             <span>Stock</span>
-            <input
-              onKeyDown={commitKeys}
-              type="number" min="0"
-              defaultValue={selectedVariant.inventory}
-              onBlur={(e) => {
-                const inventory = Number.parseInt(e.target.value, 10);
-                if (!Number.isFinite(inventory) || inventory === selectedVariant.inventory) return;
-                setP({ ...p, variants: p.variants.map((v) => (v.id === selectedVariant.id ? { ...v, inventory } : v)) });
-                void call('PATCH', `/api/products/${p.id}/variants/${selectedVariant.id}`, { inventory });
+            {/* Status first. The quantity box appears only for "Set a
+                quantity" — a number sitting next to "In stock" invites a
+                merchant to type one that is then ignored. */}
+            <select
+              value={selectedVariant.stockStatus ?? 'tracked'}
+              onChange={(e) => {
+                const stockStatus = e.target.value;
+                setP({ ...p, variants: p.variants.map((v) => (v.id === selectedVariant.id ? { ...v, stockStatus } : v)) });
+                void call('PATCH', `/api/products/${p.id}/variants/${selectedVariant.id}`, { stockStatus });
               }}
-            />
+            >
+              <option value="in_stock">In stock</option>
+              <option value="out_of_stock">Out of stock</option>
+              <option value="backorder">On backorder</option>
+              <option value="tracked">Set a quantity…</option>
+            </select>
           </label>
+          {(selectedVariant.stockStatus ?? 'tracked') === 'tracked' && (
+            <label className="th-studio__field">
+              <span>Quantity</span>
+              <input
+                onKeyDown={commitKeys}
+                type="number" min="0"
+                defaultValue={selectedVariant.inventory}
+                onBlur={(e) => {
+                  const inventory = Number.parseInt(e.target.value, 10);
+                  if (!Number.isFinite(inventory) || inventory === selectedVariant.inventory) return;
+                  setP({ ...p, variants: p.variants.map((v) => (v.id === selectedVariant.id ? { ...v, inventory } : v)) });
+                  void call('PATCH', `/api/products/${p.id}/variants/${selectedVariant.id}`, { inventory });
+                }}
+              />
+            </label>
+          )}
           <p className="th-hint">{selectedVariant.reserved} reserved by open orders.</p>
           <button
             type="button" className="th-btn th-btn-danger" disabled={busy}
@@ -439,11 +460,21 @@ export function ProductStudio({
           {adding === 'variant' ? 'Cancel' : '+ Add a variant'}
         </button>
       </div>
-      <div className="th-studio__newvariant" hidden={adding !== 'variant'}>
+      {adding === 'variant' && (
+      <div className="th-studio__newvariant">
         {(['sku', 'color', 'size'] as const).map((f) => (
           <input key={f} placeholder={f === 'sku' ? 'SKU' : f === 'color' ? 'Colour' : 'Size'} value={newVariant[f]} onChange={(e) => setNewVariant({ ...newVariant, [f]: e.target.value })} />
         ))}
         <input placeholder="Price" type="number" step="0.01" value={newVariant.price} onChange={(e) => setNewVariant({ ...newVariant, price: e.target.value })} />
+        <select value={newVariant.stockStatus} onChange={(e) => setNewVariant({ ...newVariant, stockStatus: e.target.value })}>
+          <option value="in_stock">In stock</option>
+          <option value="out_of_stock">Out of stock</option>
+          <option value="backorder">On backorder</option>
+          <option value="tracked">Set a quantity…</option>
+        </select>
+        {newVariant.stockStatus === 'tracked' && (
+          <input placeholder="Quantity" type="number" min="0" value={newVariant.inventory} onChange={(e) => setNewVariant({ ...newVariant, inventory: e.target.value })} />
+        )}
         <button
           type="button" className="th-btn th-btn-primary" disabled={busy}
           onClick={async () => {
@@ -452,16 +483,18 @@ export function ProductStudio({
               color: newVariant.color || null,
               size: newVariant.size || null,
               price: Math.round(Number(newVariant.price || 0) * 100),
-              inventory: Number.parseInt(newVariant.inventory, 10) || 0,
+              inventory: newVariant.stockStatus === 'tracked' ? Number.parseInt(newVariant.inventory, 10) || 0 : 0,
+              stockStatus: newVariant.stockStatus,
             });
             if (created) {
               setP({ ...p, variants: [...p.variants, created as EditorProduct['variants'][number]] });
-              setNewVariant({ sku: '', price: '', color: '', size: '', inventory: '0' });
+              setNewVariant({ sku: '', price: '', color: '', size: '', inventory: '0', stockStatus: 'in_stock' });
               setAdding('');
             }
           }}
         >Add variant</button>
       </div>
+      )}
     </div>
   );
 
