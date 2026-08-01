@@ -109,11 +109,13 @@ const OAUTH_CAPABLE = new Set(oauthService.providers());
 /** The consumer key/secret pair a POD partner gives you, checked against the
  *  website it gave you with it. */
 const wooStyle: Tester = async (c) => {
-  const [site, key, secret] = c.split('|');
-  if (!site) return { ok: false, detail: 'Expected the Website value from the provider.' };
+  // The consumer key/secret pair comes FROM the provider — Printful issues it
+  // in its own dashboard — so it is checked against the PROVIDER's API, not
+  // against this store. Checking it here 401s every time: our store never
+  // issued it and correctly says so, which looks like a bad key.
+  const [, key, secret] = c.split('|');
   if (!key || !secret) return { ok: false, detail: 'Expected a Consumer key and a Consumer secret.' };
-  const base = site.replace(/\/+$/, '').replace(/^(?!https?:\/\/)/, 'https://');
-  return get(`${base}/wp-json/wc/v3/system_status`, { Authorization: basicAuthHeader(key, secret) });
+  return get('https://api.printful.com/stores', { Authorization: basicAuthHeader(key, secret) });
 };
 
 const TESTERS: Record<string, Tester> = {
