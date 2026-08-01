@@ -352,6 +352,14 @@ export function ConnectionsClient({
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error?.message ?? 'Could not create a store key.');
       setStoreKey({ consumerKey: body.consumerKey, consumerSecret: body.consumerSecret });
+      // Straight into the boxes: these three ARE the credential, and making
+      // someone copy them from a panel into fields directly below it is busy
+      // work. Paste the same pair into the provider.
+      setFieldValues([
+        typeof window === 'undefined' ? '' : window.location.origin,
+        body.consumerKey,
+        body.consumerSecret,
+      ]);
     } catch (e) {
       setActionError(e instanceof Error ? e.message : String(e));
     }
@@ -439,6 +447,21 @@ export function ConnectionsClient({
                     {/* The provider's REAL fields, not a generic token box —
                         authorizing by web is an alternative to these, not a
                         reason to stop naming them. */}
+                    {/* These providers authenticate with a key THIS store
+                        issues, so the card can mint one and fill the boxes.
+                        Without this there is no way to get a valid pair on a
+                        fresh install — which is exactly what happened: a key
+                        from another install 401s, correctly. */}
+                    {r.category === 'fulfillment' && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <button type="button" className="th-btn" onClick={() => void issueStoreKey(`${r.name} store key`)}>
+                          Issue a store key
+                        </button>
+                        <span style={{ fontSize: 11, color: 'var(--th-muted)' }}>
+                          Fills the boxes below. Paste the same pair into {r.name}.
+                        </span>
+                      </div>
+                    )}
                     {r.fields && r.fields.length > 1 && (
                       r.fields.map((f, i) => (
                         <label key={f.label} style={{ fontSize: 11, fontWeight: 600, color: 'var(--th-muted)' }}>
