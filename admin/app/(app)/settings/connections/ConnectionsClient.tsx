@@ -83,6 +83,13 @@ function shortLabel(label: string): string {
 }
 
 function credentialSummary(r: ConnectionRow): string {
+  // A store-pull provider is not asking you for a key — YOU give it one. The
+  // card used to advertise "API token (+1 optional)" for Printful, which is a
+  // different integration entirely and sends you to the wrong page to fetch
+  // the wrong value.
+  if (r.connectsVia === 'store-pull-woo' || r.connectsVia === 'store-pull-shopify') {
+    return 'Store key you issue';
+  }
   if (r.fields?.length) {
     const required = r.fields.filter((f) => !f.optional).map((f) => shortLabel(f.label));
     const optional = r.fields.length - required.length;
