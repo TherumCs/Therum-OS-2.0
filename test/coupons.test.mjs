@@ -9,6 +9,7 @@ import { closeQueues } from '../dist/lib/queue.js';
 import { db, disconnectDb } from '../dist/lib/db.js';
 import { encryptSecret } from '../dist/lib/crypto.js';
 import { recomputeReservations } from './support/reservations.mjs';
+import { ensureSiteVisible } from './support/publicSite.mjs';
 
 const SECRET = process.env.JWT_SECRET ?? '';
 function jwt(role = 'admin', sub = 'coupon-test') {
@@ -29,6 +30,9 @@ function signedWebhook(body) {
 }
 
 before(async () => {
+  // A dev box left in coming-soon mode serves the launch page to every
+  // public request, and these assertions then fail on content.
+  await ensureSiteVisible();
   app = await buildServer();
   // Clear the per-IP coupon-apply + cart-mint rate-limit windows so a prior
   // run's counter (600s TTL, shared Redis) doesn't 429 this suite's applies.

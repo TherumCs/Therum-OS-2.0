@@ -7,6 +7,7 @@ import { buildServer } from '../dist/server.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { db, disconnectDb } from '../dist/lib/db.js';
 import { studioAppService } from '../dist/services/studioApp.service.js';
+import { ensureSiteVisible } from './support/publicSite.mjs';
 
 const SECRET = process.env.JWT_SECRET ?? '';
 function jwt() {
@@ -28,6 +29,9 @@ const ELEMENTS = [
 let app, wasEnabled, importedId;
 
 before(async () => {
+  // A dev box left in coming-soon mode serves the launch page to every
+  // public request, and these assertions then fail on content.
+  await ensureSiteVisible();
   app = await buildServer();
   wasEnabled = await studioAppService.isEnabled('bricks-bridge');
 });

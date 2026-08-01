@@ -6,6 +6,7 @@ import { createHmac } from 'node:crypto';
 import { buildServer } from '../dist/server.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { db, disconnectDb } from '../dist/lib/db.js';
+import { ensureSiteVisible } from './support/publicSite.mjs';
 
 const SECRET = process.env.JWT_SECRET ?? '';
 function jwt() {
@@ -19,6 +20,9 @@ const auth = () => ({ authorization: `Bearer ${jwt()}` });
 let app, vendor, tee, mug, catApparel, catDrink, tagSummer;
 
 before(async () => {
+  // A dev box left in coming-soon mode serves the launch page to every
+  // public request, and these assertions then fail on content.
+  await ensureSiteVisible();
   app = await buildServer();
   vendor = await db.vendor.create({ data: { name: 'cattest Vendor' } });
   tee = await db.product.create({

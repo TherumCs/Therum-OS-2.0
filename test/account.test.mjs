@@ -6,6 +6,7 @@ import { buildServer } from '../dist/server.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { db, disconnectDb } from '../dist/lib/db.js';
 import { recomputeReservations } from './support/reservations.mjs';
+import { ensureSiteVisible } from './support/publicSite.mjs';
 
 let app;
 let vendor, product, coupon;
@@ -25,6 +26,9 @@ async function signUp(email) {
 const auth = (who) => ({ authorization: `Bearer ${who.token}` });
 
 before(async () => {
+  // A dev box left in coming-soon mode serves the launch page to every
+  // public request, and these assertions then fail on content.
+  await ensureSiteVisible();
   app = await buildServer();
 
   // Idempotent fixtures — a run that dies before cleanup must not break the

@@ -7,6 +7,7 @@ import { buildServer } from '../dist/server.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { db, disconnectDb } from '../dist/lib/db.js';
 import { recomputeReservations } from './support/reservations.mjs';
+import { ensureSiteVisible } from './support/publicSite.mjs';
 
 const SECRET = process.env.JWT_SECRET ?? '';
 const WHSECRET = process.env.WEBHOOK_SECRET ?? '';
@@ -22,6 +23,9 @@ const auth = () => ({ authorization: `Bearer ${jwt()}` });
 let app;
 let variantId;
 before(async () => {
+  // A dev box left in coming-soon mode serves the launch page to every
+  // public request, and these assertions then fail on content.
+  await ensureSiteVisible();
   const { redis } = await import('../dist/lib/redis.js');
   // The order limiter is real (10 per 10 minutes per IP) and the suite creates
   // far more than that from 127.0.0.1, so a later file used to 429 on a test

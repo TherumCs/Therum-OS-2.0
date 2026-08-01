@@ -6,11 +6,15 @@ import { buildServer } from '../dist/server.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { db, disconnectDb } from '../dist/lib/db.js';
 import { recomputeReservations } from './support/reservations.mjs';
+import { ensureSiteVisible } from './support/publicSite.mjs';
 
 let app;
 let vendor, product, order;
 
 before(async () => {
+  // A dev box left in coming-soon mode serves the launch page to every
+  // public request, and these assertions then fail on content.
+  await ensureSiteVisible();
   app = await buildServer();
   const { redis } = await import('../dist/lib/redis.js');
   await redis.del('ratelimit:cart-new:127.0.0.1');
