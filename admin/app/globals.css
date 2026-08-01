@@ -2030,3 +2030,8 @@ tr:hover .th-rowactions, tr:focus-within .th-rowactions { opacity: 1; }
 .th-agent__answer { font-size: var(--th-fs-sm); color: var(--th-ink); white-space: pre-wrap; }
 .th-agent__proposal { border: 1px solid var(--th-line); border-radius: var(--th-r-sm); padding: var(--th-space-10); display: flex; flex-direction: column; gap: var(--th-space-6); }
 .th-agent__warn { margin: 0; font-size: var(--th-fs-2xs); color: var(--th-warning-ink); }
+
+/* Variant row thumbnail — the colourway's own photo, or its colour chip when
+   the provider gave no image. */
+.th-studio__vthumb { width: 26px; height: 26px; border-radius: 6px; object-fit: cover; flex: 0 0 auto; border: 1px solid var(--th-line); }
+.th-studio__vthumb--none { display: inline-block; background: var(--th-line); }

@@ -45,6 +45,18 @@ type Selection =
 
 const money = (minor: number): string => `$${(minor / 100).toFixed(2)}`;
 
+/**
+ * The colour chip shown when a variant has no photo. Same rule the storefront
+ * uses: one code is solid, two are a hard split — never a blend, because a
+ * gradient between the two invents a colour that is on neither.
+ */
+function swatchStyle(codes?: string[]): React.CSSProperties {
+  const safe = (codes ?? []).filter((c) => /^#[0-9a-f]{3,8}$/i.test(c));
+  if (!safe.length) return {};
+  if (safe.length === 1) return { background: safe[0] };
+  return { background: `linear-gradient(135deg, ${safe[0]} 0 50%, ${safe[1]} 50% 100%)` };
+}
+
 export function ProductStudio({
   initial,
   allCategories,
@@ -197,6 +209,13 @@ export function ProductStudio({
             className={'th-studio__item th-studio__item--row' + (sel.kind === 'variant' && sel.id === v.id ? ' is-sel' : '')}
             onClick={() => setSel({ kind: 'variant', id: v.id })}
           >
+            {/* The variant's OWN photo. The backend showed only the product
+                image, so every colourway looked identical here while the
+                storefront showed them correctly — which reads as the sync
+                being broken rather than the editor not displaying it. */}
+            {v.image
+              ? <img className="th-studio__vthumb" src={v.image} alt="" loading="lazy" />
+              : <span className="th-studio__vthumb th-studio__vthumb--none" style={swatchStyle(v.colorCodes)} />}
             <span>{[v.color, v.size].filter(Boolean).join(' / ') || v.sku || 'Variant'}</span>
             <span className="th-hint">{money(v.price)}</span>
           </button>
@@ -488,6 +507,15 @@ export function ProductStudio({
               }}
             />
           </label>
+          {selectedVariant.image && (
+            <img className="th-studio__preview" src={selectedVariant.image} alt={[selectedVariant.color, selectedVariant.size].filter(Boolean).join(' / ')} />
+          )}
+          {!!(selectedVariant.colorCodes ?? []).length && (
+            <p className="th-hint">
+              <span className="th-studio__vthumb" style={{ ...swatchStyle(selectedVariant.colorCodes), width: 14, height: 14, display: 'inline-block', verticalAlign: 'middle', marginRight: 6 }} />
+              {selectedVariant.color} · {(selectedVariant.colorCodes ?? []).join(' + ')}
+            </p>
+          )}
           <label className="th-studio__field">
             <span>Stock</span>
             {/* Status first. The quantity box appears only for "Set a

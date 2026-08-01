@@ -12,6 +12,10 @@ interface Variant {
   size: string | null;
   inventory: number;
   stockStatus: string;
+  /** The variant's OWN photo — a colourway is a different picture. */
+  image?: string | null;
+  /** Provider hex for this colour; 2 entries = two-tone. */
+  colorCodes?: string[];
   reserved: number;
 }
 interface Term {
