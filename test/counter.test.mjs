@@ -856,6 +856,155 @@ describe('woo bridge discovery (how a partner finds us)', () => {
   });
 });
 
+describe("printful plugin routes (the 'Valid route not found' sync error)", () => {
+  // Printful does not drive the store through the WooCommerce API alone. After
+  // connecting it calls routes its own WordPress plugin registers, and when
+  // those are missing the sync fails with:
+  //
+  //   "Valid route not found. Please make sure latest Printful plugin is
+  //    installed and REST API enabled!"
+  //
+  // which reads as a WordPress problem and gets the credentials blamed instead.
+  // The namespace is the trap: the plugin registers under wc/v2, not wc/v3.
+  let app, key, secret, product;
+
+  before(async () => {
+    const { buildServer } = await import('../dist/server.js');
+    const { storeCredentials } = await import('../dist/counter/storeCredentials.js');
+    app = await buildServer();
+    const issued = await storeCredentials.issue('PrintfulRouteTest key', 'read_write');
+    key = issued.consumerKey;
+    secret = issued.consumerSecret;
+    product = await db.product.create({
+      data: { name: 'pfroute Tee', slug: `pfroute-${Date.now()}`, status: 'active' },
+    });
+  });
+
+  after(async () => {
+    await db.product.deleteMany({ where: { slug: { startsWith: 'pfroute-' } } }).catch(() => {});
+    await db.storeCredential.deleteMany({ where: { label: { startsWith: 'PrintfulRouteTest' } } });
+    await db.setting.deleteMany({ where: { key: 'printful_link' } }).catch(() => {});
+    await app.close();
+  });
+
+  const auth = () => ({ authorization: `Basic ${Buffer.from(`${key}:${secret}`).toString('base64')}` });
+
+  test('every route Printful calls exists — none may 404', async () => {
+    // A 404 on ANY of these produces the error above. Asserted as "not 404"
+    // rather than "200" so the reason a route fails stays visible.
+    const routes = [
+      ['GET', '/wp-json/wc/v2/printful/store_data'],
+      ['GET', '/wp-json/wc/v2/printful/version'],
+      ['POST', '/wp-json/wc/v2/printful/access'],
+      ['POST', `/wp-json/wc/v2/printful/products/${product.id}/size-chart`],
+      ['POST', `/wp-json/wc/v2/printful/products/${product.id}/advanced-size-chart`],
+    ];
+    for (const [method, url] of routes) {
+      const r = await app.inject({ method, url, headers: auth(), payload: method === 'POST' ? {} : undefined });
+      assert.notEqual(r.statusCode, 404, `${method} ${url} does not exist — this IS the sync error`);
+    }
+  });
+
+  test('discovery advertises wc/v2, or Printful never calls the routes at all', async () => {
+    const root = await app.inject({ method: 'GET', url: '/wp-json/' });
+    assert.ok(root.json().namespaces.includes('wc/v2'), 'wc/v2 missing from the namespace list');
+    const ns = await app.inject({ method: 'GET', url: '/wp-json/wc/v2' });
+    assert.equal(ns.statusCode, 200);
+    assert.equal(ns.json().namespace, 'wc/v2');
+  });
+
+  test('store_data identifies this store by the host Printful actually reached', async () => {
+    const r = await app.inject({ method: 'GET', url: '/wp-json/wc/v2/printful/store_data', headers: auth() });
+    assert.equal(r.statusCode, 200);
+    const body = r.json();
+    // An empty website is how a store ends up linked to an address Printful
+    // cannot reach — it must be a real absolute URL.
+    assert.match(body.website, /^https?:\/\/.+/, 'website must be an absolute URL');
+    assert.ok(body.name, 'store name present');
+    assert.ok(body.version, 'Woo version present');
+  });
+
+  test('the plugin routes are GATED — they are not public', async () => {
+    for (const url of ['/wp-json/wc/v2/printful/store_data', '/wp-json/wc/v2/printful/version']) {
+      assert.equal((await app.inject({ method: 'GET', url })).statusCode, 401, url);
+    }
+  });
+
+  test('access: Printful pushes its token back and it is stored ENCRYPTED', async () => {
+    const r = await app.inject({
+      method: 'POST',
+      url: '/wp-json/wc/v2/printful/access',
+      headers: auth(),
+      payload: { token: 'pf-oauth-token-under-test', storeId: 987654 },
+    });
+    assert.equal(r.statusCode, 200);
+    assert.equal(r.json().error, false);
+
+    const { printfulLink } = await import('../dist/services/printfulLink.service.js');
+    assert.equal(await printfulLink.storeId(), 987654);
+    assert.equal(await printfulLink.token(), 'pf-oauth-token-under-test');
+
+    // The row itself must not contain the token in the clear. A credential
+    // readable straight out of the settings table is a credential leaked by
+    // any backup, log, or admin export that touches it.
+    const row = await db.setting.findUnique({ where: { key: 'printful_link' } });
+    assert.doesNotMatch(JSON.stringify(row.value), /pf-oauth-token-under-test/, 'token stored in plaintext');
+  });
+
+  test('access: a bad payload reports the error in the BODY, as their client expects', async () => {
+    // The plugin answers 200 with {error: "..."} rather than a status code.
+    // A 400 here is a shape Printful does not parse.
+    const r = await app.inject({
+      method: 'POST', url: '/wp-json/wc/v2/printful/access', headers: auth(),
+      payload: { token: '', storeId: 0 },
+    });
+    assert.equal(r.statusCode, 200);
+    assert.equal(r.json().error, 'Failed to update access data');
+  });
+
+  test('access requires read_write — a catalogue-only key cannot re-point the store', async () => {
+    const { storeCredentials } = await import('../dist/counter/storeCredentials.js');
+    const ro = await storeCredentials.issue('PrintfulRouteTest readonly', 'read');
+    const r = await app.inject({
+      method: 'POST', url: '/wp-json/wc/v2/printful/access',
+      headers: { authorization: `Basic ${Buffer.from(`${ro.consumerKey}:${ro.consumerSecret}`).toString('base64')}` },
+      payload: { token: 'nope', storeId: 1 },
+    });
+    assert.equal(r.statusCode, 403);
+  });
+
+  test('size charts land on the product, both the HTML and structured forms', async () => {
+    const plain = await app.inject({
+      method: 'POST', url: `/wp-json/wc/v2/printful/products/${product.id}/size-chart`,
+      headers: auth(), payload: { size_chart: '<table><tr><td>S</td></tr></table>' },
+    });
+    assert.equal(plain.statusCode, 200);
+
+    const advanced = await app.inject({
+      method: 'POST', url: `/wp-json/wc/v2/printful/products/${product.id}/advanced-size-chart`,
+      headers: auth(), payload: { size_chart: { types: [{ unit: 'inches' }] } },
+    });
+    assert.equal(advanced.statusCode, 200);
+
+    const row = await db.product.findUnique({ where: { id: product.id } });
+    assert.match(row.meta.pf_size_chart, /<table>/);
+    assert.equal(row.meta.pf_advanced_size_chart.types[0].unit, 'inches');
+
+    // The second write must not have wiped the first — they are separate keys
+    // on one JSON column, so a naive overwrite loses whichever arrived first.
+    assert.ok(row.meta.pf_size_chart && row.meta.pf_advanced_size_chart, 'one chart overwrote the other');
+  });
+
+  test('size chart for a product that does not exist is refused, not silently stored', async () => {
+    const r = await app.inject({
+      method: 'POST', url: '/wp-json/wc/v2/printful/products/no-such-product/size-chart',
+      headers: auth(), payload: { size_chart: '<table></table>' },
+    });
+    assert.equal(r.statusCode, 400);
+    assert.equal(r.json().code, 'printful_api_product_not_found');
+  });
+});
+
 describe('woo auth handshake (one-click partner connect)', () => {
   // The flow behind a partner's "Connect to WooCommerce" button: it sends the
   // merchant to the store, the merchant approves once, and the store POSTs

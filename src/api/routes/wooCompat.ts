@@ -4,6 +4,7 @@ import { db } from '../../lib/db.js';
 import { storeCredentials, readStoreCredential } from '../../counter/storeCredentials.js';
 import { toMajor } from '../../counter/currency.js';
 import { settingsService } from '../../services/settings.service.js';
+import { printfulLink } from '../../services/printfulLink.service.js';
 
 // A WooCommerce-shaped read surface, so print-on-demand platforms can connect.
 //
@@ -177,13 +178,17 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
       home: '',
       gmt_offset: 0,
       timezone_string: 'UTC',
-      namespaces: ['wp/v2', 'wc/v3'],
+      // wc/v2 is not legacy support — it is where Printful's plugin registers
+      // its own routes, and their client checks this list before calling them.
+      namespaces: ['wp/v2', 'wc/v2', 'wc/v3'],
       authentication: {},
       routes: {
         '/wc/v3': { namespace: 'wc/v3', methods: ['GET'] },
         '/wc/v3/products': { namespace: 'wc/v3', methods: ['GET'] },
         '/wc/v3/orders': { namespace: 'wc/v3', methods: ['GET', 'POST'] },
         '/wc/v3/system_status': { namespace: 'wc/v3', methods: ['GET'] },
+        '/wc/v2': { namespace: 'wc/v2', methods: ['GET'] },
+        '/wc/v2/printful/store_data': { namespace: 'wc/v2', methods: ['GET'] },
       },
     });
   };
@@ -198,6 +203,21 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
         '/wc/v3/products': { namespace: 'wc/v3', methods: ['GET'] },
         '/wc/v3/orders': { namespace: 'wc/v3', methods: ['GET', 'PUT'] },
         '/wc/v3/system_status': { namespace: 'wc/v3', methods: ['GET'] },
+      },
+    });
+  });
+
+  /**
+   * The wc/v2 namespace index. Only `store_data` is advertised here — the
+   * plugin marks the rest `show_in_index => false`, and a partner that sees a
+   * route it does not expect in this list is a partner debugging our store
+   * instead of syncing it.
+   */
+  app.get('/wp-json/wc/v2', async (_req, reply) => {
+    reply.send({
+      namespace: 'wc/v2',
+      routes: {
+        '/wc/v2/printful/store_data': { namespace: 'wc/v2', methods: ['GET'] },
       },
     });
   });
@@ -519,4 +539,147 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     if (next) await db.order.update({ where: { id }, data: { status: next } });
     reply.send({ id, status: next ?? order.status });
   });
+
+  // ---------------------------------------------------------------------
+  // Printful's own plugin surface.
+  //
+  // Printful does NOT drive a Woo store through the WooCommerce API alone. Its
+  // WordPress plugin registers a handful of extra routes, and after connecting,
+  // Printful calls THOSE. When they are missing the sync fails with a message
+  // that sends the merchant hunting in entirely the wrong place:
+  //
+  //   "Valid route not found. Please make sure latest Printful plugin is
+  //    installed and REST API enabled!"
+  //
+  // — which reads as a WordPress problem, so the credentials get blamed and
+  // regenerated, repeatedly, while the actual answer is that these five
+  // endpoints do not exist. Shapes below are taken from the published plugin
+  // (printful-shipping-for-woocommerce 2.2.12, class-printful-rest-api-controller.php).
+  //
+  // Note the namespace: the plugin registers under wc/v2, NOT wc/v3. Serving
+  // them on v3 alone leaves the error exactly as it was.
+
+  const PF = '/wp-json/wc/v2/printful';
+
+  /** Printful's routes are EDITABLE = POST | PUT | PATCH, so all three. */
+  const editable = ['POST', 'PUT', 'PATCH'] as const;
+
+  /**
+   * The store's public address, as Printful stores it to build links back.
+   * Derived from the request rather than configuration: this must match the
+   * host Printful actually reached, or its store record points somewhere it
+   * cannot get to.
+   */
+  function storeUrl(req: FastifyRequest): string {
+    const configured = process.env.PUBLIC_ORIGIN?.replace(/\/+$/, '');
+    if (configured) return configured;
+    const proto = (req.headers['x-forwarded-proto'] as string | undefined) ?? req.protocol;
+    return `${proto}://${req.headers.host ?? ''}`;
+  }
+
+  /** Identifies the store to Printful before anything is synced. */
+  app.get(`${PF}/store_data`, authed, async (req, reply) => {
+    const site = await settingsService.getSite();
+    reply.send({
+      website: storeUrl(req),
+      // The WooCommerce API version we speak — Printful gates features on it.
+      version: '9.0.0',
+      name: site.siteName || 'Therum OS',
+    });
+  });
+
+  /**
+   * Printful's debug view of the connection. Their support asks for this
+   * output, so it reports what is ACTUALLY true here rather than echoing
+   * plausible-looking OKs — a checklist that always says OK is worse than none.
+   */
+  app.get(`${PF}/version`, authed, async (_req, reply) => {
+    const storeId = await printfulLink.storeId();
+    const linked = storeId !== null;
+    reply.send({
+      // The plugin version whose surface this implements, so Printful's
+      // minimum-version check passes. Their client compares this string.
+      version: '2.2.12',
+      store_id: storeId ?? false,
+      error: false,
+      status_checklist: {
+        overall_status: linked ? 'OK' : 'NOT CONNECTED',
+        items: {
+          api_key: { status: linked ? 'OK' : 'NOT CONNECTED', label: 'Printful access token' },
+          store_id: { status: linked ? 'OK' : 'NOT CONNECTED', label: 'Printful store id' },
+          rest_api: { status: 'OK', label: 'REST API reachable' },
+        },
+      },
+    });
+  });
+
+  /**
+   * Printful pushing ITS credentials back to the store — the step that makes
+   * the connection two-way. Requires read_write: a key that may only read the
+   * catalogue has no business changing what this store authenticates as.
+   */
+  for (const method of editable) {
+    app.route({
+      method,
+      url: `${PF}/access`,
+      preHandler: authenticate,
+      handler: async (req, reply) => {
+        if (!requireWrite(req, reply)) return;
+        const body = (req.body ?? {}) as { token?: unknown; storeId?: unknown };
+        const token = typeof body.token === 'string' ? body.token : '';
+        const storeId = Number.parseInt(String(body.storeId ?? ''), 10);
+
+        // The plugin returns {error: "..."} with HTTP 200 here rather than a
+        // status code, and Printful reads the body. Matching that exactly,
+        // because a 400 is a shape their client does not expect.
+        if (!token || !Number.isFinite(storeId) || storeId <= 0) {
+          reply.send({ error: 'Failed to update access data' });
+          return;
+        }
+        await printfulLink.save(token, storeId);
+        reply.send({ error: false });
+      },
+    });
+  }
+
+  /**
+   * Size charts, pushed per product. Two routes, one handler — Printful sends
+   * a ready-made HTML table to the first and a structured object to the
+   * second, and which one arrives depends on the product.
+   *
+   * Stored on `product.meta` under the same keys the plugin writes to post
+   * meta, so the storefront has one place to look.
+   */
+  for (const method of editable) {
+    for (const [suffix, metaKey] of [
+      ['size-chart', 'pf_size_chart'],
+      ['advanced-size-chart', 'pf_advanced_size_chart'],
+    ] as const) {
+      app.route({
+        method,
+        url: `${PF}/products/:productId/${suffix}`,
+        preHandler: authenticate,
+        handler: async (req, reply) => {
+          if (!requireWrite(req, reply)) return;
+          const { productId } = req.params as { productId: string };
+          const chart = (req.body as { size_chart?: unknown } | undefined)?.size_chart;
+          if (chart === undefined || chart === null || chart === '') {
+            wooError(reply, 400, 'printful_api_size_chart_empty', 'No size chart was provided');
+            return;
+          }
+          const product = await db.product.findUnique({ where: { id: productId } });
+          if (!product) {
+            wooError(reply, 400, 'printful_api_product_not_found', 'The product is not found');
+            return;
+          }
+          const meta = (product.meta ?? {}) as Record<string, unknown>;
+          await db.product.update({
+            where: { id: productId },
+            data: { meta: { ...meta, [metaKey]: chart } as object },
+          });
+          reply.send({ product: { id: productId }, size_chart: chart });
+        },
+      });
+    }
+  }
 }
