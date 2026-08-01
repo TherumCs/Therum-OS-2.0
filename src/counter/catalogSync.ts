@@ -108,8 +108,13 @@ const printful: CatalogProvider = {
     // Accounts with more than one store 400 without this.
     if (storeId) headers['X-PF-Store-Id'] = String(storeId);
 
+    // `/store/products` is the WRONG endpoint and fails in a way that reads as
+    // an account problem: Printful answers 400 "This API endpoint applies only
+    // to Printful stores based on the Manual Order / API platform." A store
+    // connected to WooCommerce is not that platform, so the products live under
+    // `/sync/products` instead. Both exist, only one works per store type.
     const summaries = await json<{ id: number; name: string; thumbnail_url?: string }[]>(
-      'https://api.printful.com/store/products',
+      'https://api.printful.com/sync/products?limit=100',
       headers,
       'Printful',
     );
@@ -117,14 +122,36 @@ const printful: CatalogProvider = {
     for (const s of summaries ?? []) {
       const detail = await json<{
         sync_product?: { id: number; name: string; thumbnail_url?: string };
-        sync_variants?: { id: number; sku?: string | null; retail_price?: string | null; size?: string | null; color?: string | null; product?: { image?: string | null } }[];
-      }>(`https://api.printful.com/store/products/${s.id}`, headers, 'Printful').catch(() => null);
+        sync_variants?: {
+          id: number; sku?: string | null; retail_price?: string | null; size?: string | null; color?: string | null;
+          files?: { type?: string; preview_url?: string | null }[];
+          product?: { image?: string | null };
+        }[];
+      }>(`https://api.printful.com/sync/products/${s.id}`, headers, 'Printful').catch(() => null);
       if (!detail) continue;
       const p = detail.sync_product ?? s;
+
+      /**
+       * Printful's `thumbnail_url` points at the store it was synced FROM —
+       * here `https://sidemoney.co/wp-content/uploads/…`, the old WordPress
+       * install. That path does not exist on this server, so taking it would
+       * import five products whose every image 404s, which looks like a broken
+       * import rather than a wrong image source.
+       *
+       * Printful's own CDN always has the artwork, so prefer it: the variant's
+       * rendered preview first (that is the actual design), then the blank
+       * product shot, and only then the thumbnail — and never a thumbnail
+       * hosted anywhere but Printful.
+       */
+      const firstVariant = detail.sync_variants?.[0];
+      const previewOf = (type: string) =>
+        firstVariant?.files?.find((f) => f.type === type && f.preview_url)?.preview_url ?? null;
+      const cdnThumb = p.thumbnail_url?.includes('files.cdn.printful.com') ? p.thumbnail_url : null;
+
       out.push({
         sourceId: String(p.id),
         name: p.name,
-        image: p.thumbnail_url ?? detail.sync_variants?.[0]?.product?.image ?? null,
+        image: previewOf('preview') ?? previewOf('default') ?? firstVariant?.product?.image ?? cdnThumb ?? null,
         variants: (detail.sync_variants ?? [])
           .map((v) => {
             const price = money(v.retail_price);
