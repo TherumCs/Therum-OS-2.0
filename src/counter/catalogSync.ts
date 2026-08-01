@@ -81,7 +81,11 @@ const printful: CatalogProvider = {
   id: 'printful',
   label: 'Printful',
   async fetch(credential) {
-    const [token, , storeId] = credential.split('|');
+    // The vault stores the fields joined with '|' IN CATALOG ORDER: token,
+    // then Store ID. This read skipped index 1 and took index 2, so the Store
+    // ID a merchant typed was silently ignored — and an account with more than
+    // one store 400s without that header. It looked like a Printful problem.
+    const [token, storeId] = credential.split('|');
     const headers: Record<string, string> = {
       'content-type': 'application/json',
       authorization: `Bearer ${token ?? credential}`,

@@ -40,7 +40,6 @@ const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
   // and cannot be a fixed endpoint.
   square: { authorizeUrl: 'https://connect.squareup.com/oauth2/authorize', tokenUrl: 'https://connect.squareup.com/oauth2/token', scope: 'MERCHANT_PROFILE_READ PAYMENTS_WRITE ORDERS_WRITE ITEMS_READ', tokenField: 'access_token' },
   stripe: { authorizeUrl: 'https://connect.stripe.com/oauth/authorize', tokenUrl: 'https://connect.stripe.com/oauth/token', scope: 'read_write', tokenField: 'access_token' },
-  printful: { authorizeUrl: 'https://www.printful.com/oauth/authorize', tokenUrl: 'https://api.printful.com/oauth/token', scope: 'orders/read orders/write products/read', tokenField: 'access_token' },
   etsy: { authorizeUrl: 'https://www.etsy.com/oauth/connect', tokenUrl: 'https://api.etsy.com/v3/public/oauth/token', scope: 'listings_r transactions_r', tokenField: 'access_token' },
   mailchimp: { authorizeUrl: 'https://login.mailchimp.com/oauth2/authorize', tokenUrl: 'https://login.mailchimp.com/oauth2/token', scope: '', tokenField: 'access_token' },
   hubspot: { authorizeUrl: 'https://app.hubspot.com/oauth/authorize', tokenUrl: 'https://api.hubapi.com/oauth/v1/token', scope: 'crm.objects.contacts.read', tokenField: 'access_token' },

@@ -121,6 +121,13 @@ const TESTERS: Record<string, Tester> = {
   // Messaging & APIs
   sendgrid: (c) => bearerGet('https://api.sendgrid.com/v3/user/account', c),
   resend: (c) => bearerGet('https://api.resend.com/domains', c),
+  // Basic auth with the key as the USERNAME and no password — the trailing
+  // colon is load-bearing. Sent as a bearer token this returns 401 and the
+  // operator concludes their key is bad.
+  flodesk: (c) => get('https://api.flodesk.com/v1/segments', {
+    Authorization: `Basic ${Buffer.from(`${c}:`).toString('base64')}`,
+    'User-Agent': 'Therum OS (therum.studio)',
+  }),
   postmark: (c) => get('https://api.postmarkapp.com/server', { 'X-Postmark-Server-Token': c, Accept: 'application/json' }),
   mapbox: (c) => get(`https://api.mapbox.com/geocoding/v5/mapbox.places/test.json?access_token=${encodeURIComponent(c)}`, {}),
   telegram: (c) => get(`https://api.telegram.org/bot${encodeURIComponent(c)}/getMe`, {}),
