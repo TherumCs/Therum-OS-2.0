@@ -107,6 +107,44 @@ function validateCredential(provider: CatalogProvider, credential: string): void
 const OAUTH_CAPABLE = new Set(oauthService.providers());
 
 const TESTERS: Record<string, Tester> = {
+  // ── AI, apps and hosting, verified 2026-08-01 by live probe.
+  deepseek: (c) => bearerGet('https://api.deepseek.com/models', firstField(c)),
+  perplexity: (c) => post('https://api.perplexity.ai/chat/completions',
+    { Authorization: `Bearer ${firstField(c)}`, 'Content-Type': 'application/json' },
+    '{"model":"sonar","messages":[{"role":"user","content":"ping"}],"max_tokens":1}'),
+  elevenlabs: (c) => get('https://api.elevenlabs.io/v1/user', { 'xi-api-key': firstField(c) }),
+  airtable: (c) => bearerGet('https://api.airtable.com/v0/meta/whoami', firstField(c)),
+  hostinger: (c) => bearerGet('https://developers.hostinger.com/api/vps/v1/virtual-machines', firstField(c)),
+  // Ollama is the operator's OWN server, so the stored value is a base URL
+  // rather than a key. /api/tags is the cheapest proof it is reachable and
+  // actually Ollama.
+  ollama: (c) => get(`${firstField(c).replace(/\/+$/, '')}/api/tags`, {}),
+  zoom: async (c) => {
+    const [accountId, clientId, secret] = c.split('|');
+    if (!accountId || !clientId || !secret) return { ok: false, detail: 'Expected an Account ID, Client ID and Client Secret.' };
+    return post(`https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${encodeURIComponent(accountId)}`,
+      { Authorization: basicAuthHeader(clientId, secret) });
+  },
+  // Jira and Zendesk are per-tenant like Shopify: the URL comes from the
+  // operator's own site, and a fixed host 404s for everybody.
+  jira: async (c) => {
+    const [site, email, token] = c.split('|');
+    if (!site || !email || !token) return { ok: false, detail: 'Expected a Site URL, an Email and an API Token.' };
+    return get(`${site.replace(/\/+$/, '')}/rest/api/3/myself`, { Authorization: basicAuthHeader(email, token), Accept: 'application/json' });
+  },
+  zendesk: async (c) => {
+    const [subdomain, email, token] = c.split('|');
+    if (!subdomain || !email || !token) return { ok: false, detail: 'Expected a Subdomain, an Email and an API Token.' };
+    // Zendesk wants the literal "/token" suffix on the username.
+    return get(`https://${subdomain}.zendesk.com/api/v2/users/me.json`, { Authorization: basicAuthHeader(`${email}/token`, token) });
+  },
+  salesforce: async (c) => {
+    const [instance, clientId, secret] = c.split('|');
+    if (!instance || !clientId || !secret) return { ok: false, detail: 'Expected an Instance URL, Client ID and Client Secret.' };
+    return post(`${instance.replace(/\/+$/, '')}/services/oauth2/token`, { 'Content-Type': 'application/x-www-form-urlencoded' },
+      `grant_type=client_credentials&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(secret)}`);
+  },
+
   // ── Ecommerce + identity, verified 2026-08-01 by live probe.
   // Shopify and BigCommerce are addressed BY THE MERCHANT'S OWN STORE, so the
   // tester has to build the URL from the stored domain/hash. A fixed host 404s

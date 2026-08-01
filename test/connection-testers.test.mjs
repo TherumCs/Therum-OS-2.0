@@ -45,6 +45,16 @@ const CASES = [
   ['etsy', 'bogusetsykey|bogussecret'],
   ['amazon', 'amzn1.application-oa2-client.bogus|bogussecret|bogusrefresh'],
   ['facebook-login', '123456|bogussecret'],
+  // AI, apps, hosting.
+  ['deepseek', 'sk-bogusdeepseekkey'],
+  ['perplexity', 'pplx-bogusperplexitykey'],
+  ['elevenlabs', 'boguselevenlabskey'],
+  ['airtable', 'bogusairtabletoken|appBogusBaseId1'],
+  ['hostinger', 'bogushostingertoken'],
+  ['zoom', 'bogusacct|bogusclient|bogussecret'],
+  ['jira', 'https://therum-probe.atlassian.net|a@b.com|bogustoken'],
+  ['zendesk', 'therum-probe|a@b.com|bogustoken'],
+  ['salesforce', 'https://login.salesforce.com|bogusclient|bogussecret'],
 ];
 
 let online = true;
@@ -81,7 +91,7 @@ for (const [provider, credential] of CASES) {
       `${provider} could not reach its endpoint — the tester URL is wrong, not the key`);
     // Shopify and BigCommerce build their URL from the merchant's own store, so
     // a store that does not exist answers 404 — correct, not a wrong endpoint.
-    const STORE_ADDRESSED = new Set(['shopify', 'bigcommerce', 'magento']);
+    const STORE_ADDRESSED = new Set(['shopify', 'bigcommerce', 'magento', 'jira', 'zendesk']);
     if (!STORE_ADDRESSED.has(provider)) {
       assert.doesNotMatch(result.detail, /^404/, `${provider} endpoint 404s — wrong URL`);
     }
