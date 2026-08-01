@@ -26,6 +26,12 @@ export interface NormalizedVariant {
   color: string | null;
   size: string | null;
   inventory: number;
+  /** How availability is decided — POD lines are 'in_stock', not a big number. */
+  stockStatus: string;
+  /** This variant's own photo, so picking a colour changes the picture. */
+  image: string | null;
+  /** Every other shot Printful renders for this variant: [{url, alt}]. */
+  images: { url: string; alt: string }[];
 }
 
 export interface NormalizedProduct {
@@ -50,10 +56,15 @@ export interface SyncResult {
   skipped: { name: string; reason: string }[];
 }
 
-// Print-on-demand has no stock to run out of. Zero would make every synced
-// product addable to a cart and then fail at checkout with "Insufficient
-// stock", so POD lines land effectively unlimited.
-const POD_INVENTORY = 999_999;
+// Print-on-demand has no stock to run out of, so POD lines are imported as
+// 'in_stock' — availability by STATUS, not by counting.
+//
+// This used to import an inventory of 999999 instead. That number showed up in
+// the admin as if it were a real count a merchant could edit, meant nothing,
+// and would have quietly become 999998 on the first sale. See
+// counter/availability.ts.
+const POD_STOCK = 'in_stock';
+const POD_INVENTORY = 0;
 
 async function json<T>(url: string, headers: Record<string, string>, label: string): Promise<T> {
   const res = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
@@ -146,6 +157,7 @@ const printful: CatalogProvider = {
       const firstVariant = detail.sync_variants?.[0];
       const previewOf = (type: string) =>
         firstVariant?.files?.find((f) => f.type === type && f.preview_url)?.preview_url ?? null;
+      // 'preview' is the mockup; 'default' is the bare artwork. Prefer the mockup.
       const cdnThumb = p.thumbnail_url?.includes('files.cdn.printful.com') ? p.thumbnail_url : null;
 
       out.push({
@@ -155,9 +167,38 @@ const printful: CatalogProvider = {
         variants: (detail.sync_variants ?? [])
           .map((v) => {
             const price = money(v.retail_price);
-            return price === null
-              ? null
-              : { sourceId: String(v.id), sku: v.sku ?? null, price, color: v.color ?? null, size: v.size ?? null, inventory: POD_INVENTORY };
+            if (price === null) return null;
+            /**
+             * PER-COLOUR image. The distinction matters and is easy to get
+             * wrong: `files` holds one entry per PLACEMENT — default, back,
+             * left, right — and those are the DESIGN ARTWORK, byte-identical
+             * across every colourway. Taking files[0] gave all 17 variants of
+             * this store just 5 distinct pictures between them, so picking a
+             * colour changed nothing.
+             *
+             * The `preview` entry is the generated MOCKUP: the design rendered
+             * on that specific colour, and genuinely different per variant
+             * (verified: 4 colours -> 4 distinct preview URLs). `product.image`
+             * is the blank garment in that colour — also per-colour, and the
+             * right fallback when no mockup has been generated.
+             */
+            const preview = (v.files ?? []).find((f) => f.type === 'preview' && f.preview_url)?.preview_url ?? null;
+            const blank = v.product?.image ?? null;
+            const image = preview ?? blank ?? (v.files ?? []).find((f) => f.preview_url)?.preview_url ?? null;
+            // The blank shot is worth keeping as a second angle, but only when
+            // it is not already the main image.
+            const shots = blank && blank !== image ? [{ url: blank, alt: `${v.color ?? ''}`.trim() }] : [];
+            return {
+              sourceId: String(v.id),
+              sku: v.sku ?? null,
+              price,
+              color: v.color ?? null,
+              size: v.size ?? null,
+              inventory: POD_INVENTORY,
+              stockStatus: POD_STOCK,
+              image,
+              images: shots,
+            };
           })
           .filter((v): v is NormalizedVariant => v !== null),
       });
@@ -195,6 +236,9 @@ const printify: CatalogProvider = {
           color: null,
           size: v.title ?? null,
           inventory: POD_INVENTORY,
+          stockStatus: POD_STOCK,
+          image: null,
+          images: [],
         }))
         .filter((v) => v.price > 0),
     }));
@@ -253,10 +297,30 @@ export const catalogSyncService = {
         for (const v of p.variants) {
           const found = await db.productVariant.findFirst({
             where: { productId: existing.id, sourceId: v.sourceId },
-            select: { id: true },
+            select: { id: true, stockStatus: true, inventory: true },
           });
           if (found) {
-            await db.productVariant.update({ where: { id: found.id }, data: { price: v.price, inventory: v.inventory } });
+            // Images and price are the provider's to own. `inventory` is NOT
+            // overwritten when the merchant has taken the variant off the
+            // provider's stock model — re-syncing must not undo a deliberate
+            // "only 3 of these" or an out-of-stock switch.
+            // 999999 is the old print-on-demand sentinel. Rows carrying it were
+            // never a merchant's real count, so a re-sync moves them onto the
+            // status model rather than leaving a fake number in the admin.
+            const legacySentinel = found.stockStatus === 'tracked' && found.inventory === 999_999;
+            // Provider stock is adopted while the merchant has not overridden
+            // it. Once they set their own status or count, re-syncing leaves it
+            // alone — undoing a deliberate "only 3 of these" would be worse
+            // than a stale number.
+            const providerOwnsStock = legacySentinel || found.stockStatus === v.stockStatus;
+            await db.productVariant.update({
+              where: { id: found.id },
+              data: {
+                price: v.price,
+                ...(v.image ? { image: v.image, images: v.images } : {}),
+                ...(providerOwnsStock ? { stockStatus: v.stockStatus, inventory: v.inventory } : {}),
+              },
+            });
           } else {
             await db.productVariant.create({ data: { ...v, productId: existing.id } });
           }

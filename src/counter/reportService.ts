@@ -1,5 +1,6 @@
 import { db } from '../lib/db.js';
 import { ValidationError } from '../lib/errors.js';
+import { availableOf } from './availability.js';
 
 // Counter — reports.
 //
@@ -181,6 +182,7 @@ export const reportService = {
         sku: true,
         inventory: true,
         reserved: true,
+        stockStatus: true,
         product: { select: { id: true, name: true, status: true } },
       },
     });
@@ -192,7 +194,7 @@ export const reportService = {
       productStatus: v.product.status,
       // Reserved stock is spoken for by open carts — available is what can
       // actually still be sold, and it is the number worth alerting on.
-      available: v.inventory - v.reserved,
+      available: availableOf(v),
       inventory: v.inventory,
     }));
   },

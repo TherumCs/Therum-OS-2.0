@@ -10,6 +10,7 @@ import { couponService } from './coupon.service.js';
 import { milieuService } from './milieu.service.js';
 import { capabilityService } from './capability.service.js';
 import { NotFoundError, ValidationError, ConflictError } from '../lib/errors.js';
+import { availableOf } from '../counter/availability.js';
 
 // Counter C2 — the unified cart/checkout session (1.x's core
 // differentiator: cart and checkout are ONE state container, two render
@@ -141,7 +142,7 @@ async function computeTotals(state: CartState): Promise<CartTotals> {
         quantity: i.quantity,
         unitPrice: v.price,
         lineTotal: v.price * i.quantity,
-        available: v.inventory - v.reserved,
+        available: availableOf(v),
       };
     });
 

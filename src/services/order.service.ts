@@ -129,9 +129,21 @@ export const orderService = {
       const order = await db.$transaction(async (tx) => {
         // Reserve each variant atomically; guard prevents overselling.
         for (const item of input.items) {
+          // The guard mirrors availableOf() in counter/availability.ts, in SQL
+          // so it stays atomic. Untracked lines (print-on-demand, backorder)
+          // still increment `reserved` — that is what makes the reservation
+          // releasable on cancel by the same code path — but they are not
+          // gated on a count they do not keep.
+          //
+          // 'out_of_stock' is refused explicitly rather than by arithmetic, so
+          // a merchant switching a variant off takes it off sale immediately
+          // regardless of what the inventory column happens to say.
           const reserved = await tx.$executeRaw`
             UPDATE product_variants SET reserved = reserved + ${item.quantity}
-            WHERE id = ${item.variantId} AND inventory - reserved >= ${item.quantity}`;
+            WHERE id = ${item.variantId}
+              AND stock_status <> 'out_of_stock'
+              AND (stock_status IN ('in_stock', 'backorder')
+                   OR inventory - reserved >= ${item.quantity})`;
           if (reserved !== 1) throw new ConflictError(`Insufficient stock for ${labelById.get(item.variantId) ?? item.variantId}`, 'items');
         }
 

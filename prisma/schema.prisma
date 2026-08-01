@@ -158,6 +158,31 @@ model ProductVariant {
   inventory      Int      @default(0)
   // Reserved (held) inventory; available = inventory - reserved.
   reserved       Int      @default(0)
+
+  /**
+   * How this variant's availability is decided.
+   *
+   *   tracked       — `inventory` is the truth; selling decrements it.
+   *   in_stock      — always sellable, no counting.
+   *   out_of_stock  — never sellable, whatever `inventory` says.
+   *   backorder     — sellable, and the buyer is told it ships later.
+   *
+   * Print-on-demand is the reason this exists. A POD line has no stock to run
+   * out of, and the previous workaround was to import it with an inventory of
+   * 999999 — which showed up in the admin as a real number a merchant could
+   * edit and mean nothing by, and would have silently become 999998 on the
+   * first sale.
+   */
+  stockStatus    String   @default("tracked") @map("stock_status")
+
+  /**
+   * The variant's OWN image. A colourway is a different photograph, and
+   * without this the gallery cannot change when the shopper picks one —
+   * which is what WooCommerce does and what its absence here looked like.
+   */
+  image          String?
+  /** Extra shots for this specific variant: [{url, alt}]. */
+  images         Json     @default("[]")
   meta           Json     @default("{}")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")

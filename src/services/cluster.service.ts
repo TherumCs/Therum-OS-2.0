@@ -1,6 +1,7 @@
 import { db } from '../lib/db.js';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
 import type { CreateClusterInput, UpdateClusterInput } from '../schemas/cluster.schema.js';
+import { availableOf } from '../counter/availability.js';
 
 // Cluster — symmetric product groups, ported from the 1.x group-engine
 // (docs/superpowers/specs/2026-07-22-cluster-native-design.md):
@@ -227,7 +228,7 @@ export const clusterService = {
                 createdAt: true,
                 vendor: { select: { id: true, name: true } },
                 variants: {
-                  select: { id: true, sku: true, price: true, color: true, size: true, inventory: true, reserved: true },
+                  select: { id: true, sku: true, price: true, color: true, size: true, inventory: true, reserved: true, stockStatus: true },
                 },
               },
             },
@@ -245,7 +246,7 @@ export const clusterService = {
     for (const m of orderMembers(g.members, primaryId)) {
       for (const v of m.product.variants) {
         const key = comboKey(v.color, v.size);
-        const available = v.inventory - v.reserved;
+        const available = availableOf(v);
         const entry = {
           variantId: v.id,
           sku: v.sku,
