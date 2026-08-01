@@ -321,10 +321,28 @@ export const HOST_ACTIONS: HostAction[] = [
     revert: 'ALTER SYSTEM RESET shared_buffers, then restart Postgres.',
     async run() {
       const mb = quarterOfRamMb();
-      // Interpolating a number this function computed, into a statement that
-      // takes no user input. ALTER SYSTEM cannot be parameterised.
-      await db.$executeRawUnsafe(`ALTER SYSTEM SET shared_buffers = '${mb}MB'`);
-      return `shared_buffers staged at ${mb}MB. Restart Postgres to apply — 'systemctl restart postgresql'. Until then the running value is unchanged.`;
+      // ALTER SYSTEM needs a superuser and the application role deliberately is
+      // not one. On the first real deployment this failed with "permission
+      // denied to set parameter" — the database being right, this action being
+      // wrong.
+      //
+      // The fix is NOT to grant sudo for `psql -u postgres`: that hands whoever
+      // holds this panel full control of every database plus file write as the
+      // postgres user, to move one tuning knob. So it tries, and when the role
+      // cannot, it hands back the exact command instead of pretending.
+      try {
+        await db.$executeRawUnsafe(`ALTER SYSTEM SET shared_buffers = '${mb}MB'`);
+        return `shared_buffers staged at ${mb}MB. Restart Postgres to apply — a reload will NOT do it, and until then the running value is unchanged.`;
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (!/permission denied|must be superuser/i.test(msg)) throw e;
+        throw new Error(
+          `This needs a Postgres superuser and the app's role is not one — which is correct. Run it on the box:\n\n` +
+            `  sudo -u postgres psql -c "ALTER SYSTEM SET shared_buffers = '${mb}MB';"\n` +
+            `  sudo -u postgres psql -c "ALTER SYSTEM SET effective_cache_size = '${Math.round((mb * 4) * 0.6)}MB';"\n` +
+            `  sudo systemctl restart postgresql`,
+        );
+      }
     },
   },
 

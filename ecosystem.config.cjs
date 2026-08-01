@@ -71,7 +71,11 @@ module.exports = {
       name: 'therum-cms-admin',
       cwd: './admin',
       script: 'node_modules/next/dist/bin/next',
-      args: 'start -p 3100',
+      // -H 127.0.0.1 because nginx is the only thing that should reach it.
+      // Next binds 0.0.0.0 by default, which the advisor flagged as an exposed
+      // port — true even behind a firewall, and one misconfigured rule away
+      // from being reachable.
+      args: 'start -p 3100 -H 127.0.0.1',
       instances: 1,
       exec_mode: 'fork',
       env: adminEnv,

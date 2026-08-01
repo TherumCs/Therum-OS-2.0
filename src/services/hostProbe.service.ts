@@ -359,7 +359,11 @@ export const PROBES: Probe[] = [
       // compression: nginx config can say `gzip on` and still not compress a
       // proxied response (that is the `gzip_proxied` trap this stack already
       // hit once).
-      const base = `http://127.0.0.1:${env.PORT}`;
+      // Measure the EDGE when there is one. Compression and cache headers are
+      // nginx's job, and hitting the origin on 127.0.0.1 skips nginx entirely —
+      // so a correctly configured box reported its HTML as uncompressed while
+      // the public site was serving 16 KB as 5.7 KB gzipped.
+      const base = process.env.PUBLIC_ORIGIN?.replace(/\/+$/, '') || `http://127.0.0.1:${env.PORT}`;
       const probeOne = async (path: string): Promise<Record<string, unknown>> => {
         const res = await fetch(`${base}${path}`, {
           headers: { 'accept-encoding': 'gzip, br', accept: 'text/html,*/*' },
@@ -464,9 +468,20 @@ export const PROBES: Probe[] = [
     label: 'Firewall',
     scope: 'deployed',
     run: async () => {
-      const ufw = await tryExec('ufw', ['status']);
-      if (ufw !== null) return { available: true, tool: 'ufw', active: /Status:\s*active/i.test(ufw) };
-      const nft = await tryExec('nft', ['list', 'ruleset']);
+      // BOTH tools need root to report their state. Unprivileged, `ufw status`
+      // exits non-zero with "You need to be root to run this script", which
+      // tryExec turns into null — and the rule then reported NO FIREWALL on a
+      // box whose firewall was active and correctly configured. A security
+      // check that cries wolf is worse than one that is absent, because the
+      // next real finding gets ignored too.
+      //
+      // `sudo -n` never prompts: without the grant this still yields null and
+      // the rule reports "could not determine" rather than a false alarm.
+      const ufw = (await tryExec('sudo', ['-n', 'ufw', 'status'])) ?? (await tryExec('ufw', ['status']));
+      if (ufw !== null && !/need to be root/i.test(ufw)) {
+        return { available: true, tool: 'ufw', active: /Status:\s*active/i.test(ufw) };
+      }
+      const nft = (await tryExec('sudo', ['-n', 'nft', 'list', 'ruleset'])) ?? (await tryExec('nft', ['list', 'ruleset']));
       if (nft !== null) return { available: true, tool: 'nftables', active: nft.trim().length > 0 };
       return { available: false, tool: null, active: false };
     },
