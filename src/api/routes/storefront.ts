@@ -30,6 +30,7 @@ import { shopToolbar, SHOP_TOOLBAR_RUNTIME } from '../../site/shopToolbar.js';
 import { accountMarkup, ACCOUNT_RUNTIME } from '../../site/accountPage.js';
 import { wishlistMarkup } from '../../site/wishlist.js';
 import { orderTrackingMarkup, ORDER_TRACKING_CSS, ORDER_TRACKING_RUNTIME } from '../../site/orderTracking.js';
+import { availableOf, stockLabel } from '../../counter/availability.js';
 
 // Counter C4 — the five public storefront surfaces, server-rendered from the
 // same Fastify process as the API (same origin, so the client runtime's
@@ -590,17 +591,32 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
       return html(reply, await page('Not found', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Product not found</h1><p class="page-sub"><a href="/shop" style="color:var(--ac-btn)">Back to the shop</a></p></div>', '', PRIVATE_PAGE));
     }
 
-    const variants = p.variants.map((v) => ({
-      id: v.id,
-      label: [v.color, v.size].filter(Boolean).join(' / ') || v.sku || 'Default',
-      price: v.price,
-      available: v.inventory - v.reserved,
-    }));
+    const variants = p.variants.map((v) => {
+      const shots = Array.isArray(v.images) ? (v.images as { url?: string; alt?: string }[]) : [];
+      return {
+        id: v.id,
+        label: [v.color, v.size].filter(Boolean).join(' / ') || v.sku || 'Default',
+        price: v.price,
+        // A BOOLEAN, not the count. An untracked variant's availability is a
+        // sentinel (a billion), and serialising it into the page leaves that
+        // number sitting in the HTML waiting to be rendered by the next person
+        // who reaches for it.
+        sellable: availableOf(v) > 0,
+        // What the shopper is TOLD. The raw number cannot be shown any more:
+        // an untracked line is a billion, and "1000000000 in stock" is worse
+        // than saying nothing.
+        stock: stockLabel(v).label,
+        // A colourway is a different photograph. Without these the gallery has
+        // nothing to change to when the shopper picks one.
+        image: v.image ?? null,
+        images: shots.filter((g) => g.url).map((g) => ({ url: g.url!, alt: g.alt ?? '' })),
+      };
+    });
 
     const picker = variants.map((v, i) => `
-      <button type="button" data-variant="${esc(v.id)}" data-price="${v.price}" ${v.available <= 0 ? 'disabled' : ''} class="${i === 0 && v.available > 0 ? 'sel' : ''}">${esc(v.label)}</button>`).join('');
+      <button type="button" data-variant="${esc(v.id)}" data-price="${v.price}" ${v.sellable ? '' : 'disabled'} class="${i === 0 && v.sellable ? 'sel' : ''}">${esc(v.label)}</button>`).join('');
 
-    const firstAvailable = variants.find((v) => v.available > 0);
+    const firstAvailable = variants.find((v) => v.sellable);
 
     // Gallery: stills + video, one strip. Selecting a video thumb plays it
     // (muted, controls) in the main slot; stills swap the image back in.
@@ -630,25 +646,31 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
           ${p.vendor ? `<span class="pill">${esc(p.vendor.name)}</span>` : ''}
           <h1 class="page-title" style="margin-top:10px">${esc(p.name)}</h1>
           <div class="price-big" id="price">${money(firstAvailable?.price ?? variants[0]?.price ?? 0)}</div>
-          <div class="stock-note" id="stock">${firstAvailable ? `${firstAvailable.available} in stock` : 'Out of stock'}</div>
+          <div class="stock-note" id="stock">${firstAvailable ? esc(firstAvailable.stock) : 'Sold out'}</div>
           ${variants.length > 1 ? `<label>Options</label><div class="variant-picker" id="picker">${picker}</div>` : ''}
           <button class="btn" id="add" ${firstAvailable ? '' : 'disabled'}>Add to cart</button>
           ${p.description ? `<div class="product-desc">${esc(p.description).replace(/\n/g, '<br>')}</div>` : ''}
           ${taxonomyPills ? `<div class="taxonomy-row">${taxonomyPills}</div>` : ''}
         </div>
       </div>`, `
-document.querySelectorAll('.gallery-thumb').forEach(b=>b.addEventListener('click',()=>{
-  document.querySelectorAll('.gallery-thumb').forEach(x=>x.classList.remove('sel'));
-  b.classList.add('sel');
-  const main=document.getElementById('gallery-main');
-  if(b.dataset.type==='video'){
-    main.innerHTML='<video controls muted playsinline autoplay src="'+b.dataset.src+'"'+(b.dataset.poster?' poster="'+b.dataset.poster+'"':'')+'></video>';
-  }else{
-    main.innerHTML='<img src="'+b.dataset.src+'" alt="">';
-  }
-}));
+function bindThumbs(){
+  document.querySelectorAll('.gallery-thumb').forEach(b=>b.addEventListener('click',()=>{
+    document.querySelectorAll('.gallery-thumb').forEach(x=>x.classList.remove('sel'));
+    b.classList.add('sel');
+    const main=document.getElementById('gallery-main');
+    if(b.dataset.type==='video'){
+      main.innerHTML='<video controls muted playsinline autoplay src="'+b.dataset.src+'"'+(b.dataset.poster?' poster="'+b.dataset.poster+'"':'')+'></video>';
+    }else{
+      main.innerHTML='<img src="'+b.dataset.src+'" alt="">';
+    }
+  }));
+}
+bindThumbs();
+// The product-level gallery, kept so a variant's shots can be shown in front
+// of it instead of throwing the other angles away.
+const PRODUCT_SHOTS=${JSON.stringify(gallery.filter((g) => g.type === 'image').map((g) => ({ url: g.url, alt: g.alt })))};
 const VARIANTS=${JSON.stringify(variants)};
-let sel=VARIANTS.find(v=>v.available>0)||VARIANTS[0];
+let sel=VARIANTS.find(v=>v.sellable)||VARIANTS[0];
 const picker=document.getElementById('picker');
 if(picker)picker.addEventListener('click',(e)=>{
   const b=e.target.closest('button[data-variant]');if(!b||b.disabled)return;
@@ -656,9 +678,34 @@ if(picker)picker.addEventListener('click',(e)=>{
   b.classList.add('sel');
   sel=VARIANTS.find(v=>v.id===b.dataset.variant);
   document.getElementById('price').textContent=(sel.price/100).toLocaleString('en-US',{style:'currency',currency:'USD'});
-  document.getElementById('stock').textContent=sel.available>0?sel.available+' in stock':'Out of stock';
-  document.getElementById('add').disabled=sel.available<=0;
+  // The label, never the count — an untracked variant's "available" is a
+  // sentinel, and printing it reads as a billion hats in a warehouse.
+  document.getElementById('stock').textContent=sel.stock;
+  document.getElementById('add').disabled=!sel.sellable;
+  showVariantShots(sel);
 });
+/**
+ * Picking a colour changes the picture, which is what a shopper expects and
+ * what WooCommerce does. The variant's own shots go in front of the product
+ * gallery rather than replacing it, so the other angles stay reachable.
+ */
+function showVariantShots(v){
+  if(!v||!v.image)return;
+  var strip=document.querySelector('.gallery-strip');
+  var main=document.getElementById('gallery-main');
+  if(main)main.innerHTML='<img src="'+v.image+'" alt="'+(v.label||'')+'">';
+  if(!strip)return;
+  var own=[{url:v.image,alt:v.label}].concat(v.images||[]);
+  var rest=PRODUCT_SHOTS.filter(function(g){
+    return !own.some(function(o){return o.url===g.url;});
+  });
+  strip.innerHTML=own.concat(rest).map(function(g,i){
+    return '<button type="button" class="gallery-thumb'+(i===0?' sel':'')+'" data-src="'+g.url+'" data-type="image" aria-label="'+(g.alt||'')+'">'+
+           '<img src="'+g.url+'" alt="'+(g.alt||'')+'" loading="lazy"></button>';
+  }).join('');
+  bindThumbs();
+}
+if(sel)showVariantShots(sel);
 document.getElementById('add').addEventListener('click',(e)=>{if(sel)addToCart(sel.id,1,e.target)});
 `, {
       description: (p.description ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300)
