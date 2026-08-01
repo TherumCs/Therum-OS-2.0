@@ -1116,6 +1116,27 @@ describe("printful plugin routes (the 'Valid route not found' sync error)", () =
     assert.ok(idx.json().routes['/wc/v2/system_status'], 'v2 index hides system_status');
   });
 
+  test('system_status carries active_plugins and a real site_url — the other half of Error: []', async () => {
+    // Printful got a 200 here and STILL stopped: it reads active_plugins to
+    // confirm the store speaks its protocol, we had no such key, and it
+    // reported the empty array to the merchant as `Error: []`.
+    const qs = `consumer_key=${key}&consumer_secret=${secret}`;
+    const r = await app.inject({ method: 'GET', url: `/wp-json/wc/v2/system_status?${qs}` });
+    assert.equal(r.statusCode, 200);
+    const body = r.json();
+
+    assert.ok(Array.isArray(body.active_plugins), 'active_plugins missing entirely');
+    assert.ok(body.active_plugins.length > 0, 'active_plugins is the empty array Printful reported');
+    assert.ok(body.active_plugins.some((p) => /printful/i.test(p.plugin)),
+      'Printful cannot find its own integration listed');
+    assert.ok(body.active_plugins.some((p) => /woocommerce\.php/.test(p.plugin)),
+      'WooCommerce itself is not listed');
+
+    // An empty site_url is a store the partner cannot place.
+    assert.match(body.environment.site_url, /^https?:\/\/.+/, 'site_url is empty');
+    assert.match(body.environment.home_url, /^https?:\/\/.+/, 'home_url is empty');
+  });
+
   test('discovery advertises wc/v2, or Printful never calls the routes at all', async () => {
     const root = await app.inject({ method: 'GET', url: '/wp-json/' });
     assert.ok(root.json().namespaces.includes('wc/v2'), 'wc/v2 missing from the namespace list');

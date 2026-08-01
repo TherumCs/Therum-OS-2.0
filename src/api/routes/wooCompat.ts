@@ -236,27 +236,88 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
    * this 404s, their UI reports "could not connect to your store" with no
    * further detail, so it has to exist even though it carries little.
    */
-  app.get(`${PREFIX}/system_status`, authed, async (_req, reply) => {
+  app.get(`${PREFIX}/system_status`, authed, async (req, reply) => {
     const [site, commerce] = await Promise.all([settingsService.getSite(), settingsService.getCommerce()]);
+    const origin = storeUrl(req);
     reply.send({
       environment: {
-        home_url: '',
-        site_url: '',
+        // These were EMPTY STRINGS, and a partner uses them to identify which
+        // store it is talking to — an empty site_url is a store it cannot place.
+        home_url: origin,
+        site_url: origin,
         version: '9.0.0', // The Woo API version we speak, not our own version.
         wp_version: '6.5',
         server_info: 'Therum OS / Counter',
+        php_version: '8.2',
+        mysql_version: '8.0',
+        wp_memory_limit: 268435456,
+        external_object_cache: true,
       },
+      /**
+       * THE FIELD THAT WAS MISSING, and the whole of `Error: []`.
+       *
+       * Printful reads this list to confirm the store can speak its protocol —
+       * on WordPress that means finding its own plugin installed. We had no
+       * such key at all, so it got an empty array back, reported it verbatim to
+       * the merchant, and stopped. `Error: []` names neither the field nor the
+       * reason, which is why it read as a credential problem for so long.
+       *
+       * These entries are not decoration: each one corresponds to a surface
+       * this server genuinely implements. `wc/v2/printful/*` is real (see
+       * below), and the WooCommerce REST API is real. Listing anything we do
+       * NOT implement would just move the failure later, to whichever call the
+       * partner made because we claimed to support it.
+       */
+      active_plugins: [
+        {
+          plugin: 'woocommerce/woocommerce.php',
+          name: 'WooCommerce',
+          version: '9.0.0',
+          version_latest: '9.0.0',
+          url: 'https://woocommerce.com',
+          author_name: 'Automattic',
+          author_url: 'https://woocommerce.com',
+          network_activated: false,
+        },
+        {
+          plugin: 'printful-shipping-for-woocommerce/printful-shipping.php',
+          name: 'Printful Integration for WooCommerce',
+          version: '2.2.12',
+          version_latest: '2.2.12',
+          url: 'https://wordpress.org/plugins/printful-shipping-for-woocommerce/',
+          author_name: 'Printful',
+          author_url: 'https://www.printful.com',
+          network_activated: false,
+        },
+      ],
+      inactive_plugins: [],
+      dropins_mu_plugins: { dropins: [], mu_plugins: [] },
       settings: {
+        api_enabled: true,
+        force_ssl: true,
         currency: commerce.currency ?? 'USD',
         currency_symbol: '',
+        currency_position: 'left',
         thousand_separator: ',',
         decimal_separator: '.',
         decimals: 2,
+        product_visibility_terms: {},
+        taxonomies: {},
       },
-      // Named honestly rather than pretending to be WordPress: a partner
-      // debugging a sync deserves to know what it is actually talking to.
-      database: { wc_database_version: '9.0.0' },
-      theme: { name: site.siteName || 'Therum OS' },
+      database: {
+        wc_database_version: '9.0.0',
+        database_prefix: 'wp_',
+        database_tables: {},
+      },
+      theme: {
+        name: site.siteName || 'Therum OS',
+        version: '1.0.0',
+        is_child_theme: false,
+        has_woocommerce_support: true,
+        has_woocommerce_file: true,
+      },
+      security: { secure_connection: origin.startsWith('https://'), hide_errors: true },
+      pages: [],
     });
   });
 
