@@ -88,14 +88,38 @@ export async function buildServer() {
      * it found a store with no products.
      */
     rewriteUrl(req) {
-      const raw = req.url ?? '/';
-      if (!raw.includes('rest_route=')) return raw;
-      const url = new URL(raw, 'http://x');
-      const route = url.searchParams.get('rest_route');
-      if (!route?.startsWith('/')) return raw;
-      url.searchParams.delete('rest_route');
-      const qs = url.searchParams.toString();
-      return `/wp-json${route}${qs ? `?${qs}` : ''}`;
+      let raw = req.url ?? '/';
+
+      if (raw.includes('rest_route=')) {
+        const url = new URL(raw, 'http://x');
+        const route = url.searchParams.get('rest_route');
+        if (route?.startsWith('/')) {
+          url.searchParams.delete('rest_route');
+          const qs = url.searchParams.toString();
+          raw = `/wp-json${route}${qs ? `?${qs}` : ''}`;
+        }
+      }
+
+      /**
+       * `wc/v2/<anything>` -> `wc/v3/<anything>`.
+       *
+       * WooCommerce's v2 and v3 namespaces are the same API; a store serving
+       * only v3 is a store a v2 client cannot use at all. Printful's client
+       * (`Printful WooCommerce Integration/3.1.0`) asks for
+       * `wc/v2/system_status` and nothing else it does matters if that 404s —
+       * it reports the empty body back to the merchant as `Error: []`, which
+       * names neither the route nor the version and sends everyone to look at
+       * the credentials instead.
+       *
+       * Printful's OWN plugin routes live at `wc/v2/printful/*` and are
+       * genuinely v2-only, so those are left alone — rewriting them to v3
+       * would 404 the very endpoints that were just added.
+       */
+      if (raw.startsWith('/wp-json/wc/v2/') && !raw.startsWith('/wp-json/wc/v2/printful')) {
+        raw = raw.replace('/wp-json/wc/v2/', '/wp-json/wc/v3/');
+      }
+
+      return raw;
     },
     logger: {
       level: env.LOG_LEVEL,

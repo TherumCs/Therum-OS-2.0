@@ -209,15 +209,23 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
   });
 
   /**
-   * The wc/v2 namespace index. Only `store_data` is advertised here — the
-   * plugin marks the rest `show_in_index => false`, and a partner that sees a
-   * route it does not expect in this list is a partner debugging our store
-   * instead of syncing it.
+   * The wc/v2 namespace index.
+   *
+   * v2 is a real, complete namespace here — every standard route is served on
+   * it, rewritten to v3 in `rewriteUrl` (they are the same API). Printful's
+   * client asks for `wc/v2/system_status`, so a v2 index listing only the
+   * plugin routes would advertise a namespace that cannot do the job.
+   *
+   * `printful/*` is the exception that is genuinely v2-only, and the plugin
+   * marks all of it `show_in_index => false` except `store_data`.
    */
   app.get('/wp-json/wc/v2', async (_req, reply) => {
     reply.send({
       namespace: 'wc/v2',
       routes: {
+        '/wc/v2/products': { namespace: 'wc/v2', methods: ['GET', 'POST'] },
+        '/wc/v2/orders': { namespace: 'wc/v2', methods: ['GET', 'PUT'] },
+        '/wc/v2/system_status': { namespace: 'wc/v2', methods: ['GET'] },
         '/wc/v2/printful/store_data': { namespace: 'wc/v2', methods: ['GET'] },
       },
     });

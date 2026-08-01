@@ -1090,6 +1090,32 @@ describe("printful plugin routes (the 'Valid route not found' sync error)", () =
     }
   });
 
+  test('the STANDARD Woo endpoints answer on wc/v2 too, with query-string keys', async () => {
+    // Printful's real client is `Printful WooCommerce Integration/3.1.0` and it
+    // calls `GET /wp-json/wc/v2/system_status?consumer_key=…&consumer_secret=…`.
+    // Serving only v3 404'd it, and Printful reported the empty body to the
+    // merchant as `Error: []` — naming neither the route nor the version.
+    const qs = `consumer_key=${key}&consumer_secret=${secret}`;
+    for (const path of ['system_status', 'products', 'orders']) {
+      const r = await app.inject({ method: 'GET', url: `/wp-json/wc/v2/${path}?${qs}` });
+      assert.equal(r.statusCode, 200, `wc/v2/${path} -> ${r.statusCode}`);
+    }
+
+    // v2 and v3 are the same API, so they must answer the same thing.
+    const v2 = await app.inject({ method: 'GET', url: `/wp-json/wc/v2/system_status?${qs}` });
+    const v3 = await app.inject({ method: 'GET', url: `/wp-json/wc/v3/system_status?${qs}` });
+    assert.deepEqual(v2.json(), v3.json(), 'v2 and v3 disagree');
+
+    // But the plugin routes are genuinely v2-only — rewriting them to v3 would
+    // 404 the very endpoints that fix the sync.
+    const plugin = await app.inject({ method: 'GET', url: `/wp-json/wc/v2/printful/store_data?${qs}` });
+    assert.equal(plugin.statusCode, 200, 'printful/* must NOT be rewritten to v3');
+
+    // The namespace index has to advertise them or a client will not look.
+    const idx = await app.inject({ method: 'GET', url: '/wp-json/wc/v2' });
+    assert.ok(idx.json().routes['/wc/v2/system_status'], 'v2 index hides system_status');
+  });
+
   test('discovery advertises wc/v2, or Printful never calls the routes at all', async () => {
     const root = await app.inject({ method: 'GET', url: '/wp-json/' });
     assert.ok(root.json().namespaces.includes('wc/v2'), 'wc/v2 missing from the namespace list');
