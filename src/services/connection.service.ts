@@ -129,6 +129,35 @@ const TESTERS: Record<string, Tester> = {
     'User-Agent': 'Therum OS (therum.studio)',
   }),
   postmark: (c) => get('https://api.postmarkapp.com/server', { 'X-Postmark-Server-Token': c, Accept: 'application/json' }),
+  // ── Messaging verified 2026-08-01 by live probe.
+  // The -us21 suffix on a Mailchimp key IS the datacenter, and the request must
+  // go to that host — sent to a fixed one, every valid key from another
+  // datacenter reads as invalid. Any username works; the key is the password.
+  mailchimp: async (c) => {
+    const key = firstField(c);
+    const dc = key.split('-')[1];
+    if (!dc) return { ok: false, detail: 'Key is missing its -us21 style suffix, which selects the datacenter.' };
+    return get(`https://${dc}.api.mailchimp.com/3.0/ping`, { Authorization: basicAuthHeader('therum', key) });
+  },
+  onesignal: async (c) => {
+    const [, restKey] = c.split('|');
+    if (!restKey) return { ok: false, detail: 'Expected an App ID and a REST API Key.' };
+    return get('https://api.onesignal.com/apps', { Authorization: `Basic ${restKey}` });
+  },
+  vonage: async (c) => {
+    // Vonage joins with ':' not '|' — see its catalog entry. Splitting on the
+    // wrong separator makes a correct credential look incomplete, and the test
+    // that caught this is the reason the file exists.
+    const parts = splitCredential(c);
+    if (!parts) return { ok: false, detail: 'Expected an API Key and an API Secret.' };
+    const [key, secret] = parts;
+    return get(`https://rest.nexmo.com/account/get-balance?api_key=${encodeURIComponent(key)}&api_secret=${encodeURIComponent(secret)}`, {});
+  },
+  whatsapp: async (c) => {
+    const [, token] = c.split('|');
+    if (!token) return { ok: false, detail: 'Expected a Phone Number ID and a Permanent Access Token.' };
+    return get(`https://graph.facebook.com/v21.0/me?access_token=${encodeURIComponent(token)}`, {});
+  },
   mapbox: (c) => get(`https://api.mapbox.com/geocoding/v5/mapbox.places/test.json?access_token=${encodeURIComponent(c)}`, {}),
   telegram: (c) => get(`https://api.telegram.org/bot${encodeURIComponent(c)}/getMe`, {}),
   discord: (c) => get('https://discord.com/api/v10/users/@me', { Authorization: `Bot ${c}` }),
@@ -170,6 +199,59 @@ const TESTERS: Record<string, Tester> = {
   square: (c) => bearerGet('https://connect.squareup.com/v2/locations', c),
   'coinbase-commerce': (c) => get('https://api.commerce.coinbase.com/charges', { 'X-CC-Api-Key': firstField(c) }),
   whop: (c) => bearerGet('https://api.whop.com/api/v2/me', c),
+  // ── Payments verified 2026-08-01 by probing each API with a deliberately
+  // bad key. A tester that was never run against the real endpoint is a green
+  // tick that means nothing.
+  mollie: (c) => bearerGet('https://api.mollie.com/v2/methods', firstField(c)),
+  razorpay: async (c) => {
+    const [id, secret] = c.split('|');
+    if (!id || !secret) return { ok: false, detail: 'Expected a Key ID and a Key Secret.' };
+    return get('https://api.razorpay.com/v1/payments', { Authorization: basicAuthHeader(id, secret) });
+  },
+  payu: async (c) => {
+    const [clientId, secret] = c.split('|');
+    if (!clientId || !secret) return { ok: false, detail: 'Expected a Client ID (POS ID) and a Client Secret.' };
+    return post('https://secure.payu.com/pl/standard/user/oauth/authorize', { 'Content-Type': 'application/x-www-form-urlencoded' },
+      `grant_type=client_credentials&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(secret)}`);
+  },
+  // Adyen and Klarna run SEPARATE live and test hosts, and a key is only valid
+  // on one of them. Trying live first and falling back means a sandbox key
+  // still reports connected instead of "invalid".
+  adyen: async (c) => {
+    const key = firstField(c);
+    const live = await get('https://management-live.adyen.com/v3/me', { 'X-API-Key': key });
+    return live.ok ? live : get('https://management-test.adyen.com/v3/me', { 'X-API-Key': key });
+  },
+  klarna: async (c) => {
+    const [uid, pw] = c.split('|');
+    if (!uid || !pw) return { ok: false, detail: 'Expected a Username (UID) and a Password (API key).' };
+    const auth = { Authorization: basicAuthHeader(uid, pw), 'Content-Type': 'application/json' };
+    const live = await post('https://api.klarna.com/payments/v1/sessions', auth, '{"purchase_country":"US","purchase_currency":"USD","order_amount":0,"order_lines":[]}');
+    if (live.ok) return live;
+    return post('https://api.playground.klarna.com/payments/v1/sessions', auth, '{"purchase_country":"US","purchase_currency":"USD","order_amount":0,"order_lines":[]}');
+  },
+  // Authorize.Net answers HTTP 200 EVEN WHEN AUTH FAILS — the real result is a
+  // code in the body (E00007 = bad credentials). Trusting the status here
+  // would mark every wrong key as connected.
+  authorizenet: async (c) => {
+    const [login, txKey] = c.split('|');
+    if (!login || !txKey) return { ok: false, detail: 'Expected an API Login ID and a Transaction Key.' };
+    try {
+      const res = await fetch('https://api.authorize.net/xml/v1/request.api', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ getMerchantDetailsRequest: { merchantAuthentication: { name: login, transactionKey: txKey } } }),
+      });
+      // Their response carries a UTF-8 BOM that breaks JSON.parse.
+      const text = (await res.text()).replace(/^\uFEFF/, '').replace(/\u0000/g, '');
+      const body = JSON.parse(text) as { messages?: { resultCode?: string; message?: { code?: string; text?: string }[] } };
+      const ok = body.messages?.resultCode === 'Ok';
+      const msg = body.messages?.message?.[0];
+      return { ok, detail: ok ? '200 OK' : `${msg?.code ?? 'error'}: ${msg?.text ?? 'authentication failed'}` };
+    } catch (e) {
+      return { ok: false, detail: e instanceof Error ? e.message : 'Network error' };
+    }
+  },
   wise: (c) => bearerGet('https://api.wise.com/v1/profiles', firstField(c)),
   paypal: async (c) => {
     const parts = splitCredential(c);
