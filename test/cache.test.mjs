@@ -10,12 +10,21 @@ import { settingsService } from '../dist/services/settings.service.js';
 
 let vendorId;
 
+let savedCacheToggle;
+
 before(async () => {
+  // The cache is gated by Settings > Performance > cache, and this dev box had
+  // it switched OFF — every assertion below then fails with "did not
+  // recompute", which reads as a broken cache rather than a disabled one.
+  // Tests own their preconditions.
+  savedCacheToggle = (await settingsService.getPerformance()).cache;
+  await settingsService.setPerformance({ cache: true });
   await invalidate('catalog');
   await invalidate('settings');
 });
 
 after(async () => {
+  await settingsService.setPerformance({ cache: savedCacheToggle });
   await db.product.deleteMany({ where: { slug: { startsWith: 'cachetest-' } } }).catch(() => {});
   if (vendorId) await db.vendor.delete({ where: { id: vendorId } }).catch(() => {});
   await disconnectDb();
@@ -114,4 +123,29 @@ test('undefined is never stored — it would come back as a hit of nothing', asy
   await cached('catalog', 'undef', compute);
   await cached('catalog', 'undef', compute);
   assert.equal(calls, 2, 'undefined is recomputed rather than served from cache');
+});
+
+test('Settings > Performance > cache actually gates the cache', async () => {
+  const saved = await settingsService.getPerformance();
+  try {
+    // On: a second read is served without recomputing.
+    await settingsService.setPerformance({ cache: true });
+    let calls = 0;
+    const compute = async () => { calls++; return 'value'; };
+    await cached('catalog', 'toggle-test', compute);
+    await cached('catalog', 'toggle-test', compute);
+    assert.equal(calls, 1, 'cached while the toggle is on');
+
+    // Off: every read recomputes. This toggle used to save and gate nothing,
+    // which the schema said out loud — a switch that does nothing is worse
+    // than no switch, because it is believed.
+    await settingsService.setPerformance({ cache: false });
+    let offCalls = 0;
+    const offCompute = async () => { offCalls++; return 'value'; };
+    await cached('catalog', 'toggle-test-off', offCompute);
+    await cached('catalog', 'toggle-test-off', offCompute);
+    assert.equal(offCalls, 2, 'cache bypassed while the toggle is off');
+  } finally {
+    await settingsService.setPerformance({ cache: saved.cache });
+  }
 });

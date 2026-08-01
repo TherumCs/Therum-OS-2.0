@@ -182,9 +182,10 @@ export const LoginBrandingInput = z.object({
 });
 export type LoginBrandingInput = z.infer<typeof LoginBrandingInput>;
 
-// ─── Settings > Performance — every field here saves for real but none is
-// load-bearing yet: cache/heartbeat have no backend mechanism to gate (no
-// object-cache layer, no polling loop); lazyImages/deferJs/disableEmoji/
+// ─── Settings > Performance — `cache` IS load-bearing since 2026-08-01: it
+// gates the Redis object cache in lib/cache.ts, and turning it off makes every
+// settings and catalog read hit Postgres again. The rest still are not:
+// heartbeat has no polling loop to gate; lazyImages/deferJs/disableEmoji/
 // disableEmbeds/minCss/minHtml all describe public-page rendering and 2.0
 // has no public theme/renderer yet; revisionsLimit/trashDays/autosaveInterval
 // have no matching Content concept (no revisions, no trash, no autosave).

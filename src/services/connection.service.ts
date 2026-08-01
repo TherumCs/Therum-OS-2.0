@@ -160,6 +160,10 @@ const TESTERS: Record<string, Tester> = {
     return bearerGet('https://api.printful.com/stores', first ?? c);
   },
   printify: (c) => bearerGet('https://api.printify.com/v1/shops.json', firstField(c)),
+  // Endpoints and header names probed live (both answer 401 to a bad key, so a
+  // 200 means the credential is real) rather than taken from a summary.
+  gelato: (c) => get('https://product.gelatoapis.com/v3/catalogs', { 'X-API-KEY': firstField(c) }),
+  spod: (c) => get('https://rest.spod.com/orders', { 'X-SPOD-ACCESS-TOKEN': firstField(c) }),
 
   // Payments
   stripe: (c) => bearerGet('https://api.stripe.com/v1/balance', c),

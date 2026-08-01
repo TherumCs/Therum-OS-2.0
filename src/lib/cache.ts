@@ -84,6 +84,37 @@ export function resetCacheStats(): void {
 }
 
 /**
+ * Settings > Performance > cache. Read from the settings row, cached in this
+ * process for a few seconds so consulting it costs nothing per request — and
+ * deliberately NOT read through `cached()` itself, which would be circular.
+ *
+ * Until now this toggle saved and gated nothing, which the schema said out
+ * loud. It gates this.
+ */
+let enabledCache: { value: boolean; at: number } | null = null;
+const ENABLED_TTL_MS = 5_000;
+
+async function cacheEnabled(): Promise<boolean> {
+  if (enabledCache && Date.now() - enabledCache.at < ENABLED_TTL_MS) return enabledCache.value;
+  try {
+    const { db } = await import('./db.js');
+    const row = await db.setting.findUnique({ where: { key: 'performance' } });
+    const value = (row?.value as { cache?: boolean } | null)?.cache !== false;
+    enabledCache = { value, at: Date.now() };
+    return value;
+  } catch {
+    // Never let a settings read failure disable the cache — that would turn a
+    // blip into a load spike.
+    return true;
+  }
+}
+
+/** Called when Performance is saved, so the switch takes effect immediately. */
+export function forgetCacheEnabled(): void {
+  enabledCache = null;
+}
+
+/**
  * Read through the cache, computing on a miss.
  *
  * Redis being unavailable is never fatal: on any error this falls through to
@@ -96,6 +127,8 @@ export async function cached<T>(
   compute: () => Promise<T>,
   ttlSeconds: number = DEFAULT_TTL_S,
 ): Promise<T> {
+  if (!(await cacheEnabled())) return compute();
+
   let full: string | null = null;
   try {
     full = `cache:${SCHEMA_VERSION}:${ns}:${await generation(ns)}:${key}`;

@@ -2,7 +2,7 @@ import { isSupported } from '../counter/currency.js';
 import { ValidationError } from '../lib/errors.js';
 import { Prisma } from '@prisma/client';
 import { db } from '../lib/db.js';
-import { cached, invalidate } from '../lib/cache.js';
+import { cached, invalidate, forgetCacheEnabled } from '../lib/cache.js';
 import type {
   AppearanceInput,
   AdminDockInput,
@@ -587,6 +587,9 @@ async function write(key: string, value: object): Promise<void> {
   await invalidate('settings');
   maintenanceCache = null;
   securityCache = null;
+  // Turning the cache off in Settings > Performance must take effect on the
+  // next request, not after this process's own 5s memo expires.
+  forgetCacheEnabled();
 }
 
 export interface SiteSettings {
