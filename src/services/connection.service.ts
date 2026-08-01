@@ -107,6 +107,52 @@ function validateCredential(provider: CatalogProvider, credential: string): void
 const OAUTH_CAPABLE = new Set(oauthService.providers());
 
 const TESTERS: Record<string, Tester> = {
+  // ── Ecommerce + identity, verified 2026-08-01 by live probe.
+  // Shopify and BigCommerce are addressed BY THE MERCHANT'S OWN STORE, so the
+  // tester has to build the URL from the stored domain/hash. A fixed host 404s
+  // for everyone and looks like a dead endpoint.
+  shopify: async (c) => {
+    const [domain, token] = c.split('|');
+    if (!domain || !token) return { ok: false, detail: 'Expected a store domain and an Admin API access token.' };
+    const host = domain.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    return get(`https://${host}/admin/api/2024-10/shop.json`, { 'X-Shopify-Access-Token': token });
+  },
+  bigcommerce: async (c) => {
+    const [hash, token] = c.split('|');
+    if (!hash || !token) return { ok: false, detail: 'Expected a store hash and an access token.' };
+    return get(`https://api.bigcommerce.com/stores/${encodeURIComponent(hash)}/v2/store`, { 'X-Auth-Token': token, Accept: 'application/json' });
+  },
+  squarespace: (c) => get('https://api.squarespace.com/1.0/profiles', {
+    Authorization: `Bearer ${firstField(c)}`,
+    'User-Agent': 'Therum OS (therum.studio)',
+  }),
+  lemonsqueezy: (c) => get('https://api.lemonsqueezy.com/v1/users/me', {
+    Authorization: `Bearer ${firstField(c)}`,
+    Accept: 'application/vnd.api+json',
+  }),
+  wix: (c) => get('https://www.wixapis.com/site-properties/v4/properties', { Authorization: firstField(c) }),
+  etsy: (c) => get('https://openapi.etsy.com/v3/application/openapi-ping', { 'x-api-key': firstField(c) }),
+  magento: async (c) => {
+    const [base, token] = c.split('|');
+    if (!base || !token) return { ok: false, detail: 'Expected a store base URL and an integration access token.' };
+    return get(`${base.replace(/\/+$/, '')}/rest/V1/store/storeConfigs`, { Authorization: `Bearer ${token}` });
+  },
+  // Exchanging the refresh token is the only check that proves all THREE
+  // values agree — a valid client pair with the wrong refresh token still
+  // fails, which is the case a field-by-field check would miss.
+  amazon: async (c) => {
+    const [clientId, secret, refresh] = c.split('|');
+    if (!clientId || !secret || !refresh) return { ok: false, detail: 'Expected an LWA Client ID, Client Secret and Refresh Token.' };
+    return post('https://api.amazon.com/auth/o2/token', { 'Content-Type': 'application/x-www-form-urlencoded' },
+      `grant_type=refresh_token&refresh_token=${encodeURIComponent(refresh)}&client_id=${encodeURIComponent(clientId)}&client_secret=${encodeURIComponent(secret)}`);
+  },
+  // A client_credentials grant returns an app token when the pair is real.
+  'facebook-login': async (c) => {
+    const [appId, secret] = c.split('|');
+    if (!appId || !secret) return { ok: false, detail: 'Expected an App ID and an App Secret.' };
+    return get(`https://graph.facebook.com/oauth/access_token?client_id=${encodeURIComponent(appId)}&client_secret=${encodeURIComponent(secret)}&grant_type=client_credentials`, {});
+  },
+
   // AI tools
   openai: (c) => bearerGet('https://api.openai.com/v1/models', c),
   anthropic: (c) => get('https://api.anthropic.com/v1/models', { 'x-api-key': c, 'anthropic-version': '2023-06-01' }),

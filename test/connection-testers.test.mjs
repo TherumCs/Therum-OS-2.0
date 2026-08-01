@@ -33,6 +33,18 @@ const CASES = [
   // Vonage joins with ':' — the separator is per provider, not universal.
   ['vonage', 'bogus:bogussecret'],
   ['whatsapp', '12345|bogustoken'],
+  // Ecommerce + identity. Shopify and BigCommerce are addressed by the
+  // merchant's own store, so these use a domain shaped like a real one.
+  // These two are addressed BY THE MERCHANT'S STORE, so a bogus store 404s and
+  // that is correct — see STORE_ADDRESSED below.
+  ['shopify', 'bogus-probe-store.myshopify.com|bogustoken'],
+  ['bigcommerce', 'bogushash|bogustoken'],
+  ['squarespace', 'bogussquarespacekey'],
+  ['lemonsqueezy', 'boguslskey|12345'],
+  ['wix', 'boguswixkey|siteid|acctid'],
+  ['etsy', 'bogusetsykey|bogussecret'],
+  ['amazon', 'amzn1.application-oa2-client.bogus|bogussecret|bogusrefresh'],
+  ['facebook-login', '123456|bogussecret'],
 ];
 
 let online = true;
@@ -67,7 +79,12 @@ for (const [provider, credential] of CASES) {
     assert.ok(result.detail && result.detail.length > 0, 'the failure has a reason');
     assert.doesNotMatch(result.detail, /Network error|ENOTFOUND|fetch failed/i,
       `${provider} could not reach its endpoint — the tester URL is wrong, not the key`);
-    assert.doesNotMatch(result.detail, /^404/, `${provider} endpoint 404s — wrong URL`);
+    // Shopify and BigCommerce build their URL from the merchant's own store, so
+    // a store that does not exist answers 404 — correct, not a wrong endpoint.
+    const STORE_ADDRESSED = new Set(['shopify', 'bigcommerce', 'magento']);
+    if (!STORE_ADDRESSED.has(provider)) {
+      assert.doesNotMatch(result.detail, /^404/, `${provider} endpoint 404s — wrong URL`);
+    }
   });
 }
 

@@ -214,8 +214,8 @@ export const nexusCatalog: CatalogProvider[] = [
   // return an authorisation code (rather than an id_token) need it to
   // exchange, and splitting one provider's credentials across two places is
   // how they drift.
-  { id: 'google-signin', name: 'Sign in with Google', category: 'identity', authType: 'apikey', issuedBy: 'provider', join: '|', fields: [{ label: 'Client ID' , pattern: '\\.apps\\.googleusercontent\\.com$', example: '1234-abc.apps.googleusercontent.com' }, { label: 'Client Secret', secret: true, optional: true }] },
-  { id: 'apple-signin', name: 'Sign in with Apple', category: 'identity', authType: 'apikey', issuedBy: 'provider', join: '|', fields: [{ label: 'Services ID (the client_id)' }, { label: 'Team ID', optional: true }, { label: 'Key ID', optional: true }] },
+  { id: 'google-signin', name: 'Sign in with Google', category: 'identity', authType: 'apikey', issuedBy: 'provider', join: '|', fields: [{ label: 'Client ID' , pattern: '\\.apps\\.googleusercontent\\.com$', example: '1234-abc.apps.googleusercontent.com' }, { label: 'Client Secret', secret: true, optional: true }] , note: 'No connection test: a Client ID and secret are only exercised by a real sign-in redirect, and Google offers no endpoint that validates the pair alone. Proven the first time a shopper signs in.' },
+  { id: 'apple-signin', name: 'Sign in with Apple', category: 'identity', authType: 'apikey', issuedBy: 'provider', join: '|', fields: [{ label: 'Services ID (the client_id)' }, { label: 'Team ID', optional: true }, { label: 'Key ID', optional: true }] , note: 'No connection test: Apple wants a client secret that is a JWT signed with your .p8 key and valid for a limited window, which a stored-credential check cannot construct. Proven on first sign-in.' },
   { id: 'facebook-login', name: 'Facebook Login', category: 'identity', authType: 'apikey', issuedBy: 'provider', join: '|', fields: [{ label: 'App ID' }, { label: 'App Secret', secret: true }] },
 
   // Hosting & infrastructure (1) — added 2026-08-01.
