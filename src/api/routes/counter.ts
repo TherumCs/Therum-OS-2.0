@@ -9,6 +9,7 @@ import { reviewService } from '../../counter/reviewService.js';
 import { reportService } from '../../counter/reportService.js';
 import { nexusBridge } from '../../counter/nexusBridge.js';
 import { wooImporter } from '../../counter/wooImporter.js';
+import { db } from '../../lib/db.js';
 import { walletPayments, assertWalletProvider } from '../../counter/walletPayments.js';
 import { customerTokenFrom, requireCustomer } from '../../counter/customerSession.js';
 import { customerAccountService } from '../../services/customerAccount.service.js';
@@ -59,6 +60,26 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
     email: z.string().email(),
     password: z.string().min(8).max(200),
     name: z.string().max(120).optional(),
+  });
+
+  // "Tell me when you open", from the coming-soon page.
+  //
+  // Its own table, not a Customer: someone who wants a launch email has not
+  // bought anything and must not turn up in customer counts or in marketing
+  // that assumes a purchase.
+  app.post('/shop/notify', async (req, reply) => {
+    const rl = await checkRateLimit(`notify:${req.ip}`, 10, 3600);
+    if (!rl.allowed) throw new TooManyRequestsError('Too many sign-ups from this address — try again shortly.', rl.retryAfterSeconds);
+    const { email } = z.object({ email: z.string().trim().toLowerCase().email().max(200) }).parse(req.body);
+    // Idempotent by design: a visitor who submits twice gets a thank-you, not
+    // a duplicate-key error they have to interpret. It also means the response
+    // does not reveal whether an address was already on the list.
+    await db.emailSignup.upsert({
+      where: { email },
+      update: {},
+      create: { email, source: 'coming-soon' },
+    });
+    reply.status(201).send({ ok: true });
   });
 
   // The login and code paths are throttled inside customerAuth; registration

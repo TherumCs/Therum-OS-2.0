@@ -1093,3 +1093,20 @@ model HostActionLog {
   @@index([status])
   @@map("host_action_log")
 }
+
+// Addresses collected by the coming-soon page.
+//
+// Deliberately its own table rather than a Customer: someone who wants to know
+// when you open has not bought anything, has no account, and must not turn up
+// in customer counts or marketing that assumes a purchase. Promoting one to a
+// Customer is a real decision, made later, on purpose.
+model EmailSignup {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  /** Where it came from, so a second capture surface stays distinguishable. */
+  source    String   @default("coming-soon")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("email_signups")
+}

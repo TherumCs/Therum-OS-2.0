@@ -330,9 +330,37 @@ export interface Maintenance {
   buttonHref: string;
   backgroundImage: string;
   retryAfterMinutes: number;
+  /** Full-bleed background video for the coming-soon page. */
+  backgroundVideo: string;
+  /**
+   * Shown while the video loads and to anyone who will never get it: iOS Low
+   * Power Mode refuses autoplay outright, and prefers-reduced-motion should
+   * not be overridden for a decorative loop. Falls back to backgroundImage.
+   */
+  videoPoster: string;
+  /** ISO timestamp the countdown runs to. Empty hides the countdown. */
+  countdownTo: string;
+  /** Label above the digits — "Doors open in". */
+  countdownLabel: string;
+  /** Handle without the @. Empty hides the link. */
+  instagram: string;
+  /** Collect addresses on the coming-soon page. */
+  emailCapture: boolean;
+  emailPlaceholder: string;
+  emailButtonLabel: string;
+  emailThanks: string;
 }
 const MAINTENANCE_DEFAULTS: Maintenance = {
   mode: 'off',
+  backgroundVideo: '',
+  videoPoster: '',
+  countdownTo: '',
+  countdownLabel: 'Doors open in',
+  instagram: '',
+  emailCapture: true,
+  emailPlaceholder: 'Your email',
+  emailButtonLabel: 'Notify me',
+  emailThanks: "You're on the list.",
   heading: 'We will be back shortly',
   message: 'The site is down for scheduled maintenance. Thanks for your patience.',
   buttonLabel: '',

@@ -50,6 +50,7 @@ import { couponRoutes } from './api/routes/coupons.js';
 import { storefrontRoutes } from './api/routes/storefront.js';
 import { siteRoutes } from './api/routes/site.js';
 import { maintenancePage } from './site/maintenanceHtml.js';
+import { PAGE_CSP } from './site/pageCsp.js';
 import { settingsService } from './services/settings.service.js';
 import { taxonomyRoutes } from './api/routes/taxonomy.js';
 import { bricksRoutes } from './api/routes/bricks.js';
@@ -321,7 +322,11 @@ export async function buildServer() {
         reply.header('Retry-After', String(maintenance.retryAfterMinutes * 60));
       }
     }
-    reply.type('text/html; charset=utf-8').send(body);
+    // The SAME CSP every other public page sets. Without it this response gets
+    // helmet's global default of `script-src 'self'`, which blocks the inline
+    // countdown and the email form — the page renders perfectly and does
+    // nothing, which is the worst way for it to fail.
+    reply.header('content-security-policy', PAGE_CSP).type('text/html; charset=utf-8').send(body);
   });
 
   await app.register(siteRoutes);

@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { PAGE_CSP } from '../../site/pageCsp.js';
 import { timingSafeEqual } from 'node:crypto';
 import { db } from '../../lib/db.js';
 import { capabilityService } from '../../services/capability.service.js';
@@ -43,7 +44,7 @@ import { orderTrackingMarkup, ORDER_TRACKING_CSS, ORDER_TRACKING_RUNTIME } from 
 // script+style, nothing external loadable.
 // img/media allow https: — product galleries reference media-library or CDN
 // URLs, and hover-preview videos stream from wherever the merchant hosts.
-const PAGE_CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; media-src 'self' https:; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'";
+
 
 const html = (reply: { header: (k: string, v: string) => unknown; type: (t: string) => { send: (b: string) => void } }, body: string): void => {
   reply.header('content-security-policy', PAGE_CSP);

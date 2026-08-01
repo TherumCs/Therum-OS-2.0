@@ -625,6 +625,23 @@ export const MaintenanceSettingsInput = z.object({
   backgroundImage: z.string().max(500).optional(),
   /** Minutes for Retry-After. 0 omits the header. */
   retryAfterMinutes: z.number().int().min(0).max(10080).optional(),
+
+  // ── Coming-soon surface ────────────────────────────────────────────────
+  /** Full-bleed background video (media library URL). */
+  backgroundVideo: z.string().max(500).optional(),
+  /** Poster frame. Shown while the video loads, and to everyone who never
+   *  gets it — iOS Low Power Mode refuses autoplay, and a decorative loop
+   *  should not fight prefers-reduced-motion. */
+  videoPoster: z.string().max(500).optional(),
+  /** ISO timestamp the countdown runs to. Empty hides it. */
+  countdownTo: z.string().max(40).optional(),
+  countdownLabel: z.string().max(60).optional(),
+  /** Handle WITHOUT the @ — the page adds it. */
+  instagram: z.string().max(40).optional(),
+  emailCapture: z.boolean().optional(),
+  emailPlaceholder: z.string().max(60).optional(),
+  emailButtonLabel: z.string().max(40).optional(),
+  emailThanks: z.string().max(160).optional(),
 });
 export type MaintenanceSettingsInput = z.infer<typeof MaintenanceSettingsInput>;
 

@@ -15,6 +15,10 @@ before(async () => {
   const row = await db.setting.findUnique({ where: { key: 'site' } });
   savedSite = row?.value ?? null; // restore the operator's real settings after
   await db.setting.upsert({ where: { key: 'site' }, update: { value: { siteName: 'basetest Site', tagline: 'Testing the base theme', homepageSlug: null } }, create: { key: 'site', value: { siteName: 'basetest Site', tagline: 'Testing the base theme', homepageSlug: null } } });
+  // A run that dies before its cleanup must not break the next one. The IPC
+  // crash that ate a previous run left these rows behind and every test in the
+  // file then failed on a duplicate slug — which reads like a broken feature.
+  await db.content.deleteMany({ where: { slug: { startsWith: 'basetest-' } } }).catch(() => {});
   await db.content.createMany({
     data: [
       { type: 'page', title: 'basetest About', slug: 'basetest-about', status: 'published', body: '<p>about body</p>', bodyFormat: 'html' },
@@ -131,7 +135,15 @@ describe('maintenance / coming soon', () => {
   // blocks, and a cleanup that has to get past the gate it just enabled fails
   // exactly when the gate works. Leaving it on would hide the site.
   let app;
-  before(async () => { app = await buildServer(); });
+  before(async () => {
+    app = await buildServer();
+    // The notify limiter is real (10/hour/IP) and every test here submits from
+    // 127.0.0.1, so a previous run — or a manual curl — leaves it spent and the
+    // idempotency test fails with a 429 that has nothing to do with the
+    // behaviour under test. Cleared per file, the way the cart limiters are.
+    const { redis } = await import('../dist/lib/redis.js');
+    await redis.del('ratelimit:notify:127.0.0.1');
+  });
   after(async () => {
     await settingsService.setMaintenance({ mode: 'off' });
     await app.close();
@@ -175,6 +187,68 @@ describe('maintenance / coming soon', () => {
     await settingsService.setMaintenance({ mode: 'maintenance' });
     const r = await get('/', { cookie: 'th_session=whatever' });
     assert.equal(r.statusCode, 200, 'you cannot verify a fix you cannot look at');
+  });
+
+  // helmet's global default is script-src 'self', which blocks inline scripts.
+  // This page ships its countdown and its email form inline, so without the
+  // page CSP it renders perfectly and does nothing — the countdown sits at
+  // "--" forever. That is exactly how it first shipped.
+  test('the page sets the CSP its own inline JS needs', async () => {
+    await settingsService.setMaintenance({ mode: 'coming-soon' });
+    const soon = await get('/');
+    assert.match(soon.headers['content-security-policy'] ?? '', /script-src[^;]*'unsafe-inline'/,
+      'the countdown and email form can actually run');
+
+    await settingsService.setMaintenance({ mode: 'maintenance' });
+    const down = await get('/');
+    assert.match(down.headers['content-security-policy'] ?? '', /script-src[^;]*'unsafe-inline'/);
+  });
+
+  test('coming soon: countdown, email capture and Instagram come from settings', async () => {
+    await settingsService.setMaintenance({
+      mode: 'coming-soon',
+      heading: 'Everybody has a side.',
+      countdownTo: '2027-01-01T00:00:00.000Z',
+      countdownLabel: 'Doors open in',
+      instagram: 'sidemoneyco',
+      emailCapture: true,
+    });
+    const r = await get('/');
+    assert.match(r.body, /Everybody has a side/);
+    assert.match(r.body, /data-countdown-to="2027-01-01/, 'the target is rendered for the script');
+    assert.match(r.body, /Doors open in/);
+    assert.match(r.body, /instagram\.com\/sidemoneyco/);
+    assert.match(r.body, /<form[^>]*data-notify/, 'the form element itself');
+    // Rendered hidden, revealed by script: digits frozen at "--" because JS
+    // failed look broken in a way no countdown at all does not.
+    assert.match(r.body, /class="cd"[^>]*hidden/);
+
+    // Off must REMOVE them, not hide them.
+    await settingsService.setMaintenance({ emailCapture: false, instagram: '' });
+    const bare = await get('/');
+    // Matched as an ELEMENT: the string "data-notify" also appears in the
+    // inline script that looks the form up, so a bare substring check passes
+    // whether or not the form was rendered.
+    assert.doesNotMatch(bare.body, /<form[^>]*data-notify/, 'no form when capture is off');
+    assert.doesNotMatch(bare.body, /href="https:\/\/instagram\.com/, 'no Instagram link without a handle');
+  });
+
+  test('the notify endpoint is idempotent, normalised and validated', async () => {
+    const email = `notify-test-${Date.now()}@example.local`;
+    try {
+      assert.equal((await app.inject({ method: 'POST', url: '/api/shop/notify', payload: { email } })).statusCode, 201);
+      // A second submit is a thank-you, not a duplicate-key error — and the
+      // response must not reveal whether the address was already on the list.
+      assert.equal((await app.inject({ method: 'POST', url: '/api/shop/notify', payload: { email } })).statusCode, 201);
+      assert.equal(await db.emailSignup.count({ where: { email } }), 1, 'stored once');
+
+      assert.equal((await app.inject({ method: 'POST', url: '/api/shop/notify', payload: { email: 'nope' } })).statusCode, 422);
+
+      await app.inject({ method: 'POST', url: '/api/shop/notify', payload: { email: `  ${email.toUpperCase()} ` } });
+      assert.equal(await db.emailSignup.count({ where: { email } }), 1, 'case and whitespace normalised, not duplicated');
+    } finally {
+      await db.emailSignup.deleteMany({ where: { email: { contains: 'notify-test-' } } }).catch(() => {});
+    }
   });
 
   test('turning it off takes effect immediately, not after a cache TTL', async () => {

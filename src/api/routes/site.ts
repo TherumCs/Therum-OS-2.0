@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
+import { PAGE_CSP } from '../../site/pageCsp.js';
 import { db } from '../../lib/db.js';
 import { contentService } from '../../services/content.service.js';
 import { settingsService, type SiteSettings } from '../../services/settings.service.js';
@@ -15,7 +16,7 @@ import { esc } from '../../site/storefrontHtml.js';
 // homepage at / (settings.site.homepageSlug, else a landing built from
 // what's published). Content pages carry the CMS's own metaTags + JSON-LD.
 
-const PAGE_CSP = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'";
+
 
 function send(reply: FastifyReply, body: string, status = 200): void {
   reply.status(status).header('content-security-policy', PAGE_CSP).type('text/html; charset=utf-8').send(body);
