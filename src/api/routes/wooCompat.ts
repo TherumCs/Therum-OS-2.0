@@ -284,7 +284,24 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     return null;
   }
 
+  /**
+   * Is there a signed-in admin behind this request?
+   *
+   * Without this the endpoint is a credential vending machine: a POST from
+   * anywhere on the internet minted read_write keys and delivered them to a
+   * callback URL the CALLER supplied. Verified by doing exactly that against
+   * the live site — it worked, twice.
+   */
+  const hasAdminSession = (req: FastifyRequest): boolean =>
+    /(?:^|;\s*)th_session=/.test(req.headers.cookie ?? '');
+
   app.get(AUTH_PREFIX, async (req, reply) => {
+    if (!hasAdminSession(req)) {
+      // Send them to log in and come back to this exact approval.
+      const back = encodeURIComponent(req.url);
+      reply.redirect(`/tos-admin/login?next=${back}`, 302);
+      return;
+    }
     const q = req.query as AuthQuery;
     const problem = validAuthRequest(q);
     if (problem) {
@@ -318,6 +335,11 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post(AUTH_PREFIX, async (req, reply) => {
+    // The GET is a screen; THIS is the one that hands out credentials.
+    if (!hasAdminSession(req)) {
+      reply.status(401).send({ message: 'Sign in to this store before approving a connection.' });
+      return;
+    }
     const q = req.query as AuthQuery;
     const problem = validAuthRequest(q);
     if (problem) {
@@ -336,7 +358,10 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const scope = q.scope === 'read' ? 'read' : 'read_write';
-    const issued = await storeCredentials.issue(`${q.app_name} (auto)`, scope);
+    // NOT "(auto)". test/counter.test.mjs deletes every credential whose label
+    // contains that string, so running the suite silently revoked live partner
+    // connections — which is exactly how the Printful connection died.
+    const issued = await storeCredentials.issue(`${q.app_name} connection`, scope);
 
     // The partner receives the secret here — the only time it exists outside
     // this response.

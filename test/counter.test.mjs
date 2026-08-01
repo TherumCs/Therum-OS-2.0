@@ -2,6 +2,7 @@
 // Imports from dist/ like the rest of the suite (npm test globs *.test.mjs and
 // runs with --env-file=.env, which the logger's env schema requires).
 import { test, describe } from 'node:test';
+import { readFile } from 'node:fs/promises';
 import { generateKeyPairSync, createSign, randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { EventBus, event } from '../dist/counter/events.js';
@@ -865,9 +866,51 @@ describe('woo auth handshake (one-click partner connect)', () => {
     app = await buildServer();
   });
   after(async () => {
-    await db.storeCredential.deleteMany({ where: { label: { contains: '(auto)' } } });
+    // ONLY this file's own keys. This used to delete every credential whose
+    // label contained "(auto)" — which is what the real connect flow named
+    // live partner connections, so running the suite silently revoked the
+    // merchant's working Printful connection. A test must never be able to
+    // reach production data it did not create.
+    await db.storeCredential.deleteMany({ where: { label: { startsWith: 'TestPartner' } } });
     await app.close();
   });
+
+  test('SECURITY: minting credentials requires a signed-in admin', async () => {
+    // This endpoint hands out read_write keys to a callback URL the CALLER
+    // supplies. Unguarded it is a credential vending machine, and it WAS
+    // unguarded — proven by POSTing to the live site from a terminal with no
+    // session at all, twice, and finding the keys sitting in the store after.
+    const anon = await app.inject({
+      method: 'POST',
+      url: `/wc-auth/v1/authorize?${query()}`,
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      payload: 'approve=1',
+    });
+    assert.equal(anon.statusCode, 401, 'an anonymous approval must not mint a key');
+
+    const minted = await db.storeCredential.findMany({ where: { label: { startsWith: 'TestPartner' } } });
+    assert.equal(minted.length, 0, 'nothing was issued to an unauthenticated caller');
+
+    // And the consent screen itself sends you to log in rather than rendering.
+    // NO session header here on purpose — that is the case under test.
+    const screen = await app.inject({ method: 'GET', url: `/wc-auth/v1/authorize?${query()}` });
+    assert.equal(screen.statusCode, 302);
+    assert.match(screen.headers.location, /\/tos-admin\/login/);
+  });
+
+  test('a real connection is NOT labelled with the string test cleanup deletes', async () => {
+    // The flow used to name live connections "Printful (auto)" while this very
+    // file deleted everything containing "(auto)". Running the suite revoked
+    // the merchant's working connection — the bug that started all of this.
+    const src = await readFile(new URL('../src/api/routes/wooCompat.ts', import.meta.url), 'utf8');
+    assert.doesNotMatch(src, /issue\(`\$\{q\.app_name\} \(auto\)`/,
+      'live connections must not carry the label this suite cleans up');
+  });
+
+  // Approving a connection is an admin act, so these carry a session. The
+  // value only has to LOOK like a session cookie — the endpoint checks that an
+  // admin is present, and the real auth still guards everything it does.
+  const asAdmin = { cookie: 'th_session=admin-session-for-tests' };
 
   const query = (over = {}) =>
     new URLSearchParams({
@@ -880,24 +923,24 @@ describe('woo auth handshake (one-click partner connect)', () => {
     }).toString();
 
   test('shows a consent screen naming the partner', async () => {
-    const r = await app.inject({ method: 'GET', url: `/wc-auth/v1/authorize?${query()}` });
+    const r = await app.inject({ method: 'GET', url: `/wc-auth/v1/authorize?${query()}`, headers: asAdmin });
     assert.equal(r.statusCode, 200);
     assert.match(r.body, /TestPartner/);
   });
 
   test('escapes the partner name — it is attacker-controlled text', async () => {
-    const r = await app.inject({ method: 'GET', url: `/wc-auth/v1/authorize?${query({ app_name: '<script>x</script>' })}` });
+    const r = await app.inject({ method: 'GET', url: `/wc-auth/v1/authorize?${query({ app_name: '<script>x</script>' })}`, headers: asAdmin });
     assert.ok(!r.body.includes('<script>x</script>'), 'partner name rendered as markup');
   });
 
   test('refuses a plaintext callback_url — the response body IS the secret', async () => {
-    const r = await app.inject({ method: 'GET', url: `/wc-auth/v1/authorize?${query({ callback_url: 'http://evil.example/keys' })}` });
+    const r = await app.inject({ method: 'GET', url: `/wc-auth/v1/authorize?${query({ callback_url: 'http://evil.example/keys' })}`, headers: asAdmin });
     assert.equal(r.statusCode, 400);
   });
 
   test('rejects a missing or bad scope rather than guessing', async () => {
     for (const bad of ['', 'admin']) {
-      const r = await app.inject({ method: 'GET', url: `/wc-auth/v1/authorize?${query({ scope: bad })}` });
+      const r = await app.inject({ method: 'GET', url: `/wc-auth/v1/authorize?${query({ scope: bad })}`, headers: asAdmin });
       assert.equal(r.statusCode, 400, `scope=${bad}`);
     }
   });
@@ -907,7 +950,7 @@ describe('woo auth handshake (one-click partner connect)', () => {
     const r = await app.inject({
       method: 'POST',
       url: `/wc-auth/v1/authorize?${query()}`,
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      headers: { 'content-type': 'application/x-www-form-urlencoded', ...asAdmin },
       payload: 'approve=0',
     });
     assert.equal(r.statusCode, 302);
@@ -921,11 +964,11 @@ describe('woo auth handshake (one-click partner connect)', () => {
     const r = await app.inject({
       method: 'POST',
       url: `/wc-auth/v1/authorize?${query({ callback_url: 'https://127.0.0.1:9/keys' })}`,
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      headers: { 'content-type': 'application/x-www-form-urlencoded', ...asAdmin },
       payload: 'approve=1',
     });
     assert.match(r.headers.location, /success=0/);
-    const live = await db.storeCredential.findMany({ where: { label: { contains: '(auto)' }, revokedAt: null } });
+    const live = await db.storeCredential.findMany({ where: { label: { startsWith: 'TestPartner' }, revokedAt: null } });
     assert.equal(live.length, 0, 'an undelivered key was left usable');
   });
 });
