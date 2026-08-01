@@ -263,8 +263,8 @@ export interface CounterSettings {
   cartSidebarReveal: 'overlay' | 'push';
   cartSidebarGround: string;
   cardShell: 'bare' | 'boxed' | 'elevated';
-  cardMedia: 'still' | 'fade' | 'gallery' | 'motion';
-  cardMediaSecondary: 'still' | 'fade' | 'gallery' | 'motion';
+  cardMedia: 'auto' | 'still' | 'fade' | 'gallery' | 'motion';
+  cardMediaSecondary: 'auto' | 'still' | 'fade' | 'gallery' | 'motion';
   cardPreset: 'editorial' | 'retail' | 'detailed' | 'sneaker' | 'data';
   cardAction: 'none' | 'below' | 'overlay' | 'dual' | 'icons';
   cardEvolve: boolean;
@@ -380,10 +380,11 @@ const COUNTER_DEFAULTS: CounterSettings = {
   // wrong on a store whose products have no ratings, sizes or was-prices yet.
   cardShell: 'bare',
   cardPreset: 'editorial',
-  // 'fade' rather than 'gallery' or 'motion': it is the one behaviour that
-  // cannot fail — every product has a second image far more often than it has
-  // a video, and a cross-fade has nothing to click.
-  cardMedia: 'fade',
+  // 'auto', so a product carrying a video renders as a motion card and one
+  // with several photos gets arrows, without anyone visiting Settings. A hard
+  // default here silently capped every card at that behaviour: 'fade' meant
+  // videos never played, because fade is supported by anything with 2 images.
+  cardMedia: 'auto',
   // Still, because it is the one behaviour EVERY product can support — a
   // fallback that can itself fall back is not a fallback.
   cardMediaSecondary: 'still',

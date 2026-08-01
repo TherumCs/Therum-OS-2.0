@@ -6,6 +6,8 @@ import { createHmac } from 'node:crypto';
 import { buildServer } from '../dist/server.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { disconnectDb } from '../dist/lib/db.js';
+import { recomputeReservations } from './support/reservations.mjs';
+import { purgeTestCustomers } from './support/testCustomers.mjs';
 
 const SECRET = process.env.JWT_SECRET ?? '';
 function jwt() {
@@ -27,11 +29,22 @@ async function toPure() {
   await app.inject({ method: 'PATCH', url: '/api/capabilities/connections', headers: auth(), payload: { enabled: false } });
 }
 before(async () => {
+  const { redis } = await import('../dist/lib/redis.js');
+  // The order limiter is real (10 per 10 minutes per IP) and the suite creates
+  // far more than that from 127.0.0.1, so a later file used to 429 on a test
+  // that has nothing to do with rate limiting. Cleared per file, the way the
+  // cart limiters already are — the limiter itself stays exercised by the test
+  // that asserts it.
+  await redis.del('ratelimit:order-create:127.0.0.1');
   app = await buildServer();
   await toPure();
 });
 after(async () => {
   await toPure();
+  // Orders reserve stock; deleting the row does not release it. Run LAST, once
+  // this file's own orders are gone, so the next run starts from a clean count.
+  await recomputeReservations();
+  await purgeTestCustomers();
   await app.close();
   await closeQueues();
   await disconnectDb();

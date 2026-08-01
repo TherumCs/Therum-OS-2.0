@@ -108,6 +108,11 @@ export interface GridProduct {
 
 export type CardShell = 'bare' | 'boxed' | 'elevated';
 export type CardMedia = 'still' | 'fade' | 'gallery' | 'motion';
+/**
+ * What a merchant can PICK. 'auto' is not a behaviour a card renders — it is
+ * "read the product and decide", and it is the shipped default.
+ */
+export type CardMediaSetting = CardMedia | 'auto';
 export type CardAction = 'none' | 'below' | 'overlay' | 'dual' | 'icons';
 export type CardAlign = 'start' | 'center' | 'end';
 export type CardRadius = 'sharp' | 'soft' | 'round' | 'pill' | 'squircle';
@@ -118,9 +123,9 @@ export type CardPreset = 'editorial' | 'retail' | 'detailed' | 'sneaker' | 'data
 export interface CardConfig {
   shell: CardShell;
   /** The behaviour a product gets when it can support it. */
-  media: CardMedia;
+  media: CardMediaSetting;
   /** What it falls back to when it cannot. A merchant's choice, not a chain. */
-  mediaSecondary: CardMedia;
+  mediaSecondary: CardMediaSetting;
   action: CardAction;
   /**
    * Evolve is a MODIFIER, not an action: any card that can add to the cart can
@@ -143,18 +148,26 @@ export interface CardConfig {
 }
 
 export const CARD_DEFAULTS: CardConfig = {
-  shell: 'bare', media: 'fade', mediaSecondary: 'still', action: 'none', evolve: true,
+  shell: 'bare', media: 'auto', mediaSecondary: 'still', action: 'none', evolve: true,
   align: 'start', radius: 'sharp', ratio: 'square', fit: 'cover', shadow: 'soft',
   hover: 'none', gap: 'normal', reveal: 'none', preset: 'editorial',
   subtitle: true, badges: true, wishlist: true,
 };
 
 /** Can this product actually do this? */
-function supports(style: CardMedia, stills: number, hasVideo: boolean): boolean {
+function supports(style: CardMediaSetting, stills: number, hasVideo: boolean): boolean {
+  if (style === 'auto') return false; // never a behaviour, only an instruction
   if (style === 'motion') return hasVideo;
   if (style === 'gallery') return stills >= 2;
   if (style === 'fade') return stills >= 2;
   return true; // 'still' always works — that is why it is the last resort
+}
+
+/** What the product's own media says it wants to be, richest first. */
+function fromProduct(stills: number, hasVideo: boolean): CardMedia {
+  if (hasVideo) return 'motion';
+  if (stills >= 2) return 'gallery';
+  return 'still';
 }
 
 /**
@@ -164,11 +177,24 @@ function supports(style: CardMedia, stills: number, hasVideo: boolean): boolean 
  * so "customize a random product" means exactly that: that one card asks for
  * something different, and still falls back the same way if its own media
  * cannot carry it.
+ *
+ * 'auto' — the shipped default — means the PRODUCT decides: one with a video
+ * is a motion card, one with several photos is a gallery card. The old default
+ * was a hard 'fade' with 'still' behind it, so a product carrying a video still
+ * rendered a static image and neither the hover-video nor the arrows card could
+ * ever appear. A style a merchant actually picked is still obeyed — 'auto' is
+ * the absence of a choice, not an override of one.
  */
 export function resolveMedia(cfg: CardConfig, override: CardMedia | null, stills: number, hasVideo: boolean): CardMedia {
+  // The per-product override takes the primary slot; it is never 'auto',
+  // because "no override" already means exactly that.
   const first = override ?? cfg.media;
+  if (first === 'auto') return fromProduct(stills, hasVideo);
   if (supports(first, stills, hasVideo)) return first;
-  if (supports(cfg.mediaSecondary, stills, hasVideo)) return cfg.mediaSecondary;
+
+  const second = cfg.mediaSecondary;
+  if (second === 'auto') return fromProduct(stills, hasVideo);
+  if (supports(second, stills, hasVideo)) return second;
   return 'still';
 }
 

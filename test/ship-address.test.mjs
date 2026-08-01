@@ -10,6 +10,7 @@ import { db, disconnectDb } from '../dist/lib/db.js';
 import { disconnectRedis } from '../dist/lib/redis.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { ShipAddressInput, CreateOrderInput } from '../dist/schemas/order.schema.js';
+import { recomputeReservations } from './support/reservations.mjs';
 
 const TEST_EMAIL = 'shipaddr-test@example.local';
 
@@ -21,6 +22,9 @@ after(async () => {
     await db.orderItem.deleteMany({ where: { orderId: { in: ids } } }).catch(() => {});
     await db.order.deleteMany({ where: { id: { in: ids } } }).catch(() => {});
   }
+  // Orders reserve stock; deleting the row does not release it. Run LAST, once
+  // this file's own orders are gone, so the next run starts from a clean count.
+  await recomputeReservations();
   await closeQueues().catch(() => {});
   await disconnectDb().catch(() => {});
   await disconnectRedis().catch(() => {});

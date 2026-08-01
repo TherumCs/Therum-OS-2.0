@@ -13,6 +13,7 @@ import { closeQueues } from '../dist/lib/queue.js';
 import { shippingRateService, DEFAULT_METHODS } from '../dist/counter/shippingRates.js';
 import { settingsService } from '../dist/services/settings.service.js';
 import { orderService } from '../dist/services/order.service.js';
+import { recomputeReservations } from './support/reservations.mjs';
 
 const TEST_EMAIL = 'ratetest@example.local';
 const ADDRESS = {
@@ -35,6 +36,9 @@ after(async () => {
     await db.orderItem.deleteMany({ where: { orderId: { in: ids } } }).catch(() => {});
     await db.order.deleteMany({ where: { id: { in: ids } } }).catch(() => {});
   }
+  // Orders reserve stock; deleting the row does not release it. Run LAST, once
+  // this file's own orders are gone, so the next run starts from a clean count.
+  await recomputeReservations();
   await closeQueues().catch(() => {});
   await disconnectDb().catch(() => {});
   await disconnectRedis().catch(() => {});

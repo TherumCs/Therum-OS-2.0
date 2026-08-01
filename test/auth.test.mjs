@@ -10,6 +10,7 @@ import { buildServer } from '../dist/server.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { db, disconnectDb } from '../dist/lib/db.js';
 import { hashPassword } from '../dist/lib/password.js';
+import { recomputeReservations } from './support/reservations.mjs';
 
 const SECRET = process.env.JWT_SECRET ?? '';
 function adminJwt() {
@@ -24,6 +25,13 @@ const testUsername = 'it-auth-' + Math.random().toString(36).slice(2, 8);
 const testPassword = 'correct-horse-battery-staple';
 
 before(async () => {
+  const { redis } = await import('../dist/lib/redis.js');
+  // The order limiter is real (10 per 10 minutes per IP) and the suite creates
+  // far more than that from 127.0.0.1, so a later file used to 429 on a test
+  // that has nothing to do with rate limiting. Cleared per file, the way the
+  // cart limiters already are — the limiter itself stays exercised by the test
+  // that asserts it.
+  await redis.del('ratelimit:order-create:127.0.0.1');
   app = await buildServer();
   // Seed a throwaway test account directly (bypassing the one-time HTTP setup
   // gate on purpose) so login/setup-refusal can be tested without touching
@@ -35,6 +43,9 @@ before(async () => {
 });
 after(async () => {
   await db.adminUser.deleteMany({ where: { username: testUsername } });
+  // Orders reserve stock; deleting the row does not release it. Run LAST, once
+  // this file's own orders are gone, so the next run starts from a clean count.
+  await recomputeReservations();
   await app.close();
   await closeQueues();
   await disconnectDb();

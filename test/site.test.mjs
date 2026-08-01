@@ -96,7 +96,14 @@ test('nav: published pages linked, Blog/Work appear, storefront routes still win
   assert.equal(shop.statusCode, 200, '/shop not shadowed by /:slug');
   assert.match(shop.body, /Shop/);
 
-  const asset = await app.inject({ method: 'GET', url: '/favicon.ico' });
+  // Browsers ask for a favicon on every page load, so it is served rather than
+  // 404'd. Any OTHER asset-ish path still gets a plain 404 — never a themed
+  // HTML page, which is what /:slug would otherwise hand back.
+  const icon = await app.inject({ method: 'GET', url: '/favicon.ico' });
+  assert.equal(icon.statusCode, 200, 'favicon is served');
+  assert.match(icon.headers['content-type'] ?? '', /image\//, 'favicon is an image');
+
+  const asset = await app.inject({ method: 'GET', url: '/nothing-here.png' });
   assert.equal(asset.statusCode, 404);
   assert.doesNotMatch(asset.headers['content-type'] ?? '', /text\/html/, 'asset 404s stay JSON');
 });

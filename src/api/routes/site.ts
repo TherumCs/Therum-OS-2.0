@@ -264,6 +264,19 @@ async function indexCards(type: 'post' | 'case_study', base: string): Promise<st
 }
 
 export async function siteRoutes(app: FastifyInstance): Promise<void> {
+  // A favicon, so every page load stops 404ing for one. Uses the site logo
+  // when SEO defaults carry one; otherwise a tiny generated mark rather than
+  // a missing file, because browsers request this on every single page.
+  app.get('/favicon.ico', async (_req, reply) => {
+    const seo = await settingsService.getSeoDefaults().catch(() => ({ siteLogo: '' }));
+    if (seo.siteLogo) return reply.redirect(seo.siteLogo, 302);
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">' +
+      '<rect width="32" height="32" rx="6" fill="#0a0a0a"/>' +
+      '<circle cx="16" cy="16" r="6" fill="#e83b3b"/></svg>';
+    reply.header('content-type', 'image/svg+xml').header('cache-control', 'public, max-age=86400').send(svg);
+  });
+
   // Apple Pay domain verification. Apple fetches this exact path over HTTPS on
   // the host serving checkout and will not render the button if it 404s — the
   // single most common reason "Apple Pay just doesn't show up". Served from

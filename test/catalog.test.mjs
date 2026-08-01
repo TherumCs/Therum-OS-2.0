@@ -157,6 +157,14 @@ test('MEDIA: video entries accepted; each card style emits ONLY its own behaviou
   assert.match(gallery.body, /card-dots/, 'dot indicators present');
   assert.doesNotMatch(gallery.body, /<video[^>]*card-video/, 'gallery card does NOT also load a video');
 
+  // 'auto' — the shipped default — reads the product instead of capping it.
+  // A hard default did the opposite: 'fade' is supported by anything with two
+  // images, so it always won and a product carrying a video never played it.
+  await settingsService.setCounter({ cardMedia: 'auto' });
+  const auto = await app.inject({ method: 'GET', url: '/shop?category=cattest-apparel' });
+  assert.match(auto.body, /<video[^>]*card-video/, 'auto promotes a product with a video to a motion card');
+  assert.doesNotMatch(auto.body, /<button[^>]*card-nav prev/, 'auto still picks ONE behaviour');
+
   await settingsService.setCounter(savedCounter);
 
   const pageRes = await app.inject({ method: 'GET', url: '/product/cattest-tee' });

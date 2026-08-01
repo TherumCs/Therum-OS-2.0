@@ -9,8 +9,8 @@ export interface CounterSettings extends Record<string, unknown> {
   cartSidebarReveal: 'overlay' | 'push';
   cartSidebarGround: string;
   cardShell: 'bare' | 'boxed' | 'elevated';
-  cardMedia: 'still' | 'fade' | 'gallery' | 'motion';
-  cardMediaSecondary: 'still' | 'fade' | 'gallery' | 'motion';
+  cardMedia: 'auto' | 'still' | 'fade' | 'gallery' | 'motion';
+  cardMediaSecondary: 'auto' | 'still' | 'fade' | 'gallery' | 'motion';
   cardPreset: 'editorial' | 'retail' | 'detailed' | 'sneaker' | 'data';
   cardAction: 'none' | 'below' | 'overlay' | 'dual' | 'icons';
   cardEvolve: boolean;
@@ -54,6 +54,7 @@ const GROUND_PRESETS: [string, string][] = [
 ];
 
 const MEDIA_OPTIONS: [string, string, string?][] = [
+  ['auto', 'Auto', 'The product decides: video plays, several photos get arrows.'],
   ['still', 'Still', 'One photo. Nothing on hover.'],
   ['fade', 'Fade', 'Second photo cross-fades in.'],
   ['gallery', 'Gallery', 'Arrows and dots through every photo.'],
@@ -188,7 +189,7 @@ export function CustomizationClient({ initial }: { initial: CounterSettings }) {
 
         <PreviewPicker
           label="Media behaviour — primary"
-          desc="What the image does on a product that can support it."
+          desc="What the image does on a product that can support it. Auto reads each product and picks — a video plays on hover, several photos get arrows, one photo stays still."
           field="cardMedia"
           previews={MEDIA_PREVIEWS}
           options={MEDIA_OPTIONS}

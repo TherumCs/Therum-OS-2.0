@@ -18,12 +18,14 @@ import { formatMoney, toMinor, toMajor, currencyInfo } from '../dist/counter/cur
 import { db, disconnectDb } from '../dist/lib/db.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { after, before, beforeEach } from 'node:test';
+import { purgeTestCustomers } from './support/testCustomers.mjs';
 
 // closeQueues() AND disconnectDb(). customerAuth's rate limiter opens the lazy
 // Redis client, and queue.ts documents exactly this: any one of these left
 // open holds a live socket that keeps the event loop alive forever, which
 // presents as "the test run finished but never exited".
 after(async () => {
+  await purgeTestCustomers();
   await closeQueues();
   await disconnectDb();
 });

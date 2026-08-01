@@ -22,7 +22,7 @@ const DEFAULTS: CounterSettings = {
   cartSidebarReveal: 'push',
   cartSidebarGround: '#0a0a0a',
   cardShell: 'bare',
-  cardMedia: 'fade',
+  cardMedia: 'auto',
   cardMediaSecondary: 'still',
   cardPreset: 'editorial',
   cardAction: 'none',

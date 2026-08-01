@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { buildServer } from '../dist/server.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { db, disconnectDb } from '../dist/lib/db.js';
+import { recomputeReservations } from './support/reservations.mjs';
 
 let app;
 let vendor, product, order;
@@ -50,6 +51,9 @@ after(async () => {
   }
   await db.product.deleteMany({ where: { slug: { startsWith: 'sftest-' } } });
   await db.vendor.deleteMany({ where: { name: 'sftest Vendor' } });
+  // Orders reserve stock; deleting the row does not release it. Run LAST, once
+  // this file's own orders are gone, so the next run starts from a clean count.
+  await recomputeReservations();
   await app.close();
   await closeQueues();
   await disconnectDb();

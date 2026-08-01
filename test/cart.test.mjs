@@ -8,6 +8,7 @@ import { buildServer } from '../dist/server.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { db, disconnectDb } from '../dist/lib/db.js';
 import { encryptSecret } from '../dist/lib/crypto.js';
+import { recomputeReservations } from './support/reservations.mjs';
 
 const SECRET = process.env.JWT_SECRET ?? '';
 function jwt() {
@@ -31,7 +32,11 @@ function signedWebhook(body) {
 before(async () => {
   app = await buildServer();
   const { redis } = await import('../dist/lib/redis.js');
-  await redis.del('ratelimit:cart-new:127.0.0.1', 'ratelimit:cart-coupon:127.0.0.1');
+  // order-create is real (10 per 10 minutes per IP) and the suite creates far
+  // more than that from 127.0.0.1, so a later file used to 429 on a test that
+  // has nothing to do with rate limiting. The limiter itself stays exercised
+  // by the test that asserts it.
+  await redis.del('ratelimit:cart-new:127.0.0.1', 'ratelimit:cart-coupon:127.0.0.1', 'ratelimit:order-create:127.0.0.1');
   await db.connection.upsert({
     where: { provider: 'mock' },
     update: { credentialEncrypted: encryptSecret(MOCK_CRED), status: 'connected' },
@@ -55,21 +60,39 @@ before(async () => {
 });
 
 after(async () => {
-  await db.paymentEvent.deleteMany({ where: { provider: 'mock' } });
-  if (orderInfo?.orderId) {
-    await db.refund.deleteMany({ where: { orderId: orderInfo.orderId } });
-    await db.order.delete({ where: { id: orderInfo.orderId } }).catch(() => {});
-  }
-  await db.milieuMembership.deleteMany({ where: { milieuId } });
-  await db.milieu.deleteMany({ where: { slug: 'carttest-vip' } });
-  await db.customer.deleteMany({ where: { email: 'cart-shopper@example.com' } });
-  await db.product.deleteMany({ where: { slug: 'carttest-tee' } });
-  await db.vendor.deleteMany({ where: { name: 'carttest Vendor' } });
-  await db.connection.deleteMany({ where: { provider: 'mock' } });
-  await db.connectionAuditLog.deleteMany({ where: { provider: 'mock' } });
+  // Cleanup is wrapped because a THROW here used to be unrecoverable: the
+  // close calls below never ran, the process hung on open Redis handles, and
+  // the fixture products survived — so every later run then failed at setup on
+  // a duplicate slug. One failing test poisoned the suite until the database
+  // was cleaned by hand.
+  try {
+    await db.paymentEvent.deleteMany({ where: { provider: 'mock' } });
+    // EVERY order that touched this fixture, not just the one a passing test
+    // remembered — a test that fails before its own cleanup leaves one behind,
+    // and order_items_variant_id_fkey then blocks the product delete.
+    const items = await db.orderItem.findMany({
+      where: { variant: { product: { slug: 'carttest-tee' } } },
+      select: { orderId: true },
+    });
+    for (const orderId of new Set(items.map((i) => i.orderId))) {
+      await db.refund.deleteMany({ where: { orderId } });
+      await db.order.delete({ where: { id: orderId } }).catch(() => {});
+    }
+    await db.milieuMembership.deleteMany({ where: { milieuId } });
+    await db.milieu.deleteMany({ where: { slug: 'carttest-vip' } });
+    await db.customer.deleteMany({ where: { email: 'cart-shopper@example.com' } });
+    await db.product.deleteMany({ where: { slug: 'carttest-tee' } });
+    await db.vendor.deleteMany({ where: { name: 'carttest Vendor' } });
+    await db.connection.deleteMany({ where: { provider: 'mock' } });
+    await db.connectionAuditLog.deleteMany({ where: { provider: 'mock' } });
+  } finally {
+    // Orders reserve stock; deleting the row does not release it. Run LAST, once
+  // this file's own orders are gone, so the next run starts from a clean count.
+  await recomputeReservations();
   await app.close();
-  await closeQueues();
-  await disconnectDb();
+    await closeQueues();
+    await disconnectDb();
+  }
 });
 
 test('lazy session: first add mints the token (201); live totals from the catalog', async () => {

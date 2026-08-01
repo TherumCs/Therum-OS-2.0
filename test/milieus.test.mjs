@@ -7,6 +7,7 @@ import { createHmac } from 'node:crypto';
 import { buildServer } from '../dist/server.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { db, disconnectDb } from '../dist/lib/db.js';
+import { recomputeReservations } from './support/reservations.mjs';
 
 const SECRET = process.env.JWT_SECRET ?? '';
 
@@ -23,6 +24,14 @@ let customerId;
 let milieuId;
 
 before(async () => {
+  const { redis } = await import('../dist/lib/redis.js');
+  // Both limiters are real and both outlive a single run: order-create is 10
+  // per 10 minutes per IP and the suite makes far more orders than that from
+  // 127.0.0.1, and milieu-register's 15-minute window was still hot from the
+  // previous run — which turned an unrelated 404 assertion into a 429. Cleared
+  // per file the way the cart limiters already are; the limiters themselves
+  // stay exercised by the tests that assert them (M4 hammers this one).
+  await redis.del('ratelimit:order-create:127.0.0.1', 'ratelimit:milieu-register:127.0.0.1');
   app = await buildServer();
   const c = await db.customer.upsert({
     where: { email: 'milieus-test@example.com' },
@@ -37,6 +46,9 @@ after(async () => {
   await db.milieuMembership.deleteMany({ where: { customerId } });
   await db.milieu.deleteMany({ where: { slug: { startsWith: 'mtest-' } } });
   await db.customer.delete({ where: { id: customerId } }).catch(() => {});
+  // Orders reserve stock; deleting the row does not release it. Run LAST, once
+  // this file's own orders are gone, so the next run starts from a clean count.
+  await recomputeReservations();
   await app.close();
   await closeQueues(); // open BullMQ queues keep the event loop alive → run never exits
   await disconnectDb();

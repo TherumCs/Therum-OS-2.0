@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { buildServer } from '../dist/server.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { db, disconnectDb } from '../dist/lib/db.js';
+import { recomputeReservations } from './support/reservations.mjs';
 
 let app;
 let vendor, product, coupon;
@@ -43,6 +44,10 @@ before(async () => {
   // stale bucket makes the suite fail with 429s that have nothing to do with
   // the behaviour under test.
   await redis.del('ratelimit:cart-coupon:127.0.0.1');
+  // Account signup is 5 per 15 minutes per IP. This file signs up two accounts
+  // in its fixtures, so a window left hot by an earlier run 429'd the SETUP —
+  // which cancels every test in the file rather than failing one of them.
+  await redis.del('ratelimit:customer-register:127.0.0.1');
 
   vendor = await db.vendor.create({ data: { name: 'accttest Vendor' } });
   product = await db.product.create({
@@ -68,6 +73,9 @@ after(async () => {
   await db.product.deleteMany({ where: { slug: { startsWith: 'accttest-' } } }).catch(() => {});
   await db.vendor.deleteMany({ where: { name: 'accttest Vendor' } }).catch(() => {});
   await db.coupon.deleteMany({ where: { code: 'ACCTTEST20' } }).catch(() => {});
+  // Orders reserve stock; deleting the row does not release it. Run LAST, once
+  // this file's own orders are gone, so the next run starts from a clean count.
+  await recomputeReservations();
   await app.close();
   await closeQueues();
   await disconnectDb();

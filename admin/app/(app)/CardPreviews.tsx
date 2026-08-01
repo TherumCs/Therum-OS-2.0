@@ -130,6 +130,21 @@ export const SHELL_PREVIEWS: Record<string, React.ReactNode> = {
 
 // ── MEDIA ─────────────────────────────────────────────────────────────────
 export const MEDIA_PREVIEWS: Record<string, React.ReactNode> = {
+  // Auto has no single look, so it is drawn as the two it chooses between:
+  // the play badge of a motion card and the arrows of a gallery one.
+  auto: (
+    <Art>
+      <Thumb />
+      <g className="wf-pulse" style={{ transformOrigin: '46px 48px' }}>
+        <circle cx="46" cy="48" r="13" fill={PAPER} opacity="0.94" />
+        <path d="M42.5 42 L52.5 48 L42.5 54 Z" fill={INK} />
+      </g>
+      <circle cx={W - 30} cy="48" r="9" fill={PAPER} stroke={LINE} />
+      <path d={`M${W - 32.5} 44.5 L${W - 28.5} 48 L${W - 32.5} 51.5`} stroke={INK} strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+      <Name y={108} />
+      <Price y={122} />
+    </Art>
+  ),
   still: (
     <Art>
       <Thumb />

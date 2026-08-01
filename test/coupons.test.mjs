@@ -8,6 +8,7 @@ import { buildServer } from '../dist/server.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { db, disconnectDb } from '../dist/lib/db.js';
 import { encryptSecret } from '../dist/lib/crypto.js';
+import { recomputeReservations } from './support/reservations.mjs';
 
 const SECRET = process.env.JWT_SECRET ?? '';
 function jwt(role = 'admin', sub = 'coupon-test') {
@@ -55,6 +56,9 @@ after(async () => {
   await db.vendor.deleteMany({ where: { name: 'cptest Vendor' } });
   await db.connection.deleteMany({ where: { provider: 'mock' } });
   await db.connectionAuditLog.deleteMany({ where: { provider: 'mock' } });
+  // Orders reserve stock; deleting the row does not release it. Run LAST, once
+  // this file's own orders are gone, so the next run starts from a clean count.
+  await recomputeReservations();
   await app.close();
   await closeQueues();
   await disconnectDb();

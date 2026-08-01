@@ -394,8 +394,10 @@ export const CounterSettingsInput = z.object({
    *   fade     second image cross-fades in on hover
    *   gallery  arrows + dots to flip every image
    *   motion   hover plays the product video
+   *   auto     the product decides — video makes it motion, several photos
+   *            make it gallery. The default.
    */
-  cardMedia: z.enum(['still', 'fade', 'gallery', 'motion']).optional(),
+  cardMedia: z.enum(['auto', 'still', 'fade', 'gallery', 'motion']).optional(),
   /**
    * What a product falls back to when it cannot support the primary — no
    * video for 'motion', one photo for 'gallery' or 'fade'.
@@ -405,7 +407,7 @@ export const CounterSettingsInput = z.object({
    * something else" and "products without video get arrows instead", which is
    * a decision the merchant should own.
    */
-  cardMediaSecondary: z.enum(['still', 'fade', 'gallery', 'motion']).optional(),
+  cardMediaSecondary: z.enum(['auto', 'still', 'fade', 'gallery', 'motion']).optional(),
   /** Which rows of information the card carries. */
   cardPreset: z.enum(['editorial', 'retail', 'detailed', 'sneaker', 'data']).optional(),
   /**
