@@ -240,17 +240,57 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     const [site, commerce] = await Promise.all([settingsService.getSite(), settingsService.getCommerce()]);
     const origin = storeUrl(req);
     reply.send({
+      /**
+       * The FULL environment object, key for key.
+       *
+       * Field names and the complete list come from WooCommerce's own
+       * controller (`class-wc-rest-system-status-v2-controller.php`,
+       * `get_item_schema()`), not from guesswork. A connector that reads a
+       * field we never send gets `undefined` and decides the store is broken —
+       * and it reports that as whatever generic message it has, which is how
+       * three separate rounds here got blamed on credentials.
+       *
+       * `remote_post_successful` / `remote_get_successful` matter more than
+       * they look: they tell a partner the store can call OUT to it. The values
+       * are true because this server genuinely can.
+       */
       environment: {
         // These were EMPTY STRINGS, and a partner uses them to identify which
         // store it is talking to — an empty site_url is a store it cannot place.
         home_url: origin,
         site_url: origin,
+        store_id: null,
         version: '9.0.0', // The Woo API version we speak, not our own version.
+        log_directory: '/var/log/',
+        log_directory_writable: true,
         wp_version: '6.5',
-        server_info: 'Therum OS / Counter',
-        php_version: '8.2',
-        mysql_version: '8.0',
+        wp_multisite: false,
         wp_memory_limit: 268435456,
+        wp_debug_mode: false,
+        wp_cron: true,
+        wp_environment_type: 'production',
+        language: 'en_US',
+        server_info: 'Therum OS / Counter',
+        server_architecture: 'Linux x86_64',
+        php_version: '8.2',
+        php_post_max_size: 67108864,
+        php_max_execution_time: 60,
+        php_max_input_vars: 5000,
+        curl_version: '8.5.0, OpenSSL/3.0',
+        suhosin_installed: false,
+        max_upload_size: 67108864,
+        mysql_version: '8.0',
+        mysql_version_string: '8.0',
+        default_timezone: 'UTC',
+        fsockopen_or_curl_enabled: true,
+        soapclient_enabled: false,
+        domdocument_enabled: true,
+        gzip_enabled: true,
+        mbstring_enabled: true,
+        remote_post_successful: true,
+        remote_post_response: 200,
+        remote_get_successful: true,
+        remote_get_response: 200,
         external_object_cache: true,
       },
       /**

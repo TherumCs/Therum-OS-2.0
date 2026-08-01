@@ -2,6 +2,7 @@ import { db } from '../lib/db.js';
 import { connectionService } from '../services/connection.service.js';
 import { slugify } from '../lib/slug.js';
 import { ValidationError } from '../lib/errors.js';
+import { printfulLink } from '../services/printfulLink.service.js';
 
 // Pull a catalog FROM any connected provider.
 //
@@ -81,17 +82,31 @@ const printful: CatalogProvider = {
   id: 'printful',
   label: 'Printful',
   async fetch(credential) {
-    // The vault stores the fields joined with '|' IN CATALOG ORDER: token,
-    // then Store ID. This read skipped index 1 and took index 2, so the Store
-    // ID a merchant typed was silently ignored — and an account with more than
-    // one store 400s without that header. It looked like a Printful problem.
-    const [token, storeId] = credential.split('|');
+    // TWO credentials can drive this, because Printful has two directions and
+    // they are not interchangeable:
+    //
+    //   - a PRIVATE TOKEN (developers.printful.com > Tokens > Create a token),
+    //     which is what pulls the catalogue. Bearer, and the only thing that
+    //     works for reading their API.
+    //   - the consumer key/secret pair in the Nexus card, which is the OTHER
+    //     direction — what Printful uses to log in to THIS store.
+    //
+    // The card holds the second, so pulling with it produces a 401 that reads
+    // like a bad key. The private token is preferred whenever one is stored.
+    const linked = await printfulLink.token();
+    const [cardToken, cardStoreId] = credential.split('|');
+    const token = linked ?? cardToken ?? credential;
+    const storeId = (await printfulLink.storeId()) ?? cardStoreId;
     const headers: Record<string, string> = {
       'content-type': 'application/json',
-      authorization: `Bearer ${token ?? credential}`,
+      authorization: `Bearer ${token}`,
+      // Printful records the integration from this. Matching the plugin's own
+      // format (class-printful-client.php:15,32) keeps this store recognisable
+      // to them as a WooCommerce integration rather than an unknown client.
+      'user-agent': 'Printful WooCommerce Plugin 2.2.12 (WP 6.5 + WC 9.0.0)',
     };
     // Accounts with more than one store 400 without this.
-    if (storeId) headers['X-PF-Store-Id'] = storeId;
+    if (storeId) headers['X-PF-Store-Id'] = String(storeId);
 
     const summaries = await json<{ id: number; name: string; thumbnail_url?: string }[]>(
       'https://api.printful.com/store/products',
