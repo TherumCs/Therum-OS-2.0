@@ -2,6 +2,7 @@ import { isSupported } from '../counter/currency.js';
 import { ValidationError } from '../lib/errors.js';
 import { Prisma } from '@prisma/client';
 import { db } from '../lib/db.js';
+import { cached, invalidate } from '../lib/cache.js';
 import type {
   AppearanceInput,
   AdminDockInput,
@@ -525,10 +526,25 @@ const BACKUP_DEFAULTS: BackupSettings = {
 // workstreams land) is a thin wrapper over these two functions, same as
 // 1.9.44's TH_SETTINGS_KEYS-gated generic option-save, minus the WP-options
 // autoload/whitelist machinery (Postgres just indexes on the key).
+/**
+ * Read a settings row, through the shared cache.
+ *
+ * Every getter in this file goes through here, so caching once covers all
+ * seventeen of them. Settings are read on effectively every request — the site
+ * name, the counter config, the SEO defaults — and change only when a human
+ * saves the form, which is the shape a cache is actually for.
+ *
+ * The fallback merge stays OUTSIDE the cached value: what gets stored is the
+ * stored row, so adding a field to a defaults object takes effect immediately
+ * rather than after the TTL of every cached entry.
+ */
 async function read<T>(key: string, fallback: T): Promise<T> {
-  const row = await db.setting.findUnique({ where: { key } });
-  if (!row) return fallback;
-  return { ...fallback, ...(row.value as object) } as T;
+  const stored = await cached('settings', key, async () => {
+    const row = await db.setting.findUnique({ where: { key } });
+    return (row?.value ?? null) as object | null;
+  });
+  if (!stored) return fallback;
+  return { ...fallback, ...stored } as T;
 }
 
 async function write(key: string, value: object): Promise<void> {
@@ -537,6 +553,12 @@ async function write(key: string, value: object): Promise<void> {
     update: { value: value as Prisma.InputJsonValue },
     create: { key, value: value as Prisma.InputJsonValue },
   });
+  // Invalidated on the way out, not on a timer: a merchant who saves a setting
+  // and reloads must see the change, and "wait sixty seconds" is not an answer
+  // anyone accepts about their own admin panel.
+  await invalidate('settings');
+  maintenanceCache = null;
+  securityCache = null;
 }
 
 export interface SiteSettings {

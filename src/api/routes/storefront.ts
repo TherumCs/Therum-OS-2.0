@@ -4,6 +4,7 @@ import { db } from '../../lib/db.js';
 import { capabilityService } from '../../services/capability.service.js';
 import { layout, closedPage, esc, money, type StoreChrome, type SeoMeta } from '../../site/storefrontHtml.js';
 import { SITE_WIDTHS } from '../../site/siteHtml.js';
+import { cached } from '../../lib/cache.js';
 import { buildNav } from './site.js';
 import { resolveCategoryPath, resolveCategoryFilter, categoryAndDescendantIds, categoryFacets } from '../../counter/categoryTree.js';
 import { settingsService } from '../../services/settings.service.js';
@@ -247,7 +248,24 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
       : sort === 'oldest' ? { createdAt: 'asc' as const }
       : { createdAt: 'desc' as const };
 
-    const products = await db.product.findMany({
+    // The catalog read, cached per distinct filter combination. This is the
+    // heaviest query on the busiest page — it joins vendor, variants and
+    // categories — and every visitor to /shop with the same filters gets a
+    // byte-identical answer.
+    //
+    // The key is built from the PARSED inputs, not the raw query string, so
+    // ?tag=x&q=y and ?q=y&tag=x share one entry. Getting a cache key wrong is
+    // how one shopper is served another's filtered page, so it lists every
+    // value that can change the result.
+    //
+    // JSON.parse on the way out also means each request gets its own array,
+    // which matters because the in-memory sorts below mutate it.
+    const catalogKey = JSON.stringify({
+      q, tag, color, size, brand, sort,
+      cats: categoryIds ?? null,
+      take: counter.toolbarPageSize,
+    });
+    const products = await cached('catalog', catalogKey, () => db.product.findMany({
       where: {
         status: 'active',
         ...(q ? { OR: [{ name: { contains: q, mode: 'insensitive' } }, { description: { contains: q, mode: 'insensitive' } }] } : {}),
@@ -268,7 +286,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
       orderBy,
       // One page at a time. See IN_MEMORY_SORTS for why that bound matters.
       take: counter.toolbarPageSize,
-    });
+    }));
 
     // Price and best-selling are resolved here, over the page just fetched.
     if (IN_MEMORY_SORTS.has(sort)) {
