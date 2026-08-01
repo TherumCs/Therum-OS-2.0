@@ -65,6 +65,40 @@ export function ProductStudio({
   // changed rather than only in the header where nobody is looking.
   const [savedField, setSavedField] = useState<string | null>(null);
   const [pickerFor, setPickerFor] = useState<null | 'primary' | 'gallery'>(null);
+  // Terms live in state, not straight off the props: a category created here
+  // has to appear in the chip row immediately, without a page reload.
+  const [cats, setCats] = useState<Term[]>(allCategories);
+  const [tags, setTags] = useState<Term[]>(allTags);
+  // Forms stay behind a button so the panel is a list of what IS set, not a
+  // wall of empty inputs.
+  const [adding, setAdding] = useState<'' | 'category' | 'tag' | 'variant'>('');
+  const [termName, setTermName] = useState('');
+
+  /**
+   * Create a category or tag and put it straight on this product.
+   *
+   * A name that already exists comes back 409 rather than creating a second
+   * one — in that case the existing term is selected instead, because a
+   * merchant typing a name that is already there means "use that one", not
+   * "fail". Slug is derived here so the box can stay a single field.
+   */
+  async function addTerm(kind: 'category' | 'tag') {
+    const name = termName.trim();
+    if (!name) return;
+    const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+    const list = kind === 'category' ? cats : tags;
+    const existing = list.find((t) => t.slug === slug || t.name.toLowerCase() === name.toLowerCase());
+    const term = existing ?? (await call('POST', kind === 'category' ? '/api/catalog/categories' : '/api/catalog/tags', { name, slug }) as Term | null);
+    if (!term) return;
+    if (!existing) (kind === 'category' ? setCats : setTags)([...list, term]);
+
+    const nextCats = kind === 'category' && !p.categories.some((x) => x.id === term.id) ? [...p.categories, term] : p.categories;
+    const nextTags = kind === 'tag' && !p.tags.some((x) => x.id === term.id) ? [...p.tags, term] : p.tags;
+    setP({ ...p, categories: nextCats, tags: nextTags });
+    await call('PUT', `/api/products/${p.id}/taxonomy`, { categoryIds: nextCats.map((x) => x.id), tagIds: nextTags.map((x) => x.id) });
+    setTermName('');
+    setAdding('');
+  }
   const [newVariant, setNewVariant] = useState({ sku: '', price: '', color: '', size: '', inventory: '0' });
 
   async function call(method: string, path: string, body?: unknown): Promise<unknown> {
@@ -259,7 +293,7 @@ export function ProductStudio({
 
           <div className="th-studio__group-head"><span>Categories</span></div>
           <div className="th-studio__chips">
-            {allCategories.map((c) => {
+            {cats.map((c) => {
               const on = p.categories.some((x) => x.id === c.id);
               return (
                 <button
@@ -275,11 +309,18 @@ export function ProductStudio({
                 >{c.name}</button>
               );
             })}
+            <button type="button" className="th-pv-chip" disabled={busy} onClick={() => { setAdding(adding === 'category' ? '' : 'category'); setTermName(''); }}>+ New</button>
           </div>
+          {adding === 'category' && (
+            <div className="th-studio__newvariant">
+              <input autoFocus placeholder="Category name" value={termName} onChange={(e) => setTermName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void addTerm('category'); if (e.key === 'Escape') setAdding(''); }} />
+              <button type="button" className="th-btn th-btn-primary" disabled={busy || !termName.trim()} onClick={() => void addTerm('category')}>Add category</button>
+            </div>
+          )}
 
           <div className="th-studio__group-head"><span>Tags</span></div>
           <div className="th-studio__chips">
-            {allTags.map((t) => {
+            {tags.map((t) => {
               const on = p.tags.some((x) => x.id === t.id);
               return (
                 <button
@@ -295,7 +336,14 @@ export function ProductStudio({
                 >{t.name}</button>
               );
             })}
+            <button type="button" className="th-pv-chip" disabled={busy} onClick={() => { setAdding(adding === 'tag' ? '' : 'tag'); setTermName(''); }}>+ New</button>
           </div>
+          {adding === 'tag' && (
+            <div className="th-studio__newvariant">
+              <input autoFocus placeholder="Tag name" value={termName} onChange={(e) => setTermName(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void addTerm('tag'); if (e.key === 'Escape') setAdding(''); }} />
+              <button type="button" className="th-btn th-btn-primary" disabled={busy || !termName.trim()} onClick={() => void addTerm('tag')}>Add tag</button>
+            </div>
+          )}
         </>
       )}
 
@@ -385,8 +433,13 @@ export function ProductStudio({
         </>
       )}
 
-      <div className="th-studio__group-head" style={{ marginTop: 20 }}><span>Add a variant</span></div>
-      <div className="th-studio__newvariant">
+      <div className="th-studio__group-head" style={{ marginTop: 20 }}>
+        <span>Variants</span>
+        <button type="button" className="th-pv-chip" disabled={busy} onClick={() => setAdding(adding === 'variant' ? '' : 'variant')}>
+          {adding === 'variant' ? 'Cancel' : '+ Add a variant'}
+        </button>
+      </div>
+      <div className="th-studio__newvariant" hidden={adding !== 'variant'}>
         {(['sku', 'color', 'size'] as const).map((f) => (
           <input key={f} placeholder={f === 'sku' ? 'SKU' : f === 'color' ? 'Colour' : 'Size'} value={newVariant[f]} onChange={(e) => setNewVariant({ ...newVariant, [f]: e.target.value })} />
         ))}
@@ -404,6 +457,7 @@ export function ProductStudio({
             if (created) {
               setP({ ...p, variants: [...p.variants, created as EditorProduct['variants'][number]] });
               setNewVariant({ sku: '', price: '', color: '', size: '', inventory: '0' });
+              setAdding('');
             }
           }}
         >Add variant</button>

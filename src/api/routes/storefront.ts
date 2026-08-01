@@ -606,6 +606,8 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
         // an untracked line is a billion, and "1000000000 in stock" is worse
         // than saying nothing.
         stock: stockLabel(v).label,
+        color: v.color,
+        size: v.size,
         // A colourway is a different photograph. Without these the gallery has
         // nothing to change to when the shopper picks one.
         image: v.image ?? null,
@@ -613,8 +615,51 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
       };
     });
 
-    const picker = variants.map((v, i) => `
-      <button type="button" data-variant="${esc(v.id)}" data-price="${v.price}" ${v.sellable ? '' : 'disabled'} class="${i === 0 && v.sellable ? 'sel' : ''}">${esc(v.label)}</button>`).join('');
+    /**
+     * Colour and size are SEPARATE choices, not one combined label.
+     *
+     * Every variant used to render as its own chip reading "Dark Green/Natural
+     * / One size" — which repeats the size on every option when there is only
+     * one of them, and makes the shopper read six near-identical strings to
+     * find a colour.
+     *
+     * A size with one value is a FACT about the product, so it is stated once
+     * as text. Colours become swatches, and the swatch is the variant's own
+     * mockup rather than a colour dot: "Dark Green/Natural" is two colours and
+     * no single dot is honest about it, whereas the photo always is.
+     */
+    const uniq = <T,>(xs: T[]) => [...new Set(xs)];
+    const colors = uniq(variants.map((v) => v.color).filter((c): c is string => !!c));
+    const sizes = uniq(variants.map((v) => v.size).filter((z): z is string => !!z));
+    const firstOf = (color: string) => variants.find((v) => v.color === color);
+
+    const swatches = colors.length > 1
+      ? `<label>Colour</label>
+         <div class="swatches" id="swatches">${colors.map((c, i) => {
+            const v = firstOf(c)!;
+            return `<button type="button" class="swatch${i === 0 ? ' sel' : ''}" data-color="${esc(c)}" title="${esc(c)}" aria-label="${esc(c)}"${v.sellable ? '' : ' disabled'}>
+              ${v.image ? `<img src="${esc(v.image)}" alt="" loading="lazy">` : `<span class="swatch-blank"></span>`}
+            </button>`;
+          }).join('')}</div>
+         <div class="swatch-name" id="swatch-name">${esc(colors[0] ?? '')}</div>`
+      : '';
+
+    const sizeRow = sizes.length > 1
+      ? `<label>Size</label>
+         <div class="variant-picker" id="sizes">${sizes.map((z, i) => `
+            <button type="button" data-size="${esc(z)}" class="${i === 0 ? 'sel' : ''}">${esc(z)}</button>`).join('')}</div>`
+      // One size is not a choice — say it once instead of repeating it on
+      // every option.
+      : sizes.length === 1 ? `<div class="single-size">${esc(sizes[0]!)}</div>` : '';
+
+    // Fallback for products whose variants carry neither colour nor size (a
+    // plain SKU list) — those still need something to pick from.
+    const plainPicker = !colors.length && !sizes.length && variants.length > 1
+      ? `<label>Options</label><div class="variant-picker" id="picker">${variants.map((v, i) => `
+          <button type="button" data-variant="${esc(v.id)}" data-price="${v.price}" ${v.sellable ? '' : 'disabled'} class="${i === 0 && v.sellable ? 'sel' : ''}">${esc(v.label)}</button>`).join('')}</div>`
+      : '';
+
+    const picker = `${swatches}${sizeRow}${plainPicker}`;
 
     const firstAvailable = variants.find((v) => v.sellable);
 
@@ -647,7 +692,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
           <h1 class="page-title" style="margin-top:10px">${esc(p.name)}</h1>
           <div class="price-big" id="price">${money(firstAvailable?.price ?? variants[0]?.price ?? 0)}</div>
           <div class="stock-note" id="stock">${firstAvailable ? esc(firstAvailable.stock) : 'Sold out'}</div>
-          ${variants.length > 1 ? `<label>Options</label><div class="variant-picker" id="picker">${picker}</div>` : ''}
+          ${picker}
           <button class="btn" id="add" ${firstAvailable ? '' : 'disabled'}>Add to cart</button>
           ${p.description ? `<div class="product-desc">${esc(p.description).replace(/\n/g, '<br>')}</div>` : ''}
           ${taxonomyPills ? `<div class="taxonomy-row">${taxonomyPills}</div>` : ''}
@@ -671,6 +716,36 @@ bindThumbs();
 const PRODUCT_SHOTS=${JSON.stringify(gallery.filter((g) => g.type === 'image').map((g) => ({ url: g.url, alt: g.alt })))};
 const VARIANTS=${JSON.stringify(variants)};
 let sel=VARIANTS.find(v=>v.sellable)||VARIANTS[0];
+// Two independent choices resolve to one variant. Tracking the CHOICES rather
+// than the variant is what lets a shopper change colour without losing the
+// size they already picked.
+let pickColor=sel&&sel.color,pickSize=sel&&sel.size;
+function resolve(){
+  const match=VARIANTS.find(v=>(pickColor==null||v.color===pickColor)&&(pickSize==null||v.size===pickSize));
+  if(match)applyVariant(match);
+}
+function applyVariant(v){
+  sel=v;
+  document.getElementById('price').textContent=(v.price/100).toLocaleString('en-US',{style:'currency',currency:'USD'});
+  document.getElementById('stock').textContent=v.stock;
+  document.getElementById('add').disabled=!v.sellable;
+  const nm=document.getElementById('swatch-name');if(nm&&v.color)nm.textContent=v.color;
+  showVariantShots(v);
+}
+const sw=document.getElementById('swatches');
+if(sw)sw.addEventListener('click',(e)=>{
+  const b=e.target.closest('button[data-color]');if(!b||b.disabled)return;
+  sw.querySelectorAll('button').forEach(x=>x.classList.remove('sel'));
+  b.classList.add('sel');
+  pickColor=b.dataset.color;resolve();
+});
+const sz=document.getElementById('sizes');
+if(sz)sz.addEventListener('click',(e)=>{
+  const b=e.target.closest('button[data-size]');if(!b||b.disabled)return;
+  sz.querySelectorAll('button').forEach(x=>x.classList.remove('sel'));
+  b.classList.add('sel');
+  pickSize=b.dataset.size;resolve();
+});
 const picker=document.getElementById('picker');
 if(picker)picker.addEventListener('click',(e)=>{
   const b=e.target.closest('button[data-variant]');if(!b||b.disabled)return;

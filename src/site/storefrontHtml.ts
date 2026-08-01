@@ -149,6 +149,18 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 .variant-picker button{border:1px solid var(--bd2);background:var(--sf);border-radius:var(--radius-md);padding:9px 14px;font-size:13px;font-family:var(--f);cursor:pointer;color:var(--tx)}
 .variant-picker button.sel{outline:2px solid var(--ac-btn);outline-offset:-1px;border-color:transparent;font-weight:600}
 .variant-picker button:disabled{opacity:0.4;cursor:default;text-decoration:line-through}
+/* Colour swatches. The swatch is the variant's own mockup, not a colour dot:
+   "Dark Green/Natural" is two colours and no single dot is honest about it. */
+.swatches{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 6px}
+.swatch{width:52px;height:52px;padding:0;border:1px solid var(--bd2);background:var(--sf);border-radius:var(--radius-md);overflow:hidden;cursor:pointer;line-height:0}
+.swatch img{width:100%;height:100%;object-fit:cover;display:block}
+.swatch-blank{display:block;width:100%;height:100%;background:var(--bd2)}
+.swatch.sel{outline:2px solid var(--ac-btn);outline-offset:-1px;border-color:transparent}
+.swatch:disabled{opacity:.35;cursor:default}
+.swatch-name{font-size:13px;color:var(--tx);margin-bottom:10px}
+/* One size is a fact, not a choice — stated once instead of repeated on every
+   option chip. */
+.single-size{font-size:13px;color:var(--tx2,var(--tx));opacity:.75;margin:2px 0 10px}
 .product-hero{display:grid;grid-template-columns:1fr 1fr;gap:36px;align-items:start}
 @media(max-width:860px){.product-hero{grid-template-columns:1fr}}
 .product-hero .thumb{aspect-ratio:1;background:var(--sf2);border-radius:var(--radius-lg);display:flex;align-items:center;justify-content:center;color:var(--tx3);text-transform:uppercase;letter-spacing:0.06em;font-size:13px;overflow:hidden}
