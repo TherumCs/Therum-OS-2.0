@@ -174,6 +174,14 @@ export const hostingProviderService = {
   ): Promise<{ ok: boolean; output: string }> {
     const provider = this.provider(providerId);
     const started = Date.now();
+
+    // Write-ahead, for the same reason the on-box actions do it — more so
+    // here. A restart through the provider takes the whole machine, including
+    // the process trying to record that it asked for one.
+    const row = await db.hostActionLog
+      .create({ data: { actionId: `${providerId}:${action}`, actorId: actorId ?? null, status: 'running' } })
+      .catch(() => null);
+
     let ok = true;
     let output: string;
     try {
@@ -186,11 +194,14 @@ export const hostingProviderService = {
       ok = false;
       output = e instanceof Error ? e.message : String(e);
     }
-    await db.hostActionLog
-      .create({
-        data: { actionId: `${providerId}:${action}`, actorId: actorId ?? null, ok, output, durationMs: Date.now() - started },
-      })
-      .catch(() => undefined);
+    if (row) {
+      await db.hostActionLog
+        .update({
+          where: { id: row.id },
+          data: { status: ok ? 'ok' : 'failed', ok, output, durationMs: Date.now() - started, finishedAt: new Date() },
+        })
+        .catch(() => undefined);
+    }
     return { ok, output };
   },
 };

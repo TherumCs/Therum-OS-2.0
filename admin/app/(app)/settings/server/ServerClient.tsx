@@ -29,6 +29,7 @@ interface Action {
 interface LogRow {
   id: string;
   actionId: string;
+  status: string;
   ok: boolean;
   output: string;
   durationMs: number;
@@ -400,13 +401,22 @@ export function ServerClient() {
       {log.length > 0 && (
         <section className="th-srv__group">
           <h2 className="th-srv__grouptitle">Recent runs</h2>
-          <p className="th-srv__groupdesc">Every action, successful or not, with who ran it and what it printed.</p>
+          <p className="th-srv__groupdesc">
+            Every action, successful or not — the row is written before the command runs, so an action that restarts
+            this server still leaves a trace. <strong>Interrupted</strong> means exactly that: it started, and nothing
+            saw it finish.
+          </p>
           <ul className="th-srv__log">
             {log.map((row) => (
               <li key={row.id} data-ok={row.ok}>
                 <span className="th-srv__logwhen">{new Date(row.at).toLocaleString()}</span>
                 <code>{row.actionId}</code>
-                <span className={row.ok ? 'th-srv__ok' : 'th-srv__bad'}>{row.ok ? 'ok' : 'failed'}</span>
+                {/* 'interrupted' is its own answer, not a failure: the action
+                    restarted this server (or the box) before anything could
+                    record how it ended. */}
+                <span className={row.status === 'ok' ? 'th-srv__ok' : row.status === 'interrupted' ? 'th-srv__warn' : 'th-srv__bad'}>
+                  {row.status ?? (row.ok ? 'ok' : 'failed')}
+                </span>
               </li>
             ))}
           </ul>

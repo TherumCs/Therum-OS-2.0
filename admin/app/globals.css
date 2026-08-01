@@ -1928,6 +1928,7 @@ tr:hover .th-rowactions, tr:focus-within .th-rowactions { opacity: 1; }
 .th-srv__log code { font-family: var(--th-font-mono); color: var(--th-ink-2); flex: 1; }
 .th-srv__ok { color: var(--th-ok-ink, #15803d); font-weight: 600; }
 .th-srv__bad { color: var(--th-danger, #c0392b); font-weight: 600; }
+.th-srv__warn { color: var(--th-warn-ink, #a16207); font-weight: 600; }
 
 /* The console reads as a terminal on purpose — monospace, dark, scrollback —
    because that is the mental model. What it is NOT is a shell, and the hint

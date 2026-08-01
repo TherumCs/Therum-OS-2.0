@@ -6,6 +6,7 @@ import multipart from '@fastify/multipart';
 import { join } from 'node:path';
 import fastifyStatic from '@fastify/static';
 import { env } from './lib/env.js';
+import { hostActionService } from './services/hostAction.service.js';
 import { UPLOADS_DIR } from './lib/uploads.js';
 import { adminProxy } from './api/adminProxy.js';
 import { db, disconnectDb } from './lib/db.js';
@@ -349,6 +350,14 @@ async function main(): Promise<void> {
   };
   process.on('SIGINT', () => void shutdown('SIGINT'));
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
+
+  // Any host action still marked 'running' belongs to a process that no longer
+  // exists — several of them restart THIS server on purpose, and a reboot ends
+  // the rest. Closing them at boot is what makes the log survivable: after a
+  // restart you can see that something was started and never observed to
+  // finish, instead of a row frozen mid-flight forever.
+  const interrupted = await hostActionService.closeInterrupted();
+  if (interrupted > 0) app.log.warn({ interrupted }, 'host actions were interrupted by a restart');
 
   try {
     await app.listen({ port: env.PORT, host: env.HOST });

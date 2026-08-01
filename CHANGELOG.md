@@ -1,5 +1,50 @@
 # Changelog
 
+## [2.0.0-beta.5] — Server panel, quick checkout, provider catalog sync (2026-08-01)
+
+The release that makes the box administrable and the store sellable. Everything
+below was verified against the running install rather than reasoned about, and
+the suite went from 318 to 356 tests.
+
+**Settings → Server — the control panel this stack no longer has to install.**
+Fifteen actions (reload the API, restart the admin or worker, test and reload
+nginx, enable the firewall, disable SSH passwords, install updates, dry-run
+certificate renewal, cap Redis memory, tune Postgres, read the logs), each
+stating what it runs and how to undo it before it runs, each audited. Plus a
+console that parses your line against a fixed grammar instead of running a
+shell: `df; id` is refused as shell syntax, `rm -rf /` as an unknown command,
+and the refusal names what IS accepted. No endpoint anywhere takes a command;
+`deploy/therum-sudoers` grants NOPASSWD on exact argv, because granting the
+binary would be granting everything sed, systemctl or apt-get can do.
+
+**Out-of-band control.** The panel above runs ON the box and dies with it, so
+Hostinger joins Nexus as the first `hosting` provider: state, IP, hard restart
+and snapshot through the provider's API, reachable when the server is not.
+Provider-agnostic — a second host is one adapter, not another panel.
+
+**Quick checkout completes in the card.** Two card types the settings could
+never actually produce before (hover video, gallery arrows) now follow the
+product's own media via a new `auto` default. Pick options, pay with a wallet
+or a card, never leave the page — and the same Nexus method strip the full
+checkout shows.
+
+**Money is right on every surface.** Shipping address, live rates from the
+provider or Counter settings, tax, and a full breakdown — items, discount,
+shipping with its method, tax, total — on the order, the confirmation, the
+admin and the receipt email. An order that charged $54 for an $83.45 cart is
+what started this.
+
+**Catalog sync is provider-agnostic.** Printful and Printify ship as adapters;
+re-syncing is idempotent on the provider's own ids and only ever overwrites
+name, image, price and stock, so descriptions and categories you improved
+survive.
+
+Also: Host Advisor (20 probes, 25 deterministic rules), scoped editing behind
+propose → review → apply, the Studio assistant as a dashboard card, appearance
+settings that actually change the page, the navigation freeze fixed at its
+cause, and a test suite that can now run twice in a row — stock reservations,
+rate limiters and throwaway accounts all clean up after themselves.
+
 ## [2.0.0-beta.2] — Admin hardening, Media library rebuild, front-end dock (2026-07-28)
 
 Released after a full audit pass: every admin route, all 10 Appearance sections,

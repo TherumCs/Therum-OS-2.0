@@ -386,6 +386,15 @@ export const hostActionService = {
       return { id, ok: true, dryRun: true, command: action.command, output: 'Dry run — nothing executed.', durationMs: 0 };
     }
 
+    // WRITE-AHEAD. Some of these actions kill the process that would otherwise
+    // write this row: `pm2 reload therum-cms-api` restarts this very server,
+    // and apt-get can take services with it. Logging on completion meant the
+    // most disruptive actions left no trace — the exact opposite of what an
+    // audit log is for. The row exists before the command does anything.
+    const row = await db.hostActionLog
+      .create({ data: { actionId: id, actorId: opts.actorId ?? null, status: 'running' } })
+      .catch(() => null);
+
     let ok = true;
     let output: string;
     try {
@@ -396,21 +405,50 @@ export const hostActionService = {
     }
     const durationMs = Date.now() - started;
 
-    // Logged whether it worked or not. A failed privileged action is the more
-    // interesting row of the two.
-    await db.hostActionLog
-      .create({ data: { actionId: id, actorId: opts.actorId ?? null, ok, output, durationMs } })
-      .catch(() => undefined);
+    if (row) {
+      await db.hostActionLog
+        .update({
+          where: { id: row.id },
+          data: { status: ok ? 'ok' : 'failed', ok, output, durationMs, finishedAt: new Date() },
+        })
+        .catch(() => undefined);
+    }
 
     return { id, ok, dryRun: false, command: action.command, output, durationMs };
   },
 
+  /**
+   * Close out rows left 'running' by a restart, and report how many.
+   *
+   * Called at boot. If the API is up and a row still says 'running', the run
+   * that wrote it did not survive — either it restarted this process on
+   * purpose or the box went down under it. Marked 'interrupted' rather than
+   * ok or failed, because the honest answer is that nobody saw the end of it;
+   * the operator checks the box. Anything still running from THIS process is
+   * excluded by the age window.
+   */
+  async closeInterrupted(olderThanMs = 60_000): Promise<number> {
+    const cutoff = new Date(Date.now() - olderThanMs);
+    const { count } = await db.hostActionLog
+      .updateMany({
+        where: { status: 'running', at: { lt: cutoff } },
+        data: {
+          status: 'interrupted',
+          ok: false,
+          finishedAt: new Date(),
+          output: 'Interrupted — the server restarted before this finished. Its outcome was never observed; check the box.',
+        },
+      })
+      .catch(() => ({ count: 0 }));
+    return count;
+  },
+
   /** Recent runs, newest first. */
-  async log(limit = 25): Promise<{ id: string; actionId: string; ok: boolean; output: string; durationMs: number; at: Date }[]> {
+  async log(limit = 25): Promise<{ id: string; actionId: string; status: string; ok: boolean; output: string; durationMs: number; at: Date }[]> {
     return db.hostActionLog.findMany({
       orderBy: { at: 'desc' },
       take: Math.min(Math.max(limit, 1), 100),
-      select: { id: true, actionId: true, ok: true, output: true, durationMs: true, at: true },
+      select: { id: true, actionId: true, status: true, ok: true, output: true, durationMs: true, at: true },
     });
   },
 };

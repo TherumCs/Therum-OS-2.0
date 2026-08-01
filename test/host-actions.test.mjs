@@ -140,6 +140,57 @@ test('a real run is audited, and the output carries no secret', async () => {
   await redis.config('SET', 'maxmemory-policy', previousPolicy);
 });
 
+test('SURVIVES A RESTART: the row is written before the command runs', async () => {
+  // pm2.reload-api restarts the process handling the request, so a row written
+  // on completion would never be written at all. Proven by watching the row
+  // appear WHILE the action is still in flight.
+  const action = actionById('redis.tune-memory');
+  const realRun = action.run;
+  let sawRowMidFlight = null;
+  action.run = async () => {
+    sawRowMidFlight = await db.hostActionLog.findFirst({
+      where: { actionId: 'redis.tune-memory', status: 'running' },
+      orderBy: { at: 'desc' },
+    });
+    return 'ok';
+  };
+  try {
+    await hostActionService.run('redis.tune-memory', { actorId: 'restart-test' });
+  } finally {
+    action.run = realRun;
+  }
+  assert.ok(sawRowMidFlight, 'the row exists before the command finishes');
+  assert.equal(sawRowMidFlight.status, 'running');
+  assert.equal(sawRowMidFlight.actorId, 'restart-test');
+
+  const after = await db.hostActionLog.findUnique({ where: { id: sawRowMidFlight.id } });
+  assert.equal(after.status, 'ok', 'and it is closed out when the command returns');
+  assert.ok(after.finishedAt, 'with a finish time');
+});
+
+test('a row left running by a restart is closed as interrupted, not guessed', async () => {
+  const orphan = await db.hostActionLog.create({
+    data: {
+      actionId: 'redis.tune-memory',
+      actorId: 'restart-test',
+      status: 'running',
+      at: new Date(Date.now() - 10 * 60_000),
+    },
+  });
+  const closed = await hostActionService.closeInterrupted();
+  assert.ok(closed >= 1, 'the sweep found it');
+
+  const row = await db.hostActionLog.findUnique({ where: { id: orphan.id } });
+  assert.equal(row.status, 'interrupted', 'not "ok" and not "failed" — nobody saw the end of it');
+  assert.match(row.output, /restarted before this finished/);
+
+  // A row from the last minute belongs to a live request and must survive.
+  const live = await db.hostActionLog.create({ data: { actionId: 'redis.tune-memory', status: 'running' } });
+  await hostActionService.closeInterrupted();
+  assert.equal((await db.hostActionLog.findUnique({ where: { id: live.id } })).status, 'running', 'in-flight runs are left alone');
+  await db.hostActionLog.delete({ where: { id: live.id } }).catch(() => {});
+});
+
 test('a failing action is logged too — the more interesting row of the two', async () => {
   const action = actionById('redis.tune-memory');
   const realRun = action.run;

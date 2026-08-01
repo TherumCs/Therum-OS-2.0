@@ -1064,15 +1064,32 @@ model CustomerSession {
 // either a misconfiguration or somebody probing what the panel will do. Output
 // is captured scrubbed and truncated at the service layer, never raw.
 model HostActionLog {
-  id         String   @id @default(cuid())
-  actionId   String   @map("action_id")
-  actorId    String?  @map("actor_id")
-  ok         Boolean
-  output     String
-  durationMs Int      @map("duration_ms")
-  at         DateTime @default(now())
+  id       String  @id @default(cuid())
+  actionId String  @map("action_id")
+  actorId  String? @map("actor_id")
+  /**
+   * running | ok | failed | interrupted.
+   *
+   * The row is written BEFORE the action runs, because several of these
+   * actions kill the process that would otherwise write it afterwards —
+   * `pm2 reload therum-cms-api` restarts the very server handling the request,
+   * and a provider-level restart takes the whole box. Recording only on
+   * completion meant the most disruptive actions were the ones that left no
+   * trace at all.
+   *
+   * 'interrupted' is set at boot for any row still 'running': the truthful
+   * answer after a reboot is "this started and we never saw it finish", not a
+   * guess in either direction.
+   */
+  status     String    @default("running")
+  ok         Boolean   @default(false)
+  output     String    @default("")
+  durationMs Int       @default(0) @map("duration_ms")
+  at         DateTime  @default(now())
+  finishedAt DateTime? @map("finished_at")
 
   @@index([actionId, at])
   @@index([at])
+  @@index([status])
   @@map("host_action_log")
 }
