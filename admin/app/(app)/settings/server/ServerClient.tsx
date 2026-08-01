@@ -48,6 +48,22 @@ interface ConsoleLine {
   output: string;
 }
 
+interface Machine {
+  id: string;
+  name: string;
+  state: string;
+  ipv4: string | null;
+  plan: string | null;
+  region: string | null;
+}
+
+interface HostingProvider {
+  id: string;
+  label: string;
+  tokenSource: string;
+  connected: boolean;
+}
+
 interface RunResult {
   id: string;
   ok: boolean;
@@ -88,6 +104,11 @@ export function ServerClient() {
   const [line, setLine] = useState('');
   const [history, setHistory] = useState<ConsoleLine[]>([]);
   const [running, setRunning] = useState(false);
+  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [machines, setMachines] = useState<Machine[]>([]);
+  const [hostingProviders, setHostingProviders] = useState<HostingProvider[]>([]);
+  const [hostingError, setHostingError] = useState<string | null>(null);
+  const [hostingBusy, setHostingBusy] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -98,6 +119,12 @@ export function ServerClient() {
       setLog(data.log ?? []);
       const cmds = await fetch(`${BASE_PATH}/api/host/console`).then((r) => (r.ok ? r.json() : { commands: [] }));
       setCommands((cmds as { commands: ConsoleCommand[] }).commands ?? []);
+      const hosting = (await fetch(`${BASE_PATH}/api/host/hosting`).then((r) =>
+        r.ok ? r.json() : { providers: [], machines: [] },
+      )) as { providers: HostingProvider[]; machines: Machine[]; error?: string };
+      setHostingProviders(hosting.providers ?? []);
+      setMachines(hosting.machines ?? []);
+      setHostingError(hosting.error ?? null);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -151,12 +178,153 @@ export function ServerClient() {
     }
   }
 
+  async function hostingAct(provider: string, machine: Machine, action: string): Promise<void> {
+    const label = action === 'snapshot' ? `Snapshot ${machine.name}?` : `${action} ${machine.name}?`;
+    // Confirmed inline rather than through the action dialog: this one reaches
+    // the hypervisor, so the warning has to name the machine by hostname.
+    if (!window.confirm(`${label}\n\nThis goes to the provider, not the box — it works even when the server does not answer.`)) return;
+    setHostingBusy(machine.id);
+    setHostingError(null);
+    try {
+      const res = await fetch(
+        `${BASE_PATH}/api/host/hosting/${encodeURIComponent(provider)}/${encodeURIComponent(machine.id)}/${action}`,
+        { method: 'POST' },
+      );
+      const body = (await res.json()) as { ok?: boolean; output?: string; error?: { message?: string } };
+      setResult({
+        id: `${provider}:${action}`,
+        ok: res.ok && body.ok !== false,
+        dryRun: false,
+        command: `${provider} ${action} ${machine.name}`,
+        output: body.output ?? body.error?.message ?? '',
+        durationMs: 0,
+      });
+      await load();
+    } catch (e) {
+      setHostingError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setHostingBusy(null);
+    }
+  }
+
   const groups: Group[] = ['service', 'security', 'tuning', 'logs'];
+  const hostingConnected = hostingProviders.find((p) => p.connected);
   const unavailable = actions.filter((a) => !a.available).length;
 
   return (
     <div className="th-srv">
       {error && <p className="th-adv__error">{error}</p>}
+
+      {/* Console first: it is the thing you reach for on nearly every visit,
+          and the actions below are the thing you reach for rarely. Collapsed
+          until asked for, the same shape as the Studio card on the dashboard —
+          a single line you type into, which opens into its own scrollback. */}
+      <section className={'th-srv__group th-srv__consolecard' + (consoleOpen ? ' is-expanded' : '')}>
+        <div className="th-srv__consolehead">
+          <h2 className="th-srv__grouptitle">Console</h2>
+          <button type="button" className="th-srv__toggle" onClick={() => setConsoleOpen((v) => !v)} aria-expanded={consoleOpen}>
+            {consoleOpen ? 'Collapse' : history.length > 0 ? `${history.length} run` : 'Expand'}
+          </button>
+        </div>
+
+        <div className="th-srv__consolebar">
+          <input
+            value={line}
+            onChange={(e) => setLine(e.target.value)}
+            onFocus={() => setConsoleOpen(true)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void send();
+            }}
+            placeholder="status nginx"
+            aria-label="Console command"
+            spellCheck={false}
+            autoComplete="off"
+          />
+          <button type="button" className="th-btn" onClick={() => void send()} disabled={running || line.trim() === ''}>
+            {running ? 'Running…' : 'Run'}
+          </button>
+        </div>
+
+        {consoleOpen && (
+          <>
+            <p className="th-srv__groupdesc">
+              Reads only — status, logs, disk, ports. It parses what you type against a known list rather than running a
+              shell, so it refuses things a terminal would do, and says what it does accept.
+            </p>
+
+            <div className="th-srv__console">
+              {history.length === 0 ? (
+                <p className="th-srv__consoleidle">Try <code>status nginx</code>, <code>log nginx-error 50</code>, <code>df</code>.</p>
+              ) : (
+                history.map((h, i) => (
+                  <div key={i} className="th-srv__consoleline" data-ok={h.ok}>
+                    <div className="th-srv__consoleinput">$ {h.input}</div>
+                    <pre className="th-srv__consoleout">{h.output}</pre>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <details className="th-adv__skip">
+              <summary>{commands.length} commands</summary>
+              <ul>
+                {commands.map((c) => (
+                  <li key={c.name} style={{ opacity: c.available ? 1 : 0.55 }}>
+                    <code>{c.usage}</code> — {c.help}
+                    {!c.available && ' (server only)'}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          </>
+        )}
+      </section>
+
+      {/* The provider's API, not the box. This is the section that still works
+          when everything else on this page cannot answer. */}
+      <section className="th-srv__group">
+        <h2 className="th-srv__grouptitle">The machine itself</h2>
+        <p className="th-srv__groupdesc">
+          Everything else here runs ON the server, so it goes down with it. These go through your hosting
+          provider instead — a hard restart and a snapshot stay reachable when the box does not answer.
+        </p>
+
+        {hostingError && <p className="th-adv__error">{hostingError}</p>}
+
+        {!hostingConnected ? (
+          <p className="th-srv__note">
+            No hosting provider connected. Add one under <strong>Connections</strong> —
+            {hostingProviders.map((p) => ` ${p.label}: ${p.tokenSource}`).join(' · ')}
+          </p>
+        ) : machines.length === 0 && !hostingError ? (
+          <p className="th-srv__note">{hostingConnected.label} is connected, but reports no machines on this account.</p>
+        ) : (
+          <ul className="th-srv__list">
+            {machines.map((m) => (
+              <li key={m.id} className="th-srv__item">
+                <div className="th-srv__meta">
+                  <span className="th-srv__label">{m.name}</span>
+                  <span className={`th-srv__risk th-srv__risk--${m.state === 'running' ? 'read' : 'sensitive'}`}>{m.state}</span>
+                </div>
+                <p className="th-srv__desc">
+                  {[m.ipv4, m.plan, m.region].filter(Boolean).join(' · ') || hostingConnected.label}
+                </p>
+                <div className="th-srv__confirmbtns" style={{ justifyContent: 'flex-start', marginTop: 0 }}>
+                  <button type="button" className="th-btn th-btn-danger" disabled={hostingBusy !== null}
+                    onClick={() => void hostingAct(hostingConnected.id, m, 'restart')}>
+                    {hostingBusy === m.id ? 'Working…' : 'Hard restart'}
+                  </button>
+                  <button type="button" className="th-btn" disabled={hostingBusy !== null}
+                    onClick={() => void hostingAct(hostingConnected.id, m, 'snapshot')}>
+                    Snapshot
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
 
       {unavailable > 0 && (
         <p className="th-srv__note">
@@ -219,58 +387,6 @@ export function ServerClient() {
           </div>
         </div>
       )}
-
-      {/* Read-only console. Not a shell — the line is parsed against a fixed
-          grammar server-side, so there is nothing here to escape. */}
-      <section className="th-srv__group">
-        <h2 className="th-srv__grouptitle">Console</h2>
-        <p className="th-srv__groupdesc">
-          Reads only — status, logs, disk, ports. It parses what you type against a known list rather than running a
-          shell, so it will refuse things a terminal would do, and it will tell you what it does accept.
-        </p>
-
-        <div className="th-srv__console">
-          {history.length === 0 ? (
-            <p className="th-srv__consoleidle">Try <code>status nginx</code>, <code>log nginx-error 50</code>, <code>df</code>.</p>
-          ) : (
-            history.map((h, i) => (
-              <div key={i} className="th-srv__consoleline" data-ok={h.ok}>
-                <div className="th-srv__consoleinput">$ {h.input}</div>
-                <pre className="th-srv__consoleout">{h.output}</pre>
-              </div>
-            ))
-          )}
-        </div>
-
-        <div className="th-srv__consolebar">
-          <input
-            value={line}
-            onChange={(e) => setLine(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') void send();
-            }}
-            placeholder="status nginx"
-            aria-label="Console command"
-            spellCheck={false}
-            autoComplete="off"
-          />
-          <button type="button" className="th-btn" onClick={() => void send()} disabled={running || line.trim() === ''}>
-            {running ? 'Running…' : 'Run'}
-          </button>
-        </div>
-
-        <details className="th-adv__skip">
-          <summary>{commands.length} commands</summary>
-          <ul>
-            {commands.map((c) => (
-              <li key={c.name} style={{ opacity: c.available ? 1 : 0.55 }}>
-                <code>{c.usage}</code> — {c.help}
-                {!c.available && ' (server only)'}
-              </li>
-            ))}
-          </ul>
-        </details>
-      </section>
 
       {result && (
         <section className="th-srv__result" data-ok={result.ok}>

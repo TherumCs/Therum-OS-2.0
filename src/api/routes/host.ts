@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { hostAdvisorService } from '../../services/hostAdvisor.service.js';
 import { hostActionService } from '../../services/hostAction.service.js';
 import { hostConsoleService } from '../../services/hostConsole.service.js';
+import { hostingProviderService } from '../../services/hostingProvider.service.js';
 import { requireBundle } from '../../middleware/bundle.js';
 
 // The Host Advisor reads the machine this install runs on; the Server panel
@@ -53,6 +54,40 @@ export async function hostRoutes(app: FastifyInstance): Promise<void> {
       reply.status(400).send({ error: { code: 'not_a_command', message: e instanceof Error ? e.message : String(e) } });
     }
   });
+
+  // The hosting provider's own API — reachable when the box is not, which is
+  // the only reason it exists. Everything else on this router runs ON the
+  // machine and goes down with it.
+  app.get('/host/hosting', operator, async (_req, reply) => {
+    const providers = await hostingProviderService.providers();
+    const connected = providers.find((p) => p.connected);
+    if (!connected) return reply.send({ providers, machines: [] });
+    try {
+      reply.send({ providers, machines: await hostingProviderService.list(connected.id) });
+    } catch (e) {
+      // A failed list is reported WITH the provider list, so the panel can
+      // still say who is connected while explaining why it has no machines.
+      reply.send({ providers, machines: [], error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
+  app.post<{ Params: { provider: string; id: string; action: string } }>(
+    '/host/hosting/:provider/:id/:action',
+    operator,
+    async (req, reply) => {
+      const { provider, id, action } = req.params;
+      if (!['start', 'stop', 'restart', 'snapshot'].includes(action)) {
+        return reply.status(404).send({ error: { code: 'not_found', message: `Unknown action "${action}".` } });
+      }
+      const result = await hostingProviderService.act(
+        provider,
+        id,
+        action as 'start' | 'stop' | 'restart' | 'snapshot',
+        (req.user as { sub?: string } | undefined)?.sub ?? null,
+      );
+      reply.status(result.ok ? 200 : 400).send(result);
+    },
+  );
 
   app.post<{ Params: { id: string }; Body: { dryRun?: boolean } }>('/host/actions/:id/run', operator, async (req, reply) => {
     try {

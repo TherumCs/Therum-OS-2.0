@@ -1941,6 +1941,16 @@ tr:hover .th-rowactions, tr:focus-within .th-rowactions { opacity: 1; }
 .th-srv__consolebar { display: flex; gap: var(--th-space-8); margin-top: var(--th-space-8); }
 .th-srv__consolebar input { flex: 1; font-family: var(--th-font-mono); font-size: var(--th-fs-xs); padding: var(--th-space-8) var(--th-space-10); border: 1px solid var(--th-line); border-radius: var(--th-r-sm); background: var(--th-surface); color: var(--th-ink); }
 
+/* Collapsed, the console is one line you type into; expanded it owns the top
+   of the page. Same posture as the Studio card on the dashboard — the input is
+   always live, so a command can be typed without opening anything first. */
+.th-srv__consolecard { border: 1px solid var(--th-line); border-radius: var(--th-r-md); background: var(--th-surface); padding: var(--th-space-14); gap: var(--th-space-10); }
+.th-srv__consolecard.is-expanded { border-color: var(--th-line-2, var(--th-line)); box-shadow: var(--th-shadow-soft, 0 1px 2px rgba(0,0,0,.04)); }
+.th-srv__consolehead { display: flex; align-items: center; justify-content: space-between; gap: var(--th-space-8); }
+.th-srv__toggle { background: none; border: 0; padding: 0; font-size: var(--th-fs-xs); font-weight: 600; color: var(--th-accent); cursor: pointer; font-family: inherit; }
+.th-srv__toggle:hover { text-decoration: underline; }
+.th-srv__consolecard .th-srv__consolebar { margin-top: 0; }
+
 /* ── Navigation feedback ───────────────────────────────────────────────
    A click has to acknowledge itself immediately. Warm navigations on this
    admin measure 740-1000ms and there is no loading.tsx, so without this the

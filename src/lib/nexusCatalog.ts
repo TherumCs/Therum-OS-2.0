@@ -5,7 +5,7 @@
 // OAuth providers: Slack, GitHub, and the four Google services (all four
 // share one Google Cloud OAuth app — same client id/secret, different
 // scopes). Everything else is a pasted API key.
-export type ConnectionCategory = 'ai' | 'messaging' | 'ecommerce' | 'payments' | 'apps' | 'fulfillment' | 'identity' | 'custom';
+export type ConnectionCategory = 'ai' | 'messaging' | 'ecommerce' | 'payments' | 'apps' | 'fulfillment' | 'identity' | 'hosting' | 'custom';
 export type AuthType = 'apikey' | 'oauth';
 
 // CREDENTIAL SHAPES (researched 2026-07-28).
@@ -91,6 +91,7 @@ export const CATEGORY_LABELS: Record<ConnectionCategory, string> = {
   payments: 'Payments',
   fulfillment: 'Fulfillment',
   identity: 'Customer sign-in',
+  hosting: 'Hosting & infrastructure',
   apps: 'External apps',
   custom: 'Custom',
 };
@@ -211,6 +212,18 @@ export const nexusCatalog: CatalogProvider[] = [
   { id: 'google-signin', name: 'Sign in with Google', category: 'identity', authType: 'apikey', issuedBy: 'provider', join: '|', fields: [{ label: 'Client ID' , pattern: '\\.apps\\.googleusercontent\\.com$', example: '1234-abc.apps.googleusercontent.com' }, { label: 'Client Secret', secret: true, optional: true }] },
   { id: 'apple-signin', name: 'Sign in with Apple', category: 'identity', authType: 'apikey', issuedBy: 'provider', join: '|', fields: [{ label: 'Services ID (the client_id)' }, { label: 'Team ID', optional: true }, { label: 'Key ID', optional: true }] },
   { id: 'facebook-login', name: 'Facebook Login', category: 'identity', authType: 'apikey', issuedBy: 'provider', join: '|', fields: [{ label: 'App ID' }, { label: 'App Secret', secret: true }] },
+
+  // Hosting & infrastructure (1) — added 2026-08-01.
+  //
+  // Not another integration for the store: this is the provider that owns the
+  // MACHINE. Settings > Server administers the box from inside it and therefore
+  // dies with it; a credential here is the way back in when the box is wedged,
+  // because the provider's API answers from outside.
+  //
+  // Verified against Hostinger's own published tool list (npm hostinger-api-mcp
+  // 1.26.0) rather than documentation prose: bearer token, base
+  // developers.hostinger.com. Their API is in beta.
+  { id: 'hostinger', name: 'Hostinger', category: 'hosting', authType: 'apikey', issuedBy: 'provider', credentialHint: 'API token from hPanel > Dev Tools > API. Shown once — copy it then.', note: 'Used for out-of-band control: restart, snapshot and status when the server itself is unreachable.', fields: [{ label: 'API Token', secret: true }] },
 ];
 
 // Custom connectors: any id matching custom-<slug> is a valid provider even
