@@ -56,7 +56,14 @@ test('fulfillment providers listed in the catalog with the right category', asyn
 });
 
 test('printful connects through the standard vault flow', async () => {
-  const res = await app.inject({ method: 'POST', url: '/api/connections/printful', headers: auth(), payload: { credential: 'pf-test-key' } });
+  // Three fields, joined with '|' — Printful's card asks for the WEBSITE plus
+  // the consumer key and secret it was given, because the merchant pastes what
+  // Printful shows them. A single opaque token is rejected (409, "Consumer key
+  // is required"), which is the validation doing its job.
+  const res = await app.inject({
+    method: 'POST', url: '/api/connections/printful', headers: auth(),
+    payload: { credential: 'https://store.example|ck_pftest|cs_pftest' },
+  });
   assert.equal(res.statusCode, 201);
   const list = await app.inject({ method: 'GET', url: '/api/connections', headers: auth() });
   assert.equal(list.json().find((r) => r.id === 'printful').connected, true);

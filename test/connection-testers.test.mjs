@@ -25,8 +25,9 @@ const CASES = [
   ['adyen', 'BOGUS-API-KEY|BogusMerchant'],
   ['klarna', 'bogus_uid|bogus_password'],
   ['authorizenet', 'bogusLogin|bogusTransactionKey'],
-  ['gelato', 'bogus-gelato-key'],
-  ['spod', 'bogus-spod-token'],
+  // NOT gelato / spod / printful / printify — see STORE_PULL below. Their
+  // "test" does not call the provider at all, so a case here would assert the
+  // wrong thing.
   ['flodesk', 'bogusflodeskkey'],
   ['mailchimp', 'bogus0000000000000000000000000-us21'],
   ['onesignal', 'bogus-app-id|bogusrestapikey'],
@@ -95,6 +96,36 @@ for (const [provider, credential] of CASES) {
     if (!STORE_ADDRESSED.has(provider)) {
       assert.doesNotMatch(result.detail, /^404/, `${provider} endpoint 404s — wrong URL`);
     }
+  });
+}
+
+// The print-on-demand providers connect the OTHER WAY ROUND: the merchant
+// issues consumer keys and the provider logs in to THIS store with them. Their
+// "test connection" therefore points at the merchant's own website, not at any
+// provider API — so probing them with a bogus credential proves nothing about
+// reaching a provider, and belongs out of the CASES table above.
+//
+// What still has to hold is the SHAPE: three fields, website first. Getting
+// that wrong is what left Printful unable to connect for weeks.
+const STORE_PULL = ['printful', 'printify', 'gelato', 'spod'];
+
+for (const provider of STORE_PULL) {
+  test(`${provider}: store-pull card asks for website + consumer key + secret`, async () => {
+    const list = await connectionService.list();
+    const row = list.find((p) => p.id === provider);
+    assert.ok(row, `${provider} missing from the catalog`);
+    const labels = (row.fields ?? []).map((f) => f.label.toLowerCase());
+    assert.equal(labels.length, 3, `${provider} should ask for exactly 3 values, got ${labels.join(', ')}`);
+    assert.match(labels[0], /website|store url|url/, `${provider}'s first field must be the website`);
+    assert.ok(labels.some((l) => l.includes('key')), `${provider} must ask for a consumer key`);
+    assert.ok(labels.some((l) => l.includes('secret')), `${provider} must ask for a consumer secret`);
+
+    // A single opaque token must be REFUSED. Accepting one is how a card looks
+    // connected while holding something the provider can never use.
+    await assert.rejects(
+      () => connectionService.connect(provider, 'one-opaque-token', ACTOR),
+      `${provider} accepted a single token for a three-field credential`,
+    );
   });
 }
 
