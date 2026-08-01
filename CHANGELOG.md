@@ -1,5 +1,37 @@
 # Changelog
 
+## [2.0.0-beta.6] — Shop grid and quick checkout, in the order a shopper reads them (2026-08-01)
+
+The last cut before the VPS. Two storefront fixes, both found by measuring the
+rendered page rather than reading the code that produces it.
+
+**Quick checkout asks where before it asks how.** The pay face led with the
+payment strip, so the card asked "how are you paying" above "where are we
+sending it" — and with no provider connected, the first thing a shopper saw was
+a row of greyed-out pills. It is now two steps: contact and address, then
+Continue, then the method strip and Pay. Validation moved to Continue so a
+missing ZIP is caught while the field is on screen, Back walks the steps instead
+of discarding a typed address, and the method strip is fetched only when the
+shopper reaches it. Wallets stay above the form and render only when a provider
+is ready, because Apple and Google Pay return the address themselves and skip
+that step entirely.
+
+**The Columns setting reaches the cards.** Changing it from 2 to 4 moved a class
+on the list and left every card at quarter width. Three causes: the item class
+was hardcoded to `--4-per-row` (and that class IS the card width in the ported
+theme), two column systems with different breakpoints were overwriting each
+other, and `.wrap` was a literal 1080px so more columns made cards thinner
+instead of the grid wider. One system now, rendered server-side, honouring the
+site's content width. Responsive caps that actually fire: 4 → 3 → 2 → 1 rather
+than four 80px cards on a phone.
+
+Also: a shopper's per-device column choice no longer outranks the merchant
+forever — it remembers which default it was made against and steps aside when
+that default changes. That is the likeliest reason a Settings change appeared
+to do nothing.
+
+361 tests.
+
 ## [2.0.0-beta.5] — Server panel, quick checkout, provider catalog sync (2026-08-01)
 
 The release that makes the box administrable and the store sellable. Everything
