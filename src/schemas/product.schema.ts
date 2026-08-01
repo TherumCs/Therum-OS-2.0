@@ -13,6 +13,10 @@ export const VariantInput = z.object({
   sourceVendorId: z.string().optional(),
   sourceId: z.string().optional(),
   inventory: z.number().int().nonnegative().default(0),
+  // How availability is decided. 'tracked' counts `inventory`; the rest decide
+  // by status — see counter/availability.ts.
+  stockStatus: z.enum(['tracked', 'in_stock', 'out_of_stock', 'backorder']).default('tracked'),
+  image: z.string().url().nullish(),
   meta: z.record(z.string(), z.unknown()).default({}),
 });
 
@@ -73,6 +77,8 @@ export const UpdateVariantInput = z.object({
   color: z.string().max(80).nullable().optional(),
   size: z.string().max(80).nullable().optional(),
   inventory: z.number().int().min(0).optional(),
+  stockStatus: z.enum(['tracked', 'in_stock', 'out_of_stock', 'backorder']).optional(),
+  image: z.string().url().nullish(),
 });
 export type UpdateVariantInput = z.infer<typeof UpdateVariantInput>;
 

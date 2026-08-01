@@ -11,6 +11,7 @@ interface Variant {
   color: string | null;
   size: string | null;
   inventory: number;
+  stockStatus: string;
   reserved: number;
 }
 interface Term {
@@ -47,7 +48,7 @@ export function ProductEditor({ initial, allCategories, allTags }: { initial: Ed
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
   const [pickerFor, setPickerFor] = useState<null | 'primary' | 'gallery'>(null);
-  const [newVariant, setNewVariant] = useState({ sku: '', price: '', color: '', size: '', inventory: '0' });
+  const [newVariant, setNewVariant] = useState({ sku: '', price: '', color: '', size: '', inventory: '0', stockStatus: 'in_stock' });
 
   async function call(method: string, path: string, body?: unknown): Promise<unknown> {
     setBusy(true);
@@ -190,7 +191,35 @@ export function ProductEditor({ initial, allCategories, allTags }: { initial: Ed
                 <td style={{ padding: 6 }}><input defaultValue={v.color ?? ''} onBlur={(e) => void call('PATCH', `/api/products/${p.id}/variants/${v.id}`, { color: e.target.value || null })} style={{ width: 90 }} /></td>
                 <td style={{ padding: 6 }}><input defaultValue={v.size ?? ''} onBlur={(e) => void call('PATCH', `/api/products/${p.id}/variants/${v.id}`, { size: e.target.value || null })} style={{ width: 70 }} /></td>
                 <td style={{ padding: 6 }}><input type="number" defaultValue={v.price} onBlur={(e) => void call('PATCH', `/api/products/${p.id}/variants/${v.id}`, { price: Number(e.target.value) })} style={{ width: 90 }} /></td>
-                <td style={{ padding: 6 }}><input type="number" defaultValue={v.inventory} onBlur={(e) => void call('PATCH', `/api/products/${p.id}/variants/${v.id}`, { inventory: Number(e.target.value) })} style={{ width: 70 }} /></td>
+                <td style={{ padding: 6 }}>
+                  {/* Status first, then a count only when the count means
+                      something. A quantity box next to "In stock" invites a
+                      merchant to type a number that is then ignored. */}
+                  <select
+                    value={v.stockStatus}
+                    onChange={(e) => {
+                      const stockStatus = e.target.value;
+                      setP({ ...p, variants: p.variants.map((x) => (x.id === v.id ? { ...x, stockStatus } : x)) });
+                      void call('PATCH', `/api/products/${p.id}/variants/${v.id}`, { stockStatus });
+                    }}
+                    style={{ width: 128, fontSize: 12 }}
+                  >
+                    <option value="in_stock">In stock</option>
+                    <option value="out_of_stock">Out of stock</option>
+                    <option value="backorder">On backorder</option>
+                    <option value="tracked">Set a quantity…</option>
+                  </select>
+                  {v.stockStatus === 'tracked' && (
+                    <input
+                      type="number"
+                      min={0}
+                      defaultValue={v.inventory}
+                      onBlur={(e) => void call('PATCH', `/api/products/${p.id}/variants/${v.id}`, { inventory: Number(e.target.value) })}
+                      style={{ width: 70, marginLeft: 6 }}
+                      aria-label="Quantity in stock"
+                    />
+                  )}
+                </td>
                 <td style={{ padding: 6 }} className="muted">{v.reserved}</td>
                 <td style={{ padding: 6, textAlign: 'right' }}>
                   <button type="button" className="ghost" disabled={busy} style={{ fontSize: 11, color: 'var(--th-danger, #ef4444)' }} onClick={() => {
@@ -206,18 +235,27 @@ export function ProductEditor({ initial, allCategories, allTags }: { initial: Ed
           <input placeholder="Color" value={newVariant.color} onChange={(e) => setNewVariant({ ...newVariant, color: e.target.value })} style={{ width: 90 }} />
           <input placeholder="Size" value={newVariant.size} onChange={(e) => setNewVariant({ ...newVariant, size: e.target.value })} style={{ width: 70 }} />
           <input placeholder="Price ¢" type="number" value={newVariant.price} onChange={(e) => setNewVariant({ ...newVariant, price: e.target.value })} style={{ width: 90 }} />
-          <input placeholder="Stock" type="number" value={newVariant.inventory} onChange={(e) => setNewVariant({ ...newVariant, inventory: e.target.value })} style={{ width: 70 }} />
+          <select value={newVariant.stockStatus} onChange={(e) => setNewVariant({ ...newVariant, stockStatus: e.target.value })} style={{ width: 128, fontSize: 12 }}>
+            <option value="in_stock">In stock</option>
+            <option value="out_of_stock">Out of stock</option>
+            <option value="backorder">On backorder</option>
+            <option value="tracked">Set a quantity…</option>
+          </select>
+          {newVariant.stockStatus === 'tracked' && (
+            <input placeholder="Qty" type="number" min={0} value={newVariant.inventory} onChange={(e) => setNewVariant({ ...newVariant, inventory: e.target.value })} style={{ width: 70 }} />
+          )}
           <button type="button" disabled={busy || !newVariant.price} onClick={() => {
             void call('POST', `/api/products/${p.id}/variants`, {
               sku: newVariant.sku || undefined,
               color: newVariant.color || undefined,
               size: newVariant.size || undefined,
               price: Number(newVariant.price),
-              inventory: Number(newVariant.inventory) || 0,
+              inventory: newVariant.stockStatus === 'tracked' ? Number(newVariant.inventory) || 0 : 0,
+              stockStatus: newVariant.stockStatus,
             }).then((r) => {
               if (r) {
                 setP({ ...p, variants: [...p.variants, r as Variant] });
-                setNewVariant({ sku: '', price: '', color: '', size: '', inventory: '0' });
+                setNewVariant({ sku: '', price: '', color: '', size: '', inventory: '0', stockStatus: 'in_stock' });
               }
             });
           }}>Add variant</button>
