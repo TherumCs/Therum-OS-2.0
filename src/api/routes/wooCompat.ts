@@ -2,7 +2,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { Prisma, type ProductStatus, type OrderStatus } from '@prisma/client';
 import { db } from '../../lib/db.js';
 import { storeCredentials, readStoreCredential } from '../../counter/storeCredentials.js';
-import { toMajor } from '../../counter/currency.js';
+import { toMajor, toMinor } from '../../counter/currency.js';
+import { slugify } from '../../lib/slug.js';
 import { settingsService } from '../../services/settings.service.js';
 import { printfulLink } from '../../services/printfulLink.service.js';
 
@@ -471,6 +472,389 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
         ],
       })),
     );
+  });
+
+  // ---------------------------------------------------------------------
+  // WRITES. A partner does not only READ your catalogue — it PUBLISHES to it.
+  //
+  // This is the half that was missing. Printful, Printify and the rest push a
+  // product INTO the store when you hit "submit to store": they POST it, then
+  // POST each variation. Every one of those routes 404'd here, so a connection
+  // could be perfectly authenticated, sync could start, and nothing would ever
+  // appear on the site — which is the entire point of connecting.
+  //
+  // What lands must be SELLABLE, not just present: a row with no price and no
+  // stock is a product page nobody can buy from, which looks identical to a
+  // successful sync until someone tries.
+
+  /** Woo money is a decimal STRING ("19.99"); this schema is minor units. */
+  function priceToMinor(value: unknown, currency: string): number | null {
+    if (value === undefined || value === null || value === '') return null;
+    const n = typeof value === 'number' ? value : Number.parseFloat(String(value));
+    return Number.isFinite(n) ? toMinor(n, currency) : null;
+  }
+
+  interface WooImage { src?: string; alt?: string; name?: string }
+  interface WooAttr { name?: string; option?: string; options?: string[] }
+
+  /** Woo publishes with status "publish"; anything else is not on sale yet. */
+  const asStatus = (s: unknown): ProductStatus => (s === 'publish' || s === undefined ? 'active' : 'draft');
+
+  /** Colour and size live in Woo's attribute list, not in named fields. */
+  function attrValue(attrs: WooAttr[] | undefined, ...names: string[]): string | null {
+    for (const a of attrs ?? []) {
+      const n = (a.name ?? '').toLowerCase();
+      if (names.some((want) => n === want)) return a.option ?? a.options?.[0] ?? null;
+    }
+    return null;
+  }
+
+  /**
+   * A slug that is free. Woo does the same thing (`t-shirt-2`), and without it
+   * a partner pushing two products with the same name gets a 500 on the second
+   * from the unique index — reported to the merchant as "sync failed".
+   */
+  async function freeSlug(desired: string): Promise<string> {
+    const base = slugify(desired) || 'product';
+    for (let n = 0; n < 50; n++) {
+      const candidate = n === 0 ? base : `${base}-${n + 1}`;
+      if (!(await db.product.findUnique({ where: { slug: candidate }, select: { id: true } }))) return candidate;
+    }
+    return `${base}-${Date.now()}`;
+  }
+
+  /**
+   * The partner gets its own vendor row, named from the key it authenticated
+   * with. Provenance is the point: without it, "where did these 40 products
+   * come from" has no answer, and disconnecting a partner cannot find what it
+   * published.
+   */
+  async function partnerVendor(req: FastifyRequest): Promise<string> {
+    const name = req.storeAuth?.label ?? 'Connected partner';
+    const existing = await db.vendor.findFirst({ where: { name } });
+    if (existing) return existing.id;
+    return (await db.vendor.create({ data: { name } })).id;
+  }
+
+  /** Woo sends categories as [{id|name|slug}]; unknown ones are created. */
+  async function categoryIds(list: { id?: string; name?: string; slug?: string }[] | undefined): Promise<string[]> {
+    const ids: string[] = [];
+    for (const c of list ?? []) {
+      if (c.id) {
+        const byId = await db.productCategory.findUnique({ where: { id: c.id }, select: { id: true } });
+        if (byId) { ids.push(byId.id); continue; }
+      }
+      const name = c.name ?? c.slug;
+      if (!name) continue;
+      const slug = slugify(c.slug ?? name);
+      const found = await db.productCategory.findFirst({ where: { slug, parentId: null } });
+      ids.push(found ? found.id : (await db.productCategory.create({ data: { name, slug } })).id);
+    }
+    return ids;
+  }
+
+  interface WooProductBody {
+    name?: string;
+    slug?: string;
+    status?: string;
+    description?: string;
+    sku?: string;
+    regular_price?: string | number;
+    price?: string | number;
+    stock_quantity?: number;
+    images?: WooImage[];
+    categories?: { id?: string; name?: string; slug?: string }[];
+    attributes?: WooAttr[];
+  }
+
+  /**
+   * Retries are normal — a partner that times out waiting for us will send the
+   * same product again. Matching on SKU keeps that from building a duplicate
+   * catalogue, which is the damage nobody notices until the shop page has two
+   * of everything.
+   */
+  async function existingBySku(sku: string | undefined, vendorId: string): Promise<string | null> {
+    if (!sku) return null;
+    const v = await db.productVariant.findFirst({
+      where: { sku, product: { vendorId } },
+      select: { productId: true },
+    });
+    return v?.productId ?? null;
+  }
+
+  async function writeProduct(req: FastifyRequest, body: WooProductBody, currency: string, id?: string) {
+    const vendorId = await partnerVendor(req);
+    const gallery = (body.images ?? []).filter((i) => i.src);
+    const price = priceToMinor(body.regular_price ?? body.price, currency);
+
+    const data = {
+      ...(body.name !== undefined ? { name: body.name } : {}),
+      ...(body.description !== undefined ? { description: body.description } : {}),
+      ...(body.status !== undefined ? { status: asStatus(body.status) } : {}),
+      ...(gallery.length
+        ? {
+            image: gallery[0]!.src!,
+            images: gallery.slice(1).map((g) => ({ url: g.src!, alt: g.alt ?? g.name ?? '' })),
+          }
+        : {}),
+    };
+
+    if (id) {
+      const updated = await db.product.update({ where: { id }, data });
+      // A price on an update belongs on the existing variant, not a new one —
+      // otherwise every price change grows another buy option on the page.
+      if (price !== null) {
+        const first = await db.productVariant.findFirst({ where: { productId: id }, orderBy: { createdAt: 'asc' } });
+        if (first) await db.productVariant.update({ where: { id: first.id }, data: { price } });
+      }
+      if (body.categories) {
+        await db.product.update({ where: { id }, data: { categories: { set: (await categoryIds(body.categories)).map((c) => ({ id: c })) } } });
+      }
+      return updated;
+    }
+
+    return db.product.create({
+      data: {
+        name: body.name ?? 'Untitled',
+        slug: await freeSlug(body.slug ?? body.name ?? 'product'),
+        status: asStatus(body.status),
+        description: body.description ?? null,
+        vendorId,
+        image: data.image ?? null,
+        images: data.images ?? [],
+        categories: { connect: (await categoryIds(body.categories)).map((c) => ({ id: c })) },
+        // A simple product still needs ONE variant — that is what carries the
+        // price and the stock, and without it the product cannot be added to a
+        // cart at all.
+        //
+        // MARKED as auto-made from the parent body. A partner pushing a
+        // VARIABLE product sends the parent first and the real buy options
+        // after, so this row has to step aside when the first variation
+        // arrives — otherwise the product page carries a phantom extra option
+        // built from the parent's own price. Guessing at that ("looks like a
+        // placeholder: no sku, price 0") misses the moment the parent carries
+        // a price, which is most of the time. The flag is not a guess.
+        variants: {
+          create: [{
+            sku: body.sku ?? null,
+            price: price ?? 0,
+            inventory: body.stock_quantity ?? 0,
+            color: attrValue(body.attributes, 'color', 'colour'),
+            size: attrValue(body.attributes, 'size'),
+            meta: { autoFromParent: true },
+          }],
+        },
+      },
+    });
+  }
+
+  app.post(`${PREFIX}/products`, authed, async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
+    const body = (req.body ?? {}) as WooProductBody;
+    if (!body.name) {
+      wooError(reply, 400, 'woocommerce_rest_invalid_product', 'A product name is required.');
+      return;
+    }
+    const commerce = await settingsService.getCommerce();
+    const currency = commerce.currency ?? 'USD';
+
+    const dupe = await existingBySku(body.sku, await partnerVendor(req));
+    const saved = await writeProduct(req, body, currency, dupe ?? undefined);
+    const [full] = await loadProducts({ id: saved.id }, 0, 1);
+    reply.status(dupe ? 200 : 201).send(toWooProduct(full!, currency));
+  });
+
+  for (const method of ['PUT', 'PATCH'] as const) {
+    app.route({
+      method,
+      url: `${PREFIX}/products/:id`,
+      preHandler: authenticate,
+      handler: async (req, reply) => {
+        if (!requireWrite(req, reply)) return;
+        const { id } = req.params as { id: string };
+        const commerce = await settingsService.getCommerce();
+        const currency = commerce.currency ?? 'USD';
+        if (!(await db.product.findUnique({ where: { id }, select: { id: true } }))) {
+          wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid product ID.');
+          return;
+        }
+        await writeProduct(req, (req.body ?? {}) as WooProductBody, currency, id);
+        const [full] = await loadProducts({ id }, 0, 1);
+        reply.send(toWooProduct(full!, currency));
+      },
+    });
+  }
+
+  /**
+   * Unpublished rather than deleted unless `?force=true`, which is Woo's own
+   * behaviour. A partner retiring a design should take it off sale, not
+   * destroy the order history that points at its variants.
+   */
+  app.delete(`${PREFIX}/products/:id`, authed, async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
+    const { id } = req.params as { id: string };
+    const { force } = req.query as { force?: string };
+    const commerce = await settingsService.getCommerce();
+    const currency = commerce.currency ?? 'USD';
+    const [full] = await loadProducts({ id }, 0, 1);
+    if (!full) {
+      wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid product ID.');
+      return;
+    }
+    if (force === 'true') {
+      const ordered = await db.orderItem.findFirst({ where: { variant: { productId: id } }, select: { id: true } });
+      if (ordered) {
+        // Refusing is the honest answer: deleting would either orphan the order
+        // line or silently rewrite what a customer actually bought.
+        wooError(reply, 409, 'woocommerce_rest_cannot_delete', 'This product has been ordered; it can be unpublished but not deleted.');
+        return;
+      }
+      await db.product.delete({ where: { id } });
+    } else {
+      await db.product.update({ where: { id }, data: { status: 'draft' } });
+    }
+    reply.send(toWooProduct(full, currency));
+  });
+
+  /** Variations — the per-size, per-colour rows a POD partner pushes one by one. */
+  app.post(`${PREFIX}/products/:id/variations`, authed, async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
+    const { id } = req.params as { id: string };
+    const body = (req.body ?? {}) as WooProductBody & { image?: WooImage };
+    const commerce = await settingsService.getCommerce();
+    const currency = commerce.currency ?? 'USD';
+    if (!(await db.product.findUnique({ where: { id }, select: { id: true } }))) {
+      wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid product ID.');
+      return;
+    }
+    const price = priceToMinor(body.regular_price ?? body.price, currency);
+    // The first real variation CONSUMES the row the parent create made, rather
+    // than sitting beside it as an extra buy option built from the parent's
+    // price. Identified by its own flag, never inferred — and never if it has
+    // been ordered, because that row is now somebody's purchase.
+    const carried = await db.productVariant.findFirst({
+      where: {
+        productId: id,
+        meta: { path: ['autoFromParent'], equals: true },
+        orderItems: { none: {} },
+      },
+    });
+    const data = {
+      productId: id,
+      sku: body.sku ?? null,
+      price: price ?? 0,
+      inventory: body.stock_quantity ?? 0,
+      color: attrValue(body.attributes, 'color', 'colour'),
+      size: attrValue(body.attributes, 'size'),
+      meta: {},
+    };
+    const variant = carried
+      ? await db.productVariant.update({ where: { id: carried.id }, data })
+      : await db.productVariant.create({ data });
+    reply.status(201).send({
+      id: variant.id,
+      sku: variant.sku ?? '',
+      regular_price: String(toMajor(variant.price, currency)),
+      stock_quantity: variant.inventory,
+    });
+  });
+
+  for (const method of ['PUT', 'PATCH'] as const) {
+    app.route({
+      method,
+      url: `${PREFIX}/products/:id/variations/:variationId`,
+      preHandler: authenticate,
+      handler: async (req, reply) => {
+        if (!requireWrite(req, reply)) return;
+        const { id, variationId } = req.params as { id: string; variationId: string };
+        const body = (req.body ?? {}) as WooProductBody;
+        const commerce = await settingsService.getCommerce();
+        const currency = commerce.currency ?? 'USD';
+        const variant = await db.productVariant.findFirst({ where: { id: variationId, productId: id } });
+        if (!variant) {
+          wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid variation ID.');
+          return;
+        }
+        const price = priceToMinor(body.regular_price ?? body.price, currency);
+        const updated = await db.productVariant.update({
+          where: { id: variationId },
+          data: {
+            ...(price !== null ? { price } : {}),
+            ...(body.sku !== undefined ? { sku: body.sku } : {}),
+            ...(body.stock_quantity !== undefined ? { inventory: body.stock_quantity } : {}),
+          },
+        });
+        reply.send({
+          id: updated.id,
+          sku: updated.sku ?? '',
+          regular_price: String(toMajor(updated.price, currency)),
+          stock_quantity: updated.inventory,
+        });
+      },
+    });
+  }
+
+  app.delete(`${PREFIX}/products/:id/variations/:variationId`, authed, async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
+    const { id, variationId } = req.params as { id: string; variationId: string };
+    const variant = await db.productVariant.findFirst({ where: { id: variationId, productId: id } });
+    if (!variant) {
+      wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid variation ID.');
+      return;
+    }
+    const ordered = await db.orderItem.findFirst({ where: { variantId: variationId }, select: { id: true } });
+    if (ordered) {
+      wooError(reply, 409, 'woocommerce_rest_cannot_delete', 'This variation has been ordered and cannot be deleted.');
+      return;
+    }
+    await db.productVariant.delete({ where: { id: variationId } });
+    reply.send({ id: variationId });
+  });
+
+  /**
+   * Woo's batch endpoint. Partners with a catalogue of any size use this rather
+   * than one request per product, and its absence is a sync that dies at the
+   * first push with no per-product error to show the merchant.
+   */
+  app.post(`${PREFIX}/products/batch`, authed, async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
+    const body = (req.body ?? {}) as { create?: WooProductBody[]; update?: (WooProductBody & { id?: string })[]; delete?: string[] };
+    const commerce = await settingsService.getCommerce();
+    const currency = commerce.currency ?? 'USD';
+    const vendorId = await partnerVendor(req);
+    const out: { create: unknown[]; update: unknown[]; delete: unknown[] } = { create: [], update: [], delete: [] };
+
+    // One failure must not abandon the rest of the batch — Woo reports per
+    // item, and a partner needs to know WHICH product it was.
+    for (const item of body.create ?? []) {
+      try {
+        const dupe = await existingBySku(item.sku, vendorId);
+        const saved = await writeProduct(req, item, currency, dupe ?? undefined);
+        const [full] = await loadProducts({ id: saved.id }, 0, 1);
+        out.create.push(toWooProduct(full!, currency));
+      } catch (err) {
+        out.create.push({ error: { code: 'woocommerce_rest_cannot_create', message: (err as Error).message } });
+      }
+    }
+    for (const item of body.update ?? []) {
+      try {
+        if (!item.id) throw new Error('id is required to update');
+        await writeProduct(req, item, currency, item.id);
+        const [full] = await loadProducts({ id: item.id }, 0, 1);
+        out.update.push(toWooProduct(full!, currency));
+      } catch (err) {
+        out.update.push({ error: { code: 'woocommerce_rest_cannot_edit', message: (err as Error).message } });
+      }
+    }
+    for (const id of body.delete ?? []) {
+      try {
+        await db.product.update({ where: { id }, data: { status: 'draft' } });
+        out.delete.push({ id });
+      } catch (err) {
+        out.delete.push({ error: { code: 'woocommerce_rest_cannot_delete', message: (err as Error).message } });
+      }
+    }
+    reply.send(out);
   });
 
   app.get(`${PREFIX}/orders`, authed, async (req, reply) => {

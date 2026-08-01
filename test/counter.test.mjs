@@ -856,6 +856,191 @@ describe('woo bridge discovery (how a partner finds us)', () => {
   });
 });
 
+describe('partner PUBLISHES to the store (the half that was missing)', () => {
+  // Connecting a vendor is not the goal — SELLING what the vendor pushes is.
+  // A partner does not only read the catalogue: when you submit a design in
+  // Printful it POSTs the product INTO the store. Every write route 404'd, so
+  // a connection could authenticate, sync could run, and nothing would ever
+  // reach the site. These assert the whole path: pushed -> on the shop page ->
+  // in a cart.
+  let app, key, secret;
+
+  before(async () => {
+    const { buildServer } = await import('../dist/server.js');
+    const { storeCredentials } = await import('../dist/counter/storeCredentials.js');
+    const { ensureSiteVisible } = await import('./support/publicSite.mjs');
+    await ensureSiteVisible();
+    app = await buildServer();
+    const issued = await storeCredentials.issue('PartnerPublish key', 'read_write');
+    key = issued.consumerKey;
+    secret = issued.consumerSecret;
+  });
+
+  after(async () => {
+    const vendor = await db.vendor.findFirst({ where: { name: 'PartnerPublish key' } });
+    if (vendor) {
+      await db.productVariant.deleteMany({ where: { product: { vendorId: vendor.id } } }).catch(() => {});
+      await db.product.deleteMany({ where: { vendorId: vendor.id } }).catch(() => {});
+      await db.vendor.delete({ where: { id: vendor.id } }).catch(() => {});
+    }
+    await db.productCategory.deleteMany({ where: { slug: 'partnerpublish-tees' } }).catch(() => {});
+    await db.storeCredential.deleteMany({ where: { label: { startsWith: 'PartnerPublish' } } });
+    await app.close();
+  });
+
+  const auth = () => ({ authorization: `Basic ${Buffer.from(`${key}:${secret}`).toString('base64')}` });
+
+  // The payload shape a POD partner actually sends: decimal price STRING,
+  // status "publish", images by URL, category by name.
+  const push = (over = {}) => ({
+    name: 'PartnerPublish Hoodie',
+    type: 'variable',
+    status: 'publish',
+    description: 'Pushed by the partner, not typed by hand.',
+    sku: 'PP-HOODIE-1',
+    regular_price: '48.00',
+    stock_quantity: 25,
+    images: [{ src: 'https://example.com/hoodie-front.jpg', alt: 'Front' }, { src: 'https://example.com/hoodie-back.jpg' }],
+    categories: [{ name: 'PartnerPublish Tees', slug: 'partnerpublish-tees' }],
+    ...over,
+  });
+
+  test('THE ONE THAT MATTERS: a pushed product reaches the shop and can be bought', async () => {
+    const created = await app.inject({ method: 'POST', url: '/wp-json/wc/v3/products', headers: auth(), payload: push() });
+    assert.equal(created.statusCode, 201, 'the partner could not publish at all');
+    const id = created.json().id;
+
+    // Money crossed the boundary correctly — "48.00" must not become £4,800.
+    assert.equal(created.json().regular_price, '48', `price mangled: ${created.json().regular_price}`);
+
+    // On the site, publicly, without an admin touching anything.
+    const shop = await app.inject({ method: 'GET', url: '/shop' });
+    assert.match(shop.body, /PartnerPublish Hoodie/, 'pushed product never appeared on the shop page');
+
+    const page = await app.inject({ method: 'GET', url: `/product/${created.json().slug}` });
+    assert.equal(page.statusCode, 200, 'product page does not exist');
+    assert.match(page.body, /hoodie-front\.jpg/, 'images did not come through');
+
+    // And it is SELLABLE. A row with no price and no stock looks like a
+    // successful sync until a customer tries to buy it.
+    const full = await db.product.findUnique({ where: { id }, include: { variants: true } });
+    assert.equal(full.status, 'active', 'pushed as published but landed as a draft');
+    assert.equal(full.variants.length, 1, 'no variant = nothing to add to a cart');
+    assert.equal(full.variants[0].price, 4800, 'price is not in minor units');
+    assert.equal(full.variants[0].inventory, 25, 'stock did not come through');
+
+    const add = await app.inject({
+      method: 'POST', url: '/api/cart/items',
+      payload: { variantId: full.variants[0].id, quantity: 1 },
+    });
+    assert.equal(add.statusCode, 201, 'a customer cannot add the pushed product to a cart');
+    assert.ok(add.json().token, 'no cart was created for it');
+  });
+
+  test('the product is attributed to the partner that pushed it', async () => {
+    // Without provenance, "where did these 40 products come from" has no
+    // answer and disconnecting a partner cannot find what it published.
+    const vendor = await db.vendor.findFirst({ where: { name: 'PartnerPublish key' } });
+    assert.ok(vendor, 'no vendor row for the connected partner');
+    const count = await db.product.count({ where: { vendorId: vendor.id } });
+    assert.ok(count >= 1);
+  });
+
+  test('a retried push updates instead of duplicating the catalogue', async () => {
+    // Partners resend after a timeout. Two of everything on the shop page is
+    // the kind of damage nobody notices until it is everywhere.
+    const before = await db.product.count({ where: { name: 'PartnerPublish Hoodie' } });
+    const again = await app.inject({
+      method: 'POST', url: '/wp-json/wc/v3/products', headers: auth(),
+      payload: push({ regular_price: '52.00' }),
+    });
+    assert.equal(again.statusCode, 200, 'a resend should update, not create');
+    assert.equal(await db.product.count({ where: { name: 'PartnerPublish Hoodie' } }), before, 'duplicate product created');
+    assert.equal(again.json().regular_price, '52', 'the update did not take');
+
+    // And the price landed on the EXISTING variant rather than adding a second
+    // buy option to the page.
+    const p = await db.product.findFirst({ where: { name: 'PartnerPublish Hoodie' }, include: { variants: true } });
+    assert.equal(p.variants.length, 1, 'the update grew an extra variant');
+  });
+
+  test('variations: sizes and colours land as separate buyable options', async () => {
+    const created = await app.inject({
+      method: 'POST', url: '/wp-json/wc/v3/products', headers: auth(),
+      payload: push({ name: 'PartnerPublish Tee', sku: 'PP-TEE-BASE' }),
+    });
+    const id = created.json().id;
+
+    for (const [sku, size, price] of [['PP-TEE-S', 'S', '25.00'], ['PP-TEE-L', 'L', '27.00']]) {
+      const v = await app.inject({
+        method: 'POST', url: `/wp-json/wc/v3/products/${id}/variations`, headers: auth(),
+        payload: { sku, regular_price: price, stock_quantity: 4, attributes: [{ name: 'Size', option: size }] },
+      });
+      assert.equal(v.statusCode, 201, `variation ${size} rejected`);
+    }
+
+    const p = await db.product.findUnique({ where: { id }, include: { variants: true } });
+    // The placeholder variant the create made is REUSED by the first pushed
+    // variation — otherwise the page shows a £0.00 option nobody wants.
+    assert.equal(p.variants.length, 2, `expected 2 buyable variants, got ${p.variants.length}`);
+    assert.deepEqual(p.variants.map((v) => v.size).sort(), ['L', 'S']);
+    assert.ok(!p.variants.some((v) => v.price === 0), 'a zero-price placeholder variant survived');
+  });
+
+  test('writes require read_write — a read-only key cannot publish', async () => {
+    const { storeCredentials } = await import('../dist/counter/storeCredentials.js');
+    const ro = await storeCredentials.issue('PartnerPublish readonly', 'read');
+    const r = await app.inject({
+      method: 'POST', url: '/wp-json/wc/v3/products',
+      headers: { authorization: `Basic ${Buffer.from(`${ro.consumerKey}:${ro.consumerSecret}`).toString('base64')}` },
+      payload: push({ sku: 'PP-NOPE' }),
+    });
+    assert.equal(r.statusCode, 403);
+  });
+
+  test('deleting unpublishes by default and REFUSES to destroy an ordered product', async () => {
+    const created = await app.inject({
+      method: 'POST', url: '/wp-json/wc/v3/products', headers: auth(),
+      payload: push({ name: 'PartnerPublish Retired', sku: 'PP-RETIRE' }),
+    });
+    const id = created.json().id;
+
+    const soft = await app.inject({ method: 'DELETE', url: `/wp-json/wc/v3/products/${id}`, headers: auth() });
+    assert.equal(soft.statusCode, 200);
+    assert.equal((await db.product.findUnique({ where: { id } })).status, 'draft', 'delete should unpublish, not destroy');
+
+    // A design retired at the partner must not take a customer's order line
+    // with it. Force-delete on an ordered product is refused, not silently done.
+    const variant = await db.productVariant.findFirst({ where: { productId: id } });
+    const order = await db.order.create({
+      data: {
+        number: `PP-${Date.now()}`, status: 'processing', currency: 'USD', total: 4800,
+        guestEmail: 'pp@test.local',
+        items: { create: [{ variantId: variant.id, quantity: 1, priceAtTime: 4800 }] },
+      },
+    });
+    const forced = await app.inject({ method: 'DELETE', url: `/wp-json/wc/v3/products/${id}?force=true`, headers: auth() });
+    assert.equal(forced.statusCode, 409, 'an ordered product was destroyed');
+    await db.orderItem.deleteMany({ where: { orderId: order.id } });
+    await db.order.delete({ where: { id: order.id } });
+  });
+
+  test('batch: one bad item does not abandon the rest', async () => {
+    const r = await app.inject({
+      method: 'POST', url: '/wp-json/wc/v3/products/batch', headers: auth(),
+      payload: {
+        create: [push({ name: 'PartnerPublish Batch A', sku: 'PP-A' }), push({ name: 'PartnerPublish Batch B', sku: 'PP-B' })],
+        update: [{ id: 'no-such-product', name: 'nope' }],
+      },
+    });
+    assert.equal(r.statusCode, 200);
+    const body = r.json();
+    assert.equal(body.create.length, 2);
+    assert.ok(body.create.every((c) => c.id), 'a good item in the batch failed');
+    assert.ok(body.update[0].error, 'a bad update must report per-item, not 500 the batch');
+  });
+});
+
 describe("printful plugin routes (the 'Valid route not found' sync error)", () => {
   // Printful does not drive the store through the WooCommerce API alone. After
   // connecting it calls routes its own WordPress plugin registers, and when
