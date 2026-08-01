@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect} from 'react';
 import { useRouter } from 'next/navigation';
 import { BASE_PATH } from '../../../../lib/session';
 
@@ -26,6 +26,32 @@ export interface ConnectionRow {
   lastTestOk: boolean | null;
   testable: boolean;
 }
+
+/**
+ * The ONE way this provider is connected.
+ *
+ * A provider can technically support several — Printful will read your store
+ * with keys you issue, AND hand out an API token, AND run an OAuth app — and
+ * the card used to render every applicable block stacked, with nothing saying
+ * which one you actually want. Printful showed three forms and the one that
+ * connects it to the store was the last of them, behind a button.
+ *
+ * 'store-pull' wins when present: if the partner connects BY READING THIS
+ * STORE, then what it asks you for is the key pair this store issues, and the
+ * provider's own token is for a different job entirely.
+ */
+export type ConnectMode = 'store-pull' | 'oauth' | 'api-key';
+
+export function connectMode(r: { connectsVia?: string; authType?: string; oauthCapable?: boolean }): ConnectMode {
+  if (r.connectsVia === 'store-pull-woo' || r.connectsVia === 'store-pull-shopify') return 'store-pull';
+  // ONLY providers that are oauth-and-nothing-else lead with the button.
+  // `oauthCapable` means "browser sign-in also works here" — an extra route
+  // offered ALONGSIDE the real fields, never instead of them. Treating it as
+  // the mode is what hid Printful's actual values behind an app-setup form.
+  if (r.authType === 'oauth') return 'oauth';
+  return 'api-key';
+}
+
 export interface AuditEntry {
   id: string;
   provider: string;
@@ -145,6 +171,16 @@ export function ConnectionsClient({
   // Held in component state ONLY: the secret is returned once and hashed
   // server-side, so a refresh losing it is correct, not a bug.
   const [storeKey, setStoreKey] = useState<{ consumerKey: string; consumerSecret: string } | null>(null);
+  // The provider's connect screen asks for a store NAME, so the card hands the
+  // real one over rather than making the operator go and look it up.
+  const [storeName, setStoreName] = useState('');
+
+  useEffect(() => {
+    void fetch(`${BASE_PATH}/api/settings/site`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { siteName?: string } | null) => setStoreName(d?.siteName ?? ''))
+      .catch(() => setStoreName(''));
+  }, []);
 
   async function surface(res: Response): Promise<boolean> {
     if (res.ok) {
@@ -358,7 +394,7 @@ export function ConnectionsClient({
               )}
 
               {/* OAuth providers */}
-              {r && (r.authType === 'oauth' || r.oauthCapable) && !r.connected && (
+              {r && connectMode(r) === 'oauth' && !r.connected && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
                   {/* The button is shown ONLY when an OAuth app actually
                       exists for this provider. Showing it unconditionally is
@@ -421,7 +457,45 @@ export function ConnectionsClient({
               {/* Partner reads THIS store: it needs a key we issue, not one it
                   issues. Asking for a provider key here is what made these
                   impossible to connect. */}
-              {r && (r.connectsVia === 'store-pull-woo' || r.connectsVia === 'store-pull-shopify') && (
+              {/* Browser sign-in as an EXTRA route, for providers that support it
+                  but are not oauth-only. It sits AFTER the provider's real
+                  fields, because those are what most people came here to fill
+                  in — and the one-time app setup hides in a disclosure instead
+                  of dominating the card the way it did on Printful. */}
+              {r && r.oauthCapable && r.authType !== 'oauth' && !r.connected && (
+                <div style={{ marginTop: 14, borderTop: '1px solid var(--th-line)', paddingTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {oauthApps[r.id] ? (
+                    <>
+                      <p style={{ fontSize: 11, color: 'var(--th-muted)', margin: 0 }}>Or authorise in the browser instead:</p>
+                      <a href={`${BASE_PATH}/api/connections/${r.id}/oauth/start?tab=${r.category}`} className="th-btn" style={{ textAlign: 'center' }}>
+                        Sign in with {r.name}
+                      </a>
+                    </>
+                  ) : (
+                    <details>
+                      <summary style={{ fontSize: 11, color: 'var(--th-muted)', cursor: 'pointer' }}>
+                        Set up &ldquo;Sign in with {r.name}&rdquo; (one time, optional)
+                      </summary>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 8 }}>
+                        <p style={{ fontSize: 11, color: 'var(--th-muted)', margin: 0, lineHeight: 1.5 }}>
+                          Create an app in {r.name}&apos;s developer console and paste its credentials here. Give it this
+                          redirect URL:
+                        </p>
+                        <input readOnly onFocus={(e) => e.currentTarget.select()}
+                          value={typeof window === 'undefined' ? '' : `${window.location.origin}${BASE_PATH}/api/connections/${r.id}/oauth/callback`}
+                          style={{ fontFamily: 'var(--th-font-mono)', fontSize: 11 }} />
+                        <input type="text" placeholder="Client ID" value={clientId} onChange={(e) => setClientId(e.target.value)} />
+                        <input type="password" placeholder="Client secret" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} />
+                        <button type="button" className="th-btn" onClick={() => void saveOAuthApp(r.id)} disabled={busy === r.id || !clientId.trim() || !clientSecret.trim()}>
+                          Save and enable sign-in
+                        </button>
+                      </div>
+                    </details>
+                  )}
+                </div>
+              )}
+
+              {r && connectMode(r) === 'store-pull' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
                   {/* The step nobody can guess: these partners present a LIST
                       of platforms (Shopify / Woo / Wix / Etsy …) and you have
@@ -435,19 +509,29 @@ export function ConnectionsClient({
                     three values below.
                   </p>
                   {!storeKey ? (
-                    <button type="button" onClick={() => void issueStoreKey(`${r.name} store key`)}>
-                      Generate store key for {r.name}
+                    <button type="button" className="th-btn th-btn-primary" onClick={() => void issueStoreKey(`${r.name} store key`)}>
+                      Generate the values {r.name} asks for
                     </button>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {/* These are the EXACT fields the provider's own connect
+                          screen asks for, in its order. Printful wants a store
+                          name, a website, a consumer key and a consumer secret;
+                          handing over an API token instead — which is what this
+                          card used to lead with — connects nothing. */}
                       {([
-                        ['Store URL', typeof window === 'undefined' ? '' : window.location.origin],
+                        ['Store name', storeName || 'Your store'],
+                        ['Website', typeof window === 'undefined' ? '' : window.location.origin],
                         ['Consumer key', storeKey.consumerKey],
                         ['Consumer secret', storeKey.consumerSecret],
                       ] as [string, string][]).map(([label, value]) => (
                         <label key={label} style={{ fontSize: 11, fontWeight: 600, color: 'var(--th-muted)' }}>
                           {label}
-                          <input readOnly value={value} onFocus={(e) => e.currentTarget.select()} style={{ width: '100%', marginTop: 4, fontFamily: 'var(--th-font-mono)', fontSize: 11 }} />
+                          <span style={{ display: 'flex', gap: 6, marginTop: 4 }}>
+                            <input readOnly value={value} onFocus={(e) => e.currentTarget.select()} style={{ flex: 1, fontFamily: 'var(--th-font-mono)', fontSize: 11 }} />
+                            <button type="button" className="th-btn" style={{ fontSize: 11 }}
+                              onClick={() => void navigator.clipboard?.writeText(value)}>Copy</button>
+                          </span>
                         </label>
                       ))}
                       <p style={{ margin: 0, fontSize: 10, color: 'var(--th-muted)' }}>
@@ -458,7 +542,7 @@ export function ConnectionsClient({
                 </div>
               )}
 
-              {r && r.authType !== 'oauth' && !r.connected && r.connectsVia !== 'store-pull-woo' && r.connectsVia !== 'store-pull-shopify' && !r.oauthCapable && (
+              {r && connectMode(r) === 'api-key' && !r.connected && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
                   {/* Where the values come from, shown BEFORE the boxes. Every
                       provider used to render one identical "API key" field, so
