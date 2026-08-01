@@ -106,6 +106,16 @@ function validateCredential(provider: CatalogProvider, credential: string): void
 // Providers that can ALSO be connected by authorizing in a browser.
 const OAUTH_CAPABLE = new Set(oauthService.providers());
 
+/** The consumer key/secret pair a POD partner gives you, checked against the
+ *  website it gave you with it. */
+const wooStyle: Tester = async (c) => {
+  const [site, key, secret] = c.split('|');
+  if (!site) return { ok: false, detail: 'Expected the Website value from the provider.' };
+  if (!key || !secret) return { ok: false, detail: 'Expected a Consumer key and a Consumer secret.' };
+  const base = site.replace(/\/+$/, '').replace(/^(?!https?:\/\/)/, 'https://');
+  return get(`${base}/wp-json/wc/v3/system_status`, { Authorization: basicAuthHeader(key, secret) });
+};
+
 const TESTERS: Record<string, Tester> = {
   // ── AI, apps and hosting, verified 2026-08-01 by live probe.
   deepseek: (c) => bearerGet('https://api.deepseek.com/models', firstField(c)),
@@ -262,21 +272,21 @@ const TESTERS: Record<string, Tester> = {
   // as Basic, a lone private token as Bearer. Reporting "invalid key" for a
   // credential that is actually fine is the worst outcome here — it sends the
   // merchant back to regenerate something that was never the problem.
-  printful: async (c) => {
-    // BEARER ONLY. This used to try Basic first for a key+secret pair, which
-    // was correct until Printful retired API-key auth. Its API now answers
-    // "Basic API token authentication is no longer supported... create a new
-    // OAuth 2.0 token" — verified live against a stored legacy key, which
-    // 401s. Trying Basic now only produces a confusing failure before the
-    // Bearer attempt that was always going to be the real one.
-    const [first] = c.split('|');
-    return bearerGet('https://api.printful.com/stores', first ?? c);
-  },
-  printify: (c) => bearerGet('https://api.printify.com/v1/shops.json', firstField(c)),
+  // Every print-on-demand partner here connects the same way: it hands you a
+  // website, a consumer key and a consumer secret, and the pair authenticates
+  // against that website's WooCommerce-compatible REST API. One check, because
+  // it is one flow — nine slightly different ones is nine things to get wrong.
+  printful: wooStyle,
+  printify: wooStyle,
+  gooten: wooStyle,
+  podplus: wooStyle,
+  podpartner: wooStyle,
+  tapstitch: wooStyle,
+  contrado: wooStyle,
   // Endpoints and header names probed live (both answer 401 to a bad key, so a
   // 200 means the credential is real) rather than taken from a summary.
-  gelato: (c) => get('https://product.gelatoapis.com/v3/catalogs', { 'X-API-KEY': firstField(c) }),
-  spod: (c) => get('https://rest.spod.com/orders', { 'X-SPOD-ACCESS-TOKEN': firstField(c) }),
+  gelato: wooStyle,
+  spod: wooStyle,
 
   // Payments
   stripe: (c) => bearerGet('https://api.stripe.com/v1/balance', c),
