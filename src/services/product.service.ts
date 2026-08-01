@@ -20,6 +20,8 @@ const productInclude = {
   vendor: { select: { id: true, name: true, platform: true } },
   categories: { select: { id: true, name: true, slug: true } },
   tags: { select: { id: true, name: true, slug: true } },
+  audiences: { select: { milieuId: true } },
+  access: { include: { customer: { select: { email: true } } } },
 } satisfies Prisma.ProductInclude;
 
 export const productService = {

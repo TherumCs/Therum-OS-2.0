@@ -11,6 +11,7 @@ import { milieuService } from './milieu.service.js';
 import { capabilityService } from './capability.service.js';
 import { NotFoundError, ValidationError, ConflictError } from '../lib/errors.js';
 import { availableOf } from '../counter/availability.js';
+import { canBuy, viewerFor, GATE_INCLUDE } from '../counter/visibility.js';
 
 // Counter C2 — the unified cart/checkout session (1.x's core
 // differentiator: cart and checkout are ONE state container, two render
@@ -293,9 +294,23 @@ export const cartService = {
   async addItem(token: string | null, variantId: string, quantity: number, customerId: string | null = null) {
     const variant = await db.productVariant.findUnique({
       where: { id: variantId },
-      include: { product: { select: { status: true } } },
+      include: { product: { select: { status: true, visibility: true, ...GATE_INCLUDE } } },
     });
     if (!variant || variant.product.status !== 'active') {
+      throw new NotFoundError('Product not available', 'variantId');
+    }
+    /**
+     * Visibility is enforced HERE, not only in the listings.
+     *
+     * Hiding a restricted product from /shop while this endpoint still accepts
+     * its variant id is not privacy — anyone who has ever seen the id keeps
+     * access forever, and ids leak through old carts, shared links and the API.
+     *
+     * The same NotFoundError as a missing product on purpose: a distinct
+     * "you are not allowed" reply would confirm the product exists to someone
+     * who is not supposed to know that.
+     */
+    if (!canBuy(variant.product, await viewerFor(customerId))) {
       throw new NotFoundError('Product not available', 'variantId');
     }
     if (quantity < 1 || quantity > MAX_QTY) throw new ValidationError(`Quantity must be 1–${MAX_QTY}.`, 'quantity');

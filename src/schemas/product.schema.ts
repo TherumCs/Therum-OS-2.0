@@ -51,6 +51,8 @@ export const UpdateProductInput = z.object({
     poster: z.string().url().optional(),
   })).max(20).optional(),
   status: z.enum(['draft', 'active', 'archived']).optional(),
+  // WHO may see it — a separate axis from `status`. See counter/visibility.ts.
+  visibility: z.enum(['public', 'private', 'restricted']).optional(),
   vendorId: z.string().optional(),
   sourceId: z.string().optional(),
   meta: z.record(z.string(), z.unknown()).optional(),
@@ -58,6 +60,8 @@ export const UpdateProductInput = z.object({
 
 export const ListProductsQuery = z.object({
   status: z.enum(['draft', 'active', 'archived']).optional(),
+  // WHO may see it — a separate axis from `status`. See counter/visibility.ts.
+  visibility: z.enum(['public', 'private', 'restricted']).optional(),
   vendorId: z.string().optional(),
   // Filter the admin list the same way the storefront filters: a category
   // brings its DESCENDANTS with it, so "show me Mens" answers with everything

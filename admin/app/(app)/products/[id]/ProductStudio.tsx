@@ -49,11 +49,18 @@ export function ProductStudio({
   initial,
   allCategories,
   allTags,
+  allMilieus = [],
 }: {
   initial: EditorProduct;
   allCategories: Term[];
   allTags: Term[];
+  /** Groups a restricted product can be opened to. */
+  allMilieus?: { id: string; name: string }[];
 }) {
+  // Current grants come from the product itself, so the panel opens showing
+  // who actually has access rather than an empty box.
+  const initialMilieuIds = (initial.audiences ?? []).map((a) => a.milieuId);
+  const initialEmails = (initial.access ?? []).map((a) => a.customer.email);
   const router = useRouter();
   const [p, setP] = useState(initial);
   const [sel, setSel] = useState<Selection>({ kind: 'product' });
@@ -72,6 +79,9 @@ export function ProductStudio({
   // Forms stay behind a button so the panel is a list of what IS set, not a
   // wall of empty inputs.
   const [adding, setAdding] = useState<'' | 'category' | 'tag' | 'variant'>('');
+  const [milieuIds, setMilieuIds] = useState<string[]>(initialMilieuIds);
+  const [emails, setEmails] = useState<string[]>(initialEmails);
+  const [unknown, setUnknown] = useState<string[]>([]);
   const [termName, setTermName] = useState('');
 
   /**
@@ -286,6 +296,76 @@ export function ProductStudio({
               <option value="archived">Archived</option>
             </select>
           </label>
+          {/* WHO may see it — a separate axis from Status. A product can be
+              Active AND unlisted, so these are two controls, not one longer
+              dropdown. */}
+          <label className="th-studio__field">
+            <span>Visibility</span>
+            <select
+              value={p.visibility ?? 'public'}
+              onChange={(e) => { const visibility = e.target.value; setP({ ...p, visibility }); void patch({ visibility }); }}
+            >
+              <option value="public">Public — anyone</option>
+              <option value="private">Unlisted — hidden, but the link works</option>
+              <option value="restricted">Restricted — groups or accounts</option>
+            </select>
+          </label>
+          {p.visibility === 'private' && (
+            <p className="th-hint">Not in the shop, search or sitemap. Anyone you send the link to can open and buy it.</p>
+          )}
+          {p.visibility === 'restricted' && (
+            <>
+              <p className="th-hint">Everyone else gets a 404 — no hint it exists. A shopper needs ONE of the following.</p>
+              <div className="th-studio__group-head"><span>Groups</span></div>
+              <div className="th-studio__chips">
+                {allMilieus.length === 0 && <span className="th-hint">No groups yet.</span>}
+                {allMilieus.map((m) => {
+                  const on = milieuIds.includes(m.id);
+                  return (
+                    <button
+                      key={m.id}
+                      type="button"
+                      className={'th-pv-chip' + (on ? ' on' : '')}
+                      disabled={busy}
+                      onClick={() => {
+                        const next = on ? milieuIds.filter((x) => x !== m.id) : [...milieuIds, m.id];
+                        setMilieuIds(next);
+                        void call('PUT', `/api/products/${p.id}/audience`, { milieuIds: next });
+                      }}
+                    >{m.name}</button>
+                  );
+                })}
+              </div>
+              <label className="th-studio__field">
+                <span>Accounts</span>
+                {/* One email per line, replaced wholesale on save — a partial
+                    update would leave no way to REMOVE someone, which is the
+                    operation that matters for something gated. */}
+                <textarea
+                  rows={3}
+                  defaultValue={emails.join('\n')}
+                  placeholder="one email per line"
+                  onBlur={async (e) => {
+                    const next = e.target.value.split(/\s*[\n,]\s*/).map((x) => x.trim()).filter(Boolean);
+                    const res = (await call('PUT', `/api/products/${p.id}/audience`, { emails: next })) as
+                      { emails?: string[]; unknownEmails?: string[] } | null;
+                    if (res) {
+                      setEmails(res.emails ?? []);
+                      // Unknown addresses are SAID, not swallowed — otherwise
+                      // the merchant believes someone has access who does not.
+                      setUnknown(res.unknownEmails ?? []);
+                    }
+                  }}
+                />
+              </label>
+              {unknown.length > 0 && (
+                <p className="th-hint" style={{ color: 'var(--th-danger, #ef4444)' }}>
+                  No account for: {unknown.join(', ')} — not granted.
+                </p>
+              )}
+            </>
+          )}
+
           <label className="th-studio__field">
             <span>Description</span>
             <textarea onKeyDown={commitKeys} rows={5} defaultValue={p.description ?? ''} onBlur={(e) => { const description = e.target.value; if (description !== (p.description ?? '')) { setP({ ...p, description }); void patch({ description }); } }} />

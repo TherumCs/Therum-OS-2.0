@@ -80,6 +80,24 @@ model Product {
   // Gallery beyond the primary image: [{url, alt}] (catalog presentation).
   images      Json          @default("[]")
   status      ProductStatus @default(draft)
+
+  /**
+   * WHO may see this, which is a separate question from whether it is
+   * published. `status` is the lifecycle (draft -> active -> archived);
+   * visibility is the audience. A product can be perfectly Active AND private,
+   * so folding these into one dropdown loses a real combination.
+   *
+   *   public     — anyone.
+   *   private    — UNLISTED: absent from listings, but the direct link works
+   *                for anyone holding it. The link is the credential.
+   *   restricted — must match a milieu in `audiences` OR a customer in
+   *                `access`; the two COMBINE. Everyone else gets a 404 and no
+   *                hint the product exists.
+   *
+   * ENFORCED AT THE CART AND CHECKOUT, not only in listings. Hiding a product
+   * from /shop while the API still accepts its variant id is not private.
+   */
+  visibility  String        @default("public")
   // Null vendorId = a merged product the engine owns (multi-vendor).
   vendorId    String?       @map("vendor_id")
   // External id from the source platform — idempotency key for imports.
@@ -94,6 +112,8 @@ model Product {
   categories        ProductCategory[]
   tags              ProductTag[]
   reviews           ProductReview[]
+  audiences         ProductAudience[]
+  access            ProductAccess[]
 
   @@unique([vendorId, sourceId], name: "vendor_source")
   @@index([status])
@@ -226,6 +246,7 @@ model Customer {
   offers      CustomerOffer[]
 
   @@map("customers")
+  productAccess ProductAccess[]
 }
 
 // A coupon pushed to ONE named customer, so it shows up in their account
@@ -894,6 +915,7 @@ model Milieu {
   coupons     Coupon[]
 
   @@map("milieus")
+  productAudiences ProductAudience[]
 }
 
 // ── Cluster (merged products) ───────────────────────────────────────
@@ -1145,4 +1167,31 @@ model EmailSignup {
 
   @@index([createdAt])
   @@map("email_signups")
+}
+
+/** Which milieus can see a `visibility = "milieu"` product. */
+model ProductAudience {
+  productId String @map("product_id")
+  milieuId  String @map("milieu_id")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  milieu  Milieu  @relation(fields: [milieuId], references: [id], onDelete: Cascade)
+
+  @@id([productId, milieuId])
+  @@index([milieuId])
+  @@map("product_audiences")
+}
+
+/** Which individual customers can see a `visibility = "account"` product. */
+model ProductAccess {
+  productId  String   @map("product_id")
+  customerId String   @map("customer_id")
+  grantedAt  DateTime @default(now()) @map("granted_at")
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@id([productId, customerId])
+  @@index([customerId])
+  @@map("product_access")
 }

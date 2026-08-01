@@ -30,6 +30,9 @@ export interface EditorProduct {
   name: string;
   slug: string;
   description: string | null;
+  visibility?: string;
+  audiences?: { milieuId: string }[];
+  access?: { customer: { email: string } }[];
   image: string | null;
   images: GalleryItem[];
   status: string;

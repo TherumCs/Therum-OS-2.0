@@ -12,10 +12,13 @@ interface Term {
 
 export default async function ProductEditPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [product, categories, tags] = await Promise.all([
+  const [product, categories, tags, milieus] = await Promise.all([
     apiGet<EditorProduct>(`/api/products/${id}`),
     apiGet<Term[]>('/api/catalog/categories'),
     apiGet<Term[]>('/api/catalog/tags'),
+    // Groups are only needed for a restricted product, but fetching them here
+    // keeps the panel from flashing empty the moment it is switched on.
+    apiGet<{ id: string; name: string }[]>('/api/milieus').catch(() => []),
   ]);
-  return <ProductStudio initial={product} allCategories={categories} allTags={tags} />;
+  return <ProductStudio initial={product} allCategories={categories} allTags={tags} allMilieus={milieus} />;
 }

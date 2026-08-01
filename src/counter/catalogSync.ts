@@ -150,7 +150,13 @@ const printful: CatalogProvider = {
         headers,
         'Printful',
       )
-        .then((r) => [r.variant?.color_code, r.variant?.color_code2].filter((c): c is string => typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c)))
+        // ORDER MATTERS, and Printful's is the reverse of its own label.
+        // For "Red/Natural" it returns color_code #f9e9d1 (the natural) and
+        // color_code2 #c70b3c (the red) — so `color_code2` is the FIRST word of
+        // the name. Emitting them in API order paints natural-then-red under a
+        // label reading "Red/Natural", which is the swatch disagreeing with its
+        // own caption. Verified across every two-tone variant in this store.
+        .then((r) => [r.variant?.color_code2, r.variant?.color_code].filter((c): c is string => typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c)))
         // A missing colour is not a failed sync — the swatch falls back to the
         // variant's photograph.
         .catch(() => [] as string[]);

@@ -31,6 +31,7 @@ import { accountMarkup, ACCOUNT_RUNTIME } from '../../site/accountPage.js';
 import { wishlistMarkup } from '../../site/wishlist.js';
 import { orderTrackingMarkup, ORDER_TRACKING_CSS, ORDER_TRACKING_RUNTIME } from '../../site/orderTracking.js';
 import { availableOf, stockLabel } from '../../counter/availability.js';
+import { viewerFor, visibleWhere, canOpenDirectly, GATE_INCLUDE } from '../../counter/visibility.js';
 
 // Counter C4 — the five public storefront surfaces, server-rendered from the
 // same Fastify process as the API (same origin, so the client runtime's
@@ -233,6 +234,12 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     // priced for a member is per-shopper and therefore not shared-cacheable,
     // which is the real cost of showing it here rather than at checkout.
     const shopper = counter.memberPricing === 'off' ? null : await resolveCustomer(req);
+    /**
+     * Who is browsing, for VISIBILITY. Resolved from the session independently
+     * of member pricing: switching member pricing off must not hand the
+     * restricted catalogue to everyone.
+     */
+    const gateViewer = await viewerFor((await resolveCustomer(req))?.id ?? null);
     const memberPct = shopper && (await capabilityService.isEnabled('memberships'))
       ? (await milieuService.discountFor(shopper.id))?.pct ?? 0
       : 0;
@@ -262,14 +269,30 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     //
     // JSON.parse on the way out also means each request gets its own array,
     // which matters because the in-memory sorts below mutate it.
+    /**
+     * THE VIEWER IS PART OF THE CACHE KEY.
+     *
+     * This page is cached, and the moment it can contain restricted products a
+     * key without the audience in it serves one shopper's private catalogue to
+     * the next visitor. Everyone with no grants at all — every signed-out
+     * visitor, which is most traffic — shares the single 'public' key, so the
+     * common case still gets one cache entry.
+     */
+    const audienceKey = gateViewer.milieuIds.length || gateViewer.customerId
+      ? `${gateViewer.customerId ?? ''}|${[...gateViewer.milieuIds].sort().join(',')}`
+      : 'public';
     const catalogKey = JSON.stringify({
       q, tag, color, size, brand, sort,
       cats: categoryIds ?? null,
       take: counter.toolbarPageSize,
+      aud: audienceKey,
     });
     const products = await cached('catalog', catalogKey, () => db.product.findMany({
       where: {
         status: 'active',
+        // Applied in the QUERY, not by filtering the page afterwards, or the
+        // product count and pagination quietly stop matching what is shown.
+        AND: [visibleWhere(gateViewer)],
         ...(q ? { OR: [{ name: { contains: q, mode: 'insensitive' } }, { description: { contains: q, mode: 'insensitive' } }] } : {}),
         // Resolved to ids, not matched on slug: a slug is only unique within
         // its parent now, so `slug: 't-shirts'` would pull Mens AND Womens.
@@ -320,7 +343,10 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     // Scoped to the CATEGORY, deliberately not to the other active filters:
     // collapsing the colour list because a size is selected makes the filters
     // feel broken rather than helpful.
-    const scope = { status: 'active' as const, ...(categoryIds ? { categories: { some: { id: { in: categoryIds } } } } : {}), ...(tag ? { tags: { some: { slug: tag } } } : {}) };
+    // Facets are gated too: a colour or size that exists only on a restricted
+    // product would otherwise advertise it, and clicking the filter would
+    // return nothing — which tells the shopper something is being hidden.
+    const scope = { status: 'active' as const, AND: [visibleWhere(gateViewer)], ...(categoryIds ? { categories: { some: { id: { in: categoryIds } } } } : {}), ...(tag ? { tags: { some: { slug: tag } } } : {}) };
     const [cats, tags, variantAttrs] = await Promise.all([
       categoryFacets(),
       db.productTag.findMany({ where: { products: { some: scope } }, select: { name: true, slug: true }, orderBy: { name: 'asc' } }),
@@ -591,8 +617,17 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
         variants: { orderBy: { price: 'asc' } },
         categories: { select: { name: true, slug: true } },
         tags: { select: { name: true, slug: true } },
+        ...GATE_INCLUDE,
       },
     });
+    // A restricted product 404s for anyone not in its audience — the SAME
+    // response as a product that does not exist, because a distinct "members
+    // only" page would confirm it exists to someone who should not know.
+    // 'private' passes here on purpose: unlisted means the link still works.
+    if (p && !canOpenDirectly(p, await viewerFor((await resolveCustomer(req))?.id ?? null))) {
+      reply.status(404);
+      return html(reply, await page('Not found', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Product not found</h1><p class="page-sub"><a href="/shop" style="color:var(--ac-btn)">Back to the shop</a></p></div>', '', PRIVATE_PAGE));
+    }
     if (!p || p.status !== 'active') {
       reply.status(404);
       return html(reply, await page('Not found', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Product not found</h1><p class="page-sub"><a href="/shop" style="color:var(--ac-btn)">Back to the shop</a></p></div>', '', PRIVATE_PAGE));
