@@ -1,0 +1,53 @@
+# Sudo grants for the Therum OS Server panel.
+#
+# Install:
+#   sudo cp deploy/therum-sudoers /etc/sudoers.d/therum
+#   sudo chown root:root /etc/sudoers.d/therum && sudo chmod 440 /etc/sudoers.d/therum
+#   sudo visudo -c            # MUST print "parsed OK" before you log out
+#
+# Replace `therum` below with the user PM2 runs as.
+#
+# Every line grants ONE exact command line, arguments included. That is the
+# difference between this file and the usual `therum ALL=(ALL) NOPASSWD: ALL`
+# that ends up in a tutorial: granting a BINARY grants everything the binary can
+# do. `sed` alone is write-anywhere-as-root. `systemctl` alone is start-anything.
+# `apt-get` alone can install a package that installs a shell. Pinning the argv
+# means a compromised API process can run these fourteen things and nothing else.
+#
+# Wildcards are used in exactly one place — the sshd_config edit — and the
+# pattern is anchored to that one file and that one substitution.
+#
+# Nothing here grants a shell, an editor, a package install, or a write to any
+# path other than /etc/ssh/sshd_config and its backup. If a future action needs
+# more, it gets its own pinned line in a reviewed commit.
+
+Cmnd_Alias THERUM_NGINX = /usr/sbin/nginx -t, \
+                          /usr/bin/systemctl reload nginx
+
+Cmnd_Alias THERUM_SSH   = /usr/sbin/sshd -t, \
+                          /usr/bin/systemctl reload ssh, \
+                          /usr/bin/cp /etc/ssh/sshd_config /etc/ssh/sshd_config.therum-bak, \
+                          /usr/bin/cp /etc/ssh/sshd_config.therum-bak /etc/ssh/sshd_config, \
+                          /usr/bin/sed -i s/^#\?PasswordAuthentication.*/PasswordAuthentication no/ /etc/ssh/sshd_config
+
+Cmnd_Alias THERUM_FW    = /usr/sbin/ufw default deny incoming, \
+                          /usr/sbin/ufw allow OpenSSH, \
+                          /usr/sbin/ufw --force enable
+
+Cmnd_Alias THERUM_PKG   = /usr/bin/apt-get update, \
+                          /usr/bin/apt-get -y upgrade, \
+                          /usr/bin/certbot renew --dry-run
+
+Cmnd_Alias THERUM_LOGS  = /usr/bin/tail -n 200 /var/log/nginx/error.log
+
+therum ALL=(root) NOPASSWD: THERUM_NGINX, THERUM_SSH, THERUM_FW, THERUM_PKG, THERUM_LOGS
+
+# Deliberately NOT granted, and each for a reason:
+#   systemctl restart postgresql  — a restart that drops connections should be
+#                                   a decision made at a terminal, not a button.
+#   ufw disable                   — turning the firewall OFF from the web panel
+#                                   is the one move an attacker would want.
+#   apt-get install / dist-upgrade— arbitrary package installation is arbitrary
+#                                   code execution wearing a package manager.
+#   reboot / poweroff             — nothing on this box should be able to end
+#                                   the session it is being administered from.

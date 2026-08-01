@@ -29,6 +29,11 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   // Reports on the HOST, where Security above configures the APP. Kept next to
   // it because that is where you look when the question is "is this box ok".
   { id: 'advisor', label: 'Advisor', description: 'Scans this machine for security, compression and performance issues.', icon: 'gauge' },
+  // The pair to Advisor: it says what is wrong, this runs the fix. Separate
+  // page rather than buttons on the findings list, because most of what an
+  // operator wants here (restart a process, read the nginx log) is not a
+  // finding at all.
+  { id: 'server', label: 'Server', description: 'Restart services, work the firewall, read logs — the control panel this box does not need to install.', icon: 'shield' },
   { id: 'permissions', label: 'Permissions', description: 'Role capabilities.', icon: 'users' },
   { id: 'performance', label: 'Performance', description: 'Cache, lazy load, defer JS.', icon: 'gauge' },
   { id: 'editor-defaults', label: 'Editor Defaults', description: 'Content builder preferences.', icon: 'edit2' },

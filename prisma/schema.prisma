@@ -1057,3 +1057,22 @@ model CustomerSession {
   @@index([expiresAt])
   @@map("customer_sessions")
 }
+
+// Every privileged action the Server panel ran, successful or not.
+//
+// A failed privileged action is the more interesting row of the two: it is
+// either a misconfiguration or somebody probing what the panel will do. Output
+// is captured scrubbed and truncated at the service layer, never raw.
+model HostActionLog {
+  id         String   @id @default(cuid())
+  actionId   String   @map("action_id")
+  actorId    String?  @map("actor_id")
+  ok         Boolean
+  output     String
+  durationMs Int      @map("duration_ms")
+  at         DateTime @default(now())
+
+  @@index([actionId, at])
+  @@index([at])
+  @@map("host_action_log")
+}

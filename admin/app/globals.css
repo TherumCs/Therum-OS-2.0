@@ -1882,6 +1882,65 @@ tr:hover .th-rowactions, tr:focus-within .th-rowactions { opacity: 1; }
 .th-adv__skip ul { margin: var(--th-space-8) 0 0; padding-left: var(--th-space-16); display: flex; flex-direction: column; gap: var(--th-space-4); }
 .th-adv__skip code { font-family: var(--th-font-mono); color: var(--th-ink-2); }
 
+/* ── Server panel ───────────────────────────────────────────────────────
+   Sibling of the Advisor above. Every row states three things before you can
+   press it: what it does, what it will run, and how disruptive it is — an
+   operator screen earns trust by being boring and explicit, not by hiding the
+   command behind a friendly label. */
+.th-srv { display: flex; flex-direction: column; gap: var(--th-space-24); }
+.th-srv__note { margin: 0; font-size: var(--th-fs-sm); color: var(--th-ink-2); background: var(--th-surface-2); border: 1px solid var(--th-line); border-radius: var(--th-r-sm); padding: var(--th-space-10) var(--th-space-12); max-width: 70ch; }
+.th-srv__group { display: flex; flex-direction: column; gap: var(--th-space-8); }
+.th-srv__grouptitle { margin: 0; font-size: var(--th-fs-md); font-weight: 600; }
+.th-srv__groupdesc { margin: 0 0 var(--th-space-6); font-size: var(--th-fs-sm); color: var(--th-muted); max-width: 70ch; }
+
+.th-srv__list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--th-space-12); }
+.th-srv__item { display: flex; flex-direction: column; gap: var(--th-space-8); padding: var(--th-space-14); border: 1px solid var(--th-line); border-radius: var(--th-r-md); background: var(--th-surface); }
+/* Unavailable is dimmed, never hidden: knowing an action exists and needs the
+   server is the useful half of the information while still local. */
+.th-srv__item[data-available='false'] { opacity: .55; }
+.th-srv__meta { display: flex; align-items: center; justify-content: space-between; gap: var(--th-space-8); }
+.th-srv__label { font-size: var(--th-fs-sm); font-weight: 600; }
+.th-srv__risk { font-size: var(--th-fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px var(--th-space-6); border-radius: var(--th-r-pill); border: 1px solid var(--th-line); color: var(--th-muted); white-space: nowrap; }
+.th-srv__risk--restart { color: var(--th-warn-ink, #a16207); }
+.th-srv__risk--sensitive { color: var(--th-danger, #c0392b); border-color: currentColor; }
+.th-srv__desc { margin: 0; font-size: var(--th-fs-xs); color: var(--th-ink-2); }
+.th-srv__cmd { display: block; font-family: var(--th-font-mono); font-size: var(--th-fs-2xs); color: var(--th-muted); background: var(--th-surface-2); border-radius: var(--th-r-sm); padding: var(--th-space-6) var(--th-space-8); white-space: pre-wrap; word-break: break-word; }
+.th-srv__item .th-btn { align-self: flex-start; }
+
+.th-srv__confirm { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: rgba(0,0,0,.45); padding: var(--th-space-16); }
+.th-srv__confirmbox { width: min(560px, 100%); background: var(--th-surface); border: 1px solid var(--th-line); border-radius: var(--th-r-lg); padding: var(--th-space-20); display: flex; flex-direction: column; gap: var(--th-space-10); max-height: 90vh; overflow: auto; }
+.th-srv__confirmbox h3 { margin: 0; font-size: var(--th-fs-md); }
+.th-srv__confirmbox p { margin: 0; font-size: var(--th-fs-sm); color: var(--th-ink-2); }
+.th-srv__confirmlabel { font-size: var(--th-fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--th-muted); }
+.th-srv__revert { font-family: var(--th-font-mono); font-size: var(--th-fs-xs); }
+.th-srv__confirmbtns { display: flex; gap: var(--th-space-8); justify-content: flex-end; margin-top: var(--th-space-6); }
+
+.th-srv__result { display: flex; flex-direction: column; gap: var(--th-space-8); }
+.th-srv__ms { font-weight: 400; font-size: var(--th-fs-xs); color: var(--th-muted); }
+/* Command output is the one place horizontal scroll beats wrapping — a wrapped
+   log line is harder to read than one you scroll to. */
+.th-srv__output { margin: 0; padding: var(--th-space-12); background: var(--th-surface-2); border: 1px solid var(--th-line); border-radius: var(--th-r-sm); font-family: var(--th-font-mono); font-size: var(--th-fs-xs); color: var(--th-ink); max-height: 420px; overflow: auto; }
+.th-srv__result[data-ok='false'] .th-srv__output { border-color: var(--th-danger, #c0392b); }
+
+.th-srv__log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--th-space-4); }
+.th-srv__log li { display: flex; align-items: center; gap: var(--th-space-10); font-size: var(--th-fs-xs); padding: var(--th-space-6) 0; border-bottom: 1px solid var(--th-line); }
+.th-srv__logwhen { color: var(--th-muted); min-width: 15ch; }
+.th-srv__log code { font-family: var(--th-font-mono); color: var(--th-ink-2); flex: 1; }
+.th-srv__ok { color: var(--th-ok-ink, #15803d); font-weight: 600; }
+.th-srv__bad { color: var(--th-danger, #c0392b); font-weight: 600; }
+
+/* The console reads as a terminal on purpose — monospace, dark, scrollback —
+   because that is the mental model. What it is NOT is a shell, and the hint
+   line under it says so rather than letting the styling imply otherwise. */
+.th-srv__console { background: var(--th-surface-2); border: 1px solid var(--th-line); border-radius: var(--th-r-sm); padding: var(--th-space-12); min-height: 120px; max-height: 420px; overflow: auto; font-family: var(--th-font-mono); font-size: var(--th-fs-xs); display: flex; flex-direction: column; gap: var(--th-space-10); }
+.th-srv__consoleidle { margin: 0; color: var(--th-muted); }
+.th-srv__consoleidle code { background: var(--th-surface); padding: 1px 5px; border-radius: 4px; }
+.th-srv__consoleinput { color: var(--th-accent); font-weight: 600; }
+.th-srv__consoleline[data-ok='false'] .th-srv__consoleinput { color: var(--th-danger, #c0392b); }
+.th-srv__consoleout { margin: var(--th-space-4) 0 0; white-space: pre-wrap; word-break: break-word; color: var(--th-ink-2); }
+.th-srv__consolebar { display: flex; gap: var(--th-space-8); margin-top: var(--th-space-8); }
+.th-srv__consolebar input { flex: 1; font-family: var(--th-font-mono); font-size: var(--th-fs-xs); padding: var(--th-space-8) var(--th-space-10); border: 1px solid var(--th-line); border-radius: var(--th-r-sm); background: var(--th-surface); color: var(--th-ink); }
+
 /* ── Navigation feedback ───────────────────────────────────────────────
    A click has to acknowledge itself immediately. Warm navigations on this
    admin measure 740-1000ms and there is no loading.tsx, so without this the
