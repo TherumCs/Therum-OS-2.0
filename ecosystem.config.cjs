@@ -51,7 +51,7 @@ module.exports = {
   apps: [
     {
       name: 'therum-cms-api',
-      script: 'dist/server.js',
+      script: 'dist/main.js',
       instances: 'max',
       exec_mode: 'cluster',
       max_memory_restart: '400M',

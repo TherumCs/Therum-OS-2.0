@@ -338,7 +338,7 @@ export async function buildServer() {
   return app;
 }
 
-async function main(): Promise<void> {
+export async function main(): Promise<void> {
   const app = await buildServer();
 
   const shutdown = async (signal: string): Promise<void> => {
@@ -367,7 +367,16 @@ async function main(): Promise<void> {
   }
 }
 
-// Only boot a real listener when run directly — not when imported by tests.
+// Boot when run directly — `node dist/server.js` during development.
+//
+// This check is NOT sufficient under a process supervisor: PM2 spawns the app
+// through its own wrapper, so argv[1] is PM2's ProcessContainer and this is
+// false. The server then never listened, never logged, and stayed "online" in
+// `pm2 list` because the module-level Redis and Prisma connections hold the
+// event loop open. A server that never starts is indistinguishable from a
+// healthy one at a glance, which is what made it take a while to find.
+//
+// Supervisors use dist/main.js instead, which has no condition to get wrong.
 if (process.argv[1] && process.argv[1] === fileURLToPath(import.meta.url)) {
   void main();
 }
