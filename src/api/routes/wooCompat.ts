@@ -279,16 +279,33 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
           author_url: 'https://woocommerce.com',
           network_activated: false,
         },
-        {
-          plugin: 'printful-shipping-for-woocommerce/printful-shipping.php',
+        // BOTH directory names, deliberately.
+        //
+        // The plugin's main file is `printful-shipping.php` while its
+        // wordpress.org slug is `printful-shipping-for-woocommerce` — so the
+        // directory was renamed at some point and the ORIGINAL path was
+        // `printful-shipping/printful-shipping.php`. Printful's check dates
+        // from 2019 ("On February 15th, 2019 Printful has ended support for
+        // legacy versions…"), which is exactly the era of the old path.
+        //
+        // A path it does not recognise reads as "not installed", and its
+        // version comparison against an absent version fails closed — which is
+        // reported as "update the Printful plugin to version 2.0.7 or higher"
+        // even though the version we send is 2.2.12. Listing both costs
+        // nothing and removes the guess.
+        ...['printful-shipping', 'printful-shipping-for-woocommerce'].map((dir) => ({
+          plugin: `${dir}/printful-shipping.php`,
           name: 'Printful Integration for WooCommerce',
+          // Must be >= 2.0.7, and version_latest must EQUAL it — a lower
+          // "latest" reads as an update being available, which is the same
+          // complaint by another route.
           version: '2.2.12',
           version_latest: '2.2.12',
           url: 'https://wordpress.org/plugins/printful-shipping-for-woocommerce/',
           author_name: 'Printful',
           author_url: 'https://www.printful.com',
           network_activated: false,
-        },
+        })),
       ],
       inactive_plugins: [],
       dropins_mu_plugins: { dropins: [], mu_plugins: [] },

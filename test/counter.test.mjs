@@ -1127,8 +1127,20 @@ describe("printful plugin routes (the 'Valid route not found' sync error)", () =
 
     assert.ok(Array.isArray(body.active_plugins), 'active_plugins missing entirely');
     assert.ok(body.active_plugins.length > 0, 'active_plugins is the empty array Printful reported');
-    assert.ok(body.active_plugins.some((p) => /printful/i.test(p.plugin)),
-      'Printful cannot find its own integration listed');
+    // BOTH directory names. The plugin's main file is printful-shipping.php
+    // while its wp.org slug is printful-shipping-for-woocommerce, so the
+    // directory was renamed and a check written in 2019 looks for the old path.
+    // A path it does not recognise reads as "not installed", and the version
+    // comparison then fails closed — reported as "update to 2.0.7 or higher"
+    // even though the version we send is 2.2.12.
+    for (const dir of ['printful-shipping', 'printful-shipping-for-woocommerce']) {
+      const entry = body.active_plugins.find((p) => p.plugin === `${dir}/printful-shipping.php`);
+      assert.ok(entry, `Printful cannot find its integration at ${dir}/printful-shipping.php`);
+      assert.equal(entry.version, entry.version_latest, 'a newer "latest" reads as an update being due');
+      const [maj, min, patch] = entry.version.split('.').map(Number);
+      assert.ok(maj > 2 || (maj === 2 && (min > 0 || patch >= 7)),
+        `version ${entry.version} is below the 2.0.7 Printful requires`);
+    }
     assert.ok(body.active_plugins.some((p) => /woocommerce\.php/.test(p.plugin)),
       'WooCommerce itself is not listed');
 
