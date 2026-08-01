@@ -155,6 +155,7 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 .swatch{width:52px;height:52px;padding:0;border:1px solid var(--bd2);background:var(--sf);border-radius:var(--radius-md);overflow:hidden;cursor:pointer;line-height:0}
 .swatch img{width:100%;height:100%;object-fit:cover;display:block}
 .swatch-blank{display:block;width:100%;height:100%;background:var(--bd2)}
+.swatch-fill{display:block;width:100%;height:100%}
 .swatch.sel{outline:2px solid var(--ac-btn);outline-offset:-1px;border-color:transparent}
 .swatch:disabled{opacity:.35;cursor:default}
 .swatch-name{font-size:13px;color:var(--tx);margin-bottom:10px}

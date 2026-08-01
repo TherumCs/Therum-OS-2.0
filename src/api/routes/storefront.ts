@@ -420,6 +420,13 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
           stock: p.variants.reduce((n, v) => n + Math.max(0, v.inventory - v.reserved), 0),
           brand: p.vendor?.name ?? null,
           colors: [...new Set(p.variants.map((v) => v.color).filter((c): c is string => !!c))],
+          // Same hex the product page paints, keyed by colour name, so a card
+          // and the page it links to never show different swatches.
+          colorCodes: Object.fromEntries(
+            p.variants
+              .filter((v) => v.color && Array.isArray(v.colorCodes) && (v.colorCodes as unknown[]).length)
+              .map((v) => [v.color as string, (v.colorCodes as unknown[]).filter((c): c is string => typeof c === 'string')]),
+          ),
           sizes: [...new Set(p.variants.map((v) => v.size).filter((z): z is string => !!z))],
           variants: p.variants.map((v) => ({
             id: v.id, color: v.color, size: v.size, price: v.price,
@@ -611,6 +618,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
         // A colourway is a different photograph. Without these the gallery has
         // nothing to change to when the shopper picks one.
         image: v.image ?? null,
+        colorCodes: Array.isArray(v.colorCodes) ? (v.colorCodes as unknown[]).filter((c): c is string => typeof c === 'string') : [],
         images: shots.filter((g) => g.url).map((g) => ({ url: g.url!, alt: g.alt ?? '' })),
       };
     });
@@ -633,13 +641,31 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     const sizes = uniq(variants.map((v) => v.size).filter((z): z is string => !!z));
     const firstOf = (color: string) => variants.find((v) => v.color === color);
 
+    /**
+     * The swatch shows the COLOUR, from the provider's own hex codes.
+     *
+     * One code is a solid fill. Two is a hard 50/50 split rather than a blend:
+     * "Red/Natural" is a red cap with a natural panel, and a gradient between
+     * them invents a colour that is on neither. Only when the provider gives no
+     * code at all does this fall back to the variant photograph — a swatch that
+     * shows the whole product is a worse swatch, but it beats a grey box.
+     */
+    const fill = (codes: string[]): string | null => {
+      const safe = codes.filter((c) => /^#[0-9a-f]{3,8}$/i.test(c));
+      if (!safe.length) return null;
+      if (safe.length === 1) return `background:${safe[0]}`;
+      return `background:linear-gradient(135deg, ${safe[0]} 0 50%, ${safe[1]} 50% 100%)`;
+    };
+
     const swatches = colors.length > 1
       ? `<label>Colour</label>
          <div class="swatches" id="swatches">${colors.map((c, i) => {
             const v = firstOf(c)!;
-            return `<button type="button" class="swatch${i === 0 ? ' sel' : ''}" data-color="${esc(c)}" title="${esc(c)}" aria-label="${esc(c)}"${v.sellable ? '' : ' disabled'}>
-              ${v.image ? `<img src="${esc(v.image)}" alt="" loading="lazy">` : `<span class="swatch-blank"></span>`}
-            </button>`;
+            const paint = fill(v.colorCodes);
+            const inner = paint
+              ? `<span class="swatch-fill" style="${paint}"></span>`
+              : v.image ? `<img src="${esc(v.image)}" alt="" loading="lazy">` : `<span class="swatch-blank"></span>`;
+            return `<button type="button" class="swatch${i === 0 ? ' sel' : ''}" data-color="${esc(c)}" title="${esc(c)}" aria-label="${esc(c)}"${v.sellable ? '' : ' disabled'}>${inner}</button>`;
           }).join('')}</div>
          <div class="swatch-name" id="swatch-name">${esc(colors[0] ?? '')}</div>`
       : '';

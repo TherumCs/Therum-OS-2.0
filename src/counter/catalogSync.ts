@@ -32,6 +32,8 @@ export interface NormalizedVariant {
   image: string | null;
   /** Every other shot Printful renders for this variant: [{url, alt}]. */
   images: { url: string; alt: string }[];
+  /** The variant's real colours as hex, from the provider. 2 = two-tone. */
+  colorCodes: string[];
 }
 
 export interface NormalizedProduct {
@@ -129,12 +131,40 @@ const printful: CatalogProvider = {
       headers,
       'Printful',
     );
+    /**
+     * Colour HEX comes from Printful's CATALOG variant, not the sync variant —
+     * `color_code` plus `color_code2` for two-tone. Cached per catalog variant
+     * id because a store re-uses the same blank across products, and this is
+     * one HTTP call per colour otherwise.
+     *
+     * Never inferred from the colour NAME: "Red/Natural" is two colours, and a
+     * name-to-hex guess is wrong in both directions.
+     */
+    const colorCache = new Map<number, string[]>();
+    async function colorsFor(catalogVariantId: number | undefined): Promise<string[]> {
+      if (!catalogVariantId) return [];
+      const hit = colorCache.get(catalogVariantId);
+      if (hit) return hit;
+      const codes = await json<{ variant?: { color_code?: string | null; color_code2?: string | null } }>(
+        `https://api.printful.com/products/variant/${catalogVariantId}`,
+        headers,
+        'Printful',
+      )
+        .then((r) => [r.variant?.color_code, r.variant?.color_code2].filter((c): c is string => typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c)))
+        // A missing colour is not a failed sync — the swatch falls back to the
+        // variant's photograph.
+        .catch(() => [] as string[]);
+      colorCache.set(catalogVariantId, codes);
+      return codes;
+    }
+
     const out: NormalizedProduct[] = [];
     for (const s of summaries ?? []) {
       const detail = await json<{
         sync_product?: { id: number; name: string; thumbnail_url?: string };
         sync_variants?: {
           id: number; sku?: string | null; retail_price?: string | null; size?: string | null; color?: string | null;
+          variant_id?: number;
           files?: { type?: string; preview_url?: string | null }[];
           product?: { image?: string | null };
         }[];
@@ -164,8 +194,8 @@ const printful: CatalogProvider = {
         sourceId: String(p.id),
         name: p.name,
         image: previewOf('preview') ?? previewOf('default') ?? firstVariant?.product?.image ?? cdnThumb ?? null,
-        variants: (detail.sync_variants ?? [])
-          .map((v) => {
+        variants: await Promise.all((detail.sync_variants ?? [])
+          .map(async (v) => {
             const price = money(v.retail_price);
             if (price === null) return null;
             /**
@@ -198,9 +228,10 @@ const printful: CatalogProvider = {
               stockStatus: POD_STOCK,
               image,
               images: shots,
+              colorCodes: await colorsFor(v.variant_id),
             };
-          })
-          .filter((v): v is NormalizedVariant => v !== null),
+          }))
+          .then((vs) => vs.filter((v): v is NormalizedVariant => v !== null)),
       });
     }
     return out;
@@ -239,6 +270,7 @@ const printify: CatalogProvider = {
           stockStatus: POD_STOCK,
           image: null,
           images: [],
+          colorCodes: [],
         }))
         .filter((v) => v.price > 0),
     }));
@@ -318,6 +350,7 @@ export const catalogSyncService = {
               data: {
                 price: v.price,
                 ...(v.image ? { image: v.image, images: v.images } : {}),
+                ...(v.colorCodes.length ? { colorCodes: v.colorCodes } : {}),
                 ...(providerOwnsStock ? { stockStatus: v.stockStatus, inventory: v.inventory } : {}),
               },
             });

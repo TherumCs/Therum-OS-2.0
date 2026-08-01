@@ -72,6 +72,14 @@ export interface GridProduct {
   brand?: string | null;
   /** Distinct variant colours, in variant order. Drives the swatch row. */
   colors?: string[];
+  /**
+   * The provider's real hex per colour name, so the card paints the same
+   * swatch the product page does. Without it the card can only GUESS from the
+   * name via CSS named colours — which works for "navy" and fails for
+   * "Dark Green/Natural", the exact colours a print-on-demand catalogue is
+   * full of.
+   */
+  colorCodes?: Record<string, string[]>;
   /** Distinct variant sizes. Drives the size-chip row. */
   sizes?: string[];
   /**
@@ -220,7 +228,17 @@ const PRESET_ROWS: Record<CardPreset, {
  * types ("olive", "navy"); anything else falls back to a labelled chip rather
  * than a mystery grey circle that says nothing.
  */
-function swatch(color: string): string {
+function swatch(color: string, codes: string[] = []): string {
+  // The provider's own hex wins over any guess. Two codes is a hard split,
+  // not a blend: "Red/Natural" is a red cap with a natural panel, and a
+  // gradient between them invents a colour that is on neither.
+  const safe = codes.filter((c) => /^#[0-9a-f]{3,8}$/i.test(c));
+  if (safe.length) {
+    const paint = safe.length === 1
+      ? `background:${safe[0]}`
+      : `background:linear-gradient(135deg, ${safe[0]} 0 50%, ${safe[1]} 50% 100%)`;
+    return `<span class="card-swatch" style="${paint}" title="${esc(color)}" aria-label="${esc(color)}"></span>`;
+  }
   const named = /^[a-z]+$/i.test(color.trim());
   return named
     ? `<span class="card-swatch" style="background:${esc(color.toLowerCase())}" title="${esc(color)}" aria-label="${esc(color)}"></span>`
@@ -439,7 +457,7 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS, per
     + (memberPct > 0 && p.memberLabel ? `<span class="card-member">${esc(p.memberLabel)}</span>` : '');
 
   const swatches = rows.swatches && p.colors?.length
-    ? `<div class="card-swatches">${p.colors.slice(0, 6).map(swatch).join('')}${p.colors.length > 6 ? `<span class="card-swatch card-swatch--more">+${p.colors.length - 6}</span>` : ''}</div>`
+    ? `<div class="card-swatches">${p.colors.slice(0, 6).map((c) => swatch(c, p.colorCodes?.[c] ?? [])).join('')}${p.colors.length > 6 ? `<span class="card-swatch card-swatch--more">+${p.colors.length - 6}</span>` : ''}</div>`
     : '';
 
   // Size chips LINK to the PDP with the size preselected — they are not a

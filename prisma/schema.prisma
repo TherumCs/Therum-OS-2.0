@@ -183,6 +183,17 @@ model ProductVariant {
   image          String?
   /** Extra shots for this specific variant: [{url, alt}]. */
   images         Json     @default("[]")
+
+  /**
+   * The actual colours of this variant, as hex: ["#c70b3c", "#f9e9d1"].
+   *
+   * Taken from the provider, never inferred from the name. Printful publishes
+   * `color_code` and `color_code2` per catalog variant, and a name like
+   * "Red/Natural" is two colours — guessing a single hex from that word would
+   * be wrong in both directions. One entry renders a solid swatch, two render
+   * a split.
+   */
+  colorCodes     Json     @default("[]") @map("color_codes")
   meta           Json     @default("{}")
   createdAt      DateTime @default(now()) @map("created_at")
   updatedAt      DateTime @updatedAt @map("updated_at")
