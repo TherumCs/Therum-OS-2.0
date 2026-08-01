@@ -33,7 +33,12 @@ const CSS = `
 *{box-sizing:border-box;margin:0;padding:0}
 body{font-family:var(--f);background:var(--bg);color:var(--tx);line-height:1.55;-webkit-font-smoothing:antialiased}
 a{color:inherit;text-decoration:none}
-.wrap{max-width:1080px;margin:0 auto;padding:0 24px}
+/* Same knob the rest of the site uses (Settings > Site > Content width).
+   This was a literal 1080px, so the shop stayed narrow at every setting and
+   at every viewport — cards got thinner as columns went up instead of the
+   grid getting wider. The fallback is the old value, so a page rendered
+   without the variable looks exactly as it did. */
+.wrap{max-width:var(--th-site-max,1080px);margin:0 auto;padding:0 24px}
 header.site{background:var(--sf);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:10}
 header.site .wrap{display:flex;align-items:center;justify-content:space-between;height:64px}
 .brand{font-weight:700;font-size:17px;letter-spacing:-0.01em;display:flex;align-items:center;gap:10px}
@@ -357,7 +362,7 @@ export interface StoreChrome {
  * filters and the product-card behaviour, none of which the site chrome knows
  * about. Only the frame is replaced.
  */
-export function layout(title: string, body: string, extraScript = '', chrome?: StoreChrome, seo?: SeoMeta): string {
+export function layout(title: string, body: string, extraScript = '', chrome?: StoreChrome, seo?: SeoMeta, siteMax?: string): string {
   const header = chrome?.header
     ? `<div id="brx-header">${chrome.header}</div>`
     : `<header class="site"><div class="wrap">
@@ -374,10 +379,10 @@ export function layout(title: string, body: string, extraScript = '', chrome?: S
   // Only the ported header carries the cart/search/wishlist hooks; the
   // fallback chrome above has its own plain cart link and needs none of it.
   const headerIcons = chrome?.header ? chrome.headerIcons ?? HEADER_CART_DEFAULTS : null;
-  return layoutInner(title, body, extraScript, header, footer, themeCss, headerIcons, seo);
+  return layoutInner(title, body, extraScript, header, footer, themeCss, headerIcons, seo, siteMax);
 }
 
-function layoutInner(title: string, body: string, extraScript: string, header: string, footer: string, themeCss: string, headerIcons: HeaderCartConfig | null = null, seo?: SeoMeta): string {
+function layoutInner(title: string, body: string, extraScript: string, header: string, footer: string, themeCss: string, headerIcons: HeaderCartConfig | null = null, seo?: SeoMeta, siteMax?: string): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -386,7 +391,7 @@ function layoutInner(title: string, body: string, extraScript: string, header: s
 <title>${esc(title)}</title>
 ${seoTags(title, seo)}
 ${themeCss}
-<style>${CSS}${BANNER_STYLES}${PRODUCT_GRID_FALLBACK_CSS}${CHECKOUT_FLOW_CSS}${SHOP_TOOLBAR_CSS}${WISHLIST_CSS}${ACCOUNT_CSS}${headerIcons ? HEADER_CART_CSS : ''}</style>
+<style>:root{--th-site-max:${siteMax ?? '1080px'}}${CSS}${BANNER_STYLES}${PRODUCT_GRID_FALLBACK_CSS}${CHECKOUT_FLOW_CSS}${SHOP_TOOLBAR_CSS}${WISHLIST_CSS}${ACCOUNT_CSS}${headerIcons ? HEADER_CART_CSS : ''}</style>
 </head>
 <body>
 <div id="th-shell">

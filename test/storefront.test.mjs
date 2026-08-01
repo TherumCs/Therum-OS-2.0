@@ -165,3 +165,43 @@ test('QUICK CHECKOUT ORDER: details before payment, and the strip is not in the 
   // "data-mgroup", which also appears in the inline script that builds it.
   assert.match(res.body, /data-pay-methodwrap><\/div>/, 'the method host ships empty and fills on demand');
 });
+
+test('SHOP COLUMNS: the setting reaches the grid AND the cards, server-side', async () => {
+  const { settingsService } = await import('../dist/services/settings.service.js');
+  const saved = await settingsService.getCounter();
+  try {
+    for (const n of [2, 3, 4]) {
+      await settingsService.setCounter({ toolbarColumns: n });
+      const res = await app.inject({ method: 'GET', url: '/shop' });
+      assert.equal(res.statusCode, 200);
+
+      // data-cols is what the stylesheet actually keys off, and it is rendered
+      // server-side so the grid is right before any JS runs.
+      assert.match(res.body, new RegExp(`data-cols="${n}"`), `grid carries data-cols=${n}`);
+
+      // And the ITEM class, which is what the ported theme sizes cards with
+      // (width: calc(100% / N)). This was hardcoded to 4, so changing the
+      // setting moved the list's class and left every card at quarter width.
+      assert.match(res.body, new RegExp(`c-product-grid__item--${n}-per-row`), `cards carry --${n}-per-row`);
+      if (n !== 4) {
+        assert.doesNotMatch(res.body, /c-product-grid__item--4-per-row/, 'no stale 4-per-row on the cards');
+      }
+    }
+  } finally {
+    await settingsService.setCounter(saved);
+  }
+});
+
+test('SHOP COLUMNS: one system owns the count, and it steps down on small screens', async () => {
+  const res = await app.inject({ method: 'GET', url: '/shop' });
+
+  // The fallback stylesheet used to carry a SECOND column system (a hardcoded
+  // repeat(4,1fr) plus its own breakpoints) that competed with the toolbar's
+  // data-cols rules. Whichever loaded last won, which is not a setting.
+  assert.doesNotMatch(res.body, /\.c-product-grid__list\{display:grid;grid-template-columns:repeat\(4,1fr\)/,
+    'no hardcoded 4-column fallback');
+
+  for (const bp of ['1023px', '820px', '560px']) {
+    assert.ok(res.body.includes(`max-width:${bp}`), `steps down at ${bp}`);
+  }
+});

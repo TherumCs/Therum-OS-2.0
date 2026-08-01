@@ -231,7 +231,13 @@ function stars(r: { average: number; count: number }): string {
   return `<span class="card-rating" aria-label="${r.average.toFixed(1)} out of 5">★ ${r.average.toFixed(2)}<span class="card-rating__n">(${r.count})</span></span>`;
 }
 
-export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS): string {
+/**
+ * `perRow` is not decoration on the item — the ported theme sizes cards with
+ * `width: calc(100% / N)` keyed off `.c-product-grid__item--N-per-row`, so this
+ * class IS the column width. It used to be hardcoded to 4, which is why moving
+ * the Columns setting changed the class on the LIST and nothing about the cards.
+ */
+export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS, perRow = 4): string {
   // Per-product overrides beat the store-wide setting. Everything else about
   // the card still comes from settings, so one odd product does not become a
   // second card implementation.
@@ -468,7 +474,7 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS): st
        <div class="c-product-grid__price-wrap">${priceEl}</div>`;
 
   return `
-<div class="c-product-grid__item c-product-grid__item--4-per-row c-product-grid__item--1-per-row-mobile product counter-product card-shell-${cfg.shell} card-preset-${p.presetOverride ?? cfg.preset} card-media-${media} card-align-${cfg.align} card-radius-${cfg.radius} card-ratio-${cfg.ratio} card-fit-${cfg.fit} card-shadow-${cfg.shadow}${cfg.hover === 'none' ? '' : ` card-hover-${cfg.hover}`}${cfg.reveal === 'none' ? '' : ` card-reveal card-reveal--${cfg.reveal}`}${soldOut ? ' is-sold-out' : ''}">
+<div class="c-product-grid__item c-product-grid__item--${perRow}-per-row c-product-grid__item--1-per-row-mobile product counter-product card-shell-${cfg.shell} card-preset-${p.presetOverride ?? cfg.preset} card-media-${media} card-align-${cfg.align} card-radius-${cfg.radius} card-ratio-${cfg.ratio} card-fit-${cfg.fit} card-shadow-${cfg.shadow}${cfg.hover === 'none' ? '' : ` card-hover-${cfg.hover}`}${cfg.reveal === 'none' ? '' : ` card-reveal card-reveal--${cfg.reveal}`}${soldOut ? ' is-sold-out' : ''}">
   <div class="c-product-grid__thumb-wrap c-product-grid__thumb-wrap--buttons card-media" data-stills='${esc(JSON.stringify(stills.map((s) => s.url)))}'>
     <a href="${href}" class="woocommerce-LoopProduct-link woocommerce-loop-product__link">${thumb}</a>
     ${markStrip}
@@ -497,8 +503,8 @@ export function productGrid(products: GridProduct[], perRow = 4, cfg: CardConfig
 <div class="c-product-grid">
   <div class="c-product-grid__wrap c-product-grid__wrap--${perRow}-per-row c-product-grid__wrap--1-per-row-mobile c-product-grid__wrap--boxed c-product-grid__wrap--cnt-${products.length}">
     <div class="c-product-grid__list c-product-grid__list--${perRow}-per-row c-product-grid__list--boxed c-product-grid__list--1-per-row-mobile card-gap-${cfg.gap}"
-         data-count="${products.length}" data-layout="${perRow}-per-row" data-layout-width="boxed" data-layout-mobile="1-per-row-mobile">
-      ${products.map((p) => productCard(p, cfg)).join('')}
+         data-cols="${perRow}" data-count="${products.length}" data-layout="${perRow}-per-row" data-layout-width="boxed" data-layout-mobile="1-per-row-mobile">
+      ${products.map((p) => productCard(p, cfg, perRow)).join('')}
     </div>
   </div>
 </div>`;
@@ -960,9 +966,12 @@ export const CARD_EVOLVE_RUNTIME = `
 
 /** Fallback styling, so the grid is usable even before the theme CSS loads. */
 export const PRODUCT_GRID_FALLBACK_CSS = `
-.c-product-grid__list{display:grid;grid-template-columns:repeat(4,1fr);gap:24px}
-@media(max-width:1189px){.c-product-grid__list{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:767px){.c-product-grid__list{grid-template-columns:1fr}}
+/* Columns live in ONE place: the data-cols attribute, styled in
+   shopToolbar.ts. This file used to carry a second, competing system —
+   a hardcoded repeat(4,1fr) plus media queries — which the toolbar's rules
+   overrode anyway because they load later. Two systems meant the visible
+   column count came from whichever happened to win, not from the setting. */
+.c-product-grid__list{display:grid;gap:24px}
 .c-product-grid__thumb-wrap{position:relative;overflow:hidden;aspect-ratio:1/1;background:var(--background-color-dark,#f2f2f2)}
 .c-product-grid__thumb{width:100%;height:100%;object-fit:cover;display:block}
 .c-product-grid__details{padding:12px 0;display:flex;flex-direction:column;gap:8px}

@@ -263,6 +263,28 @@ export const SHOP_TOOLBAR_CSS = `
 .c-product-grid__list[data-cols="4"]{grid-template-columns:repeat(4,1fr)}
 .c-product-grid__list[data-cols="5"]{grid-template-columns:repeat(5,1fr)}
 .c-product-grid__list[data-cols="6"]{grid-template-columns:repeat(6,1fr)}
+/* Step DOWN on smaller screens rather than shrinking the cards. A 4-up grid on
+   a tablet is four 175px cards; on a phone it is four 80px ones. These rules
+   are attribute-qualified like the ones above so they share a specificity and
+   the narrower breakpoint simply wins by coming later. */
+@media(max-width:1189px){
+  .c-product-grid__list[data-cols="5"],
+  .c-product-grid__list[data-cols="6"]{grid-template-columns:repeat(4,1fr)}
+}
+@media(max-width:1023px){
+  .c-product-grid__list[data-cols="4"],
+  .c-product-grid__list[data-cols="5"],
+  .c-product-grid__list[data-cols="6"]{grid-template-columns:repeat(3,1fr)}
+}
+@media(max-width:820px){
+  .c-product-grid__list[data-cols]:not([data-cols="1"]){grid-template-columns:repeat(2,1fr)}
+}
+/* Same :not() shape as the rule above ON PURPOSE. Written as plain
+   [data-cols] it scored one selector lower and the 820px rule kept winning at
+   390px, so phones got two ~159px cards instead of one full-width one. */
+@media(max-width:560px){
+  .c-product-grid__list[data-cols]:not([data-cols="0"]){grid-template-columns:1fr}
+}
 .c-product-grid__list.is-list{display:block}
 .c-product-grid__list.is-list .c-product-grid__item{display:flex;gap:18px;align-items:center;
   padding:14px 0;border-bottom:1px solid var(--ln,#eee)}
@@ -427,6 +449,16 @@ export const SHOP_TOOLBAR_RUNTIME = `
   // device's own choice once the shopper makes one. Reading a hardcoded 4 here
   // meant the setting was ignored on every first visit.
   var fallback = parseInt(bar.getAttribute('data-cols') || '4', 10) || 4;
+  // A shopper's own choice wins over the store default — but only until the
+  // merchant changes that default. The basis is the default the choice was
+  // made against; when it no longer matches, the stored value is stale and is
+  // dropped. Without this, anyone who ever touched the columns control saw
+  // their old number forever and the Settings change looked broken.
+  var KEY_B = 'therum_shop_cols_basis';
+  var storedBasis = parseInt(localStorage.getItem(KEY_B) || '0', 10);
+  if (storedBasis && storedBasis !== fallback) {
+    try { localStorage.removeItem(KEY_C); localStorage.removeItem(KEY_B); } catch (e) {}
+  }
   var cols = parseInt(localStorage.getItem(KEY_C) || String(fallback), 10) || fallback;
   var colsValue = bar.querySelector('[data-cols-value]');
   var colsWrap = bar.querySelector('[data-cols-wrap]');
@@ -457,6 +489,7 @@ export const SHOP_TOOLBAR_RUNTIME = `
     b.addEventListener('click', function(){
       cols = Number(b.getAttribute('data-cols')) || 4;
       localStorage.setItem(KEY_C, String(cols));
+      localStorage.setItem(KEY_B, String(fallback));
       apply();
       closeAll(null);
     });

@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { db } from '../../lib/db.js';
 import { capabilityService } from '../../services/capability.service.js';
 import { layout, closedPage, esc, money, type StoreChrome, type SeoMeta } from '../../site/storefrontHtml.js';
+import { SITE_WIDTHS } from '../../site/siteHtml.js';
 import { buildNav } from './site.js';
 import { resolveCategoryPath, resolveCategoryFilter, categoryAndDescendantIds, categoryFacets } from '../../counter/categoryTree.js';
 import { settingsService } from '../../services/settings.service.js';
@@ -87,7 +88,11 @@ async function commerceOn(): Promise<boolean> {
  * frame instead of 500ing a checkout.
  */
 async function page(title: string, body: string, extraScript = '', seo?: SeoMeta): Promise<string> {
-  return layout(title, body, extraScript, await storeChrome(), seo);
+  // Content width comes from the same setting the rest of the site reads, so
+  // the shop is not the one page that stays narrow when everything else widens.
+  const site = await settingsService.getSite().catch(() => null);
+  const siteMax = SITE_WIDTHS[site?.contentWidth ?? 'wide'] ?? SITE_WIDTHS.wide;
+  return layout(title, body, extraScript, await storeChrome(), seo, siteMax);
 }
 
 /**

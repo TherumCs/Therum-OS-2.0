@@ -170,7 +170,7 @@ export interface SitePage {
 // The one place the storefront column width is decided. It used to be a
 // literal 1180px inside the stylesheet, which is why it kept reverting: every
 // fix was applied somewhere else and this constant won.
-const SITE_WIDTHS: Record<string, string> = {
+export const SITE_WIDTHS: Record<string, string> = {
   narrow: '1180px',
   normal: '1320px',
   wide: '1440px',
