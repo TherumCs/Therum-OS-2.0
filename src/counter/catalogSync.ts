@@ -389,6 +389,30 @@ export const catalogSyncService = {
         result.created++;
       }
     }
+
+    /**
+     * Fill in the photography Printful will not hand over.
+     *
+     * Its sync API returns ONE rendered preview per variant — the selected
+     * mockups are pushed to a connected store, never exposed for pulling — so
+     * without this a newly synced colourway arrives with a single angle. The
+     * generator renders the rest from the same artwork.
+     *
+     * Deliberately best-effort: mockup generation is slow and rate-limited, and
+     * a catalogue sync that fails because a picture did not render would be a
+     * worse trade than a product that starts with one image and gains the rest
+     * on the next run. Only variants with NO image are touched.
+     */
+    if (provider.id === 'printful') {
+      try {
+        const { printfulMockups } = await import('./printfulMockups.js');
+        for (const p of await printfulMockups.productsNeedingMockups()) {
+          await printfulMockups.generate(p.id, { onlyMissing: true });
+        }
+      } catch {
+        // Reported by the next run's missing-count rather than failing this one.
+      }
+    }
     return result;
   },
 };
