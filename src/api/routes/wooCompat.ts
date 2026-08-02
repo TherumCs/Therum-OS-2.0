@@ -457,6 +457,30 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     }
     const app_name = escapeHtml(q.app_name!);
     const params = new URLSearchParams(q as Record<string, string>).toString();
+
+    /**
+     * THE APPROVE BUTTON DID NOTHING, and this is why.
+     *
+     * helmet's default policy on this page includes `form-action 'self'`.
+     * Approving POSTs to this same origin — allowed — but the store then
+     * REDIRECTS the browser to the partner's return_url, and Safari enforces
+     * form-action across that redirect. The POST ran, the keys were delivered,
+     * and the browser silently refused to follow the hop: from the merchant's
+     * side the button was simply dead.
+     *
+     * The policy is narrowed to exactly the two hosts this flow needs — this
+     * store, and the partner's own return address, which was validated above.
+     * Not a blanket `form-action *`.
+     */
+    const returnHost = (() => {
+      try { return new URL(q.return_url!).origin; } catch { return null; }
+    })();
+    reply.header(
+      'content-security-policy',
+      "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+      "script-src 'none'; base-uri 'self'; frame-ancestors 'none'; " +
+      `form-action 'self'${returnHost ? ` ${returnHost}` : ''}`,
+    );
     reply.type('text/html; charset=utf-8').send(`<!doctype html>
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Connect ${app_name}</title>
