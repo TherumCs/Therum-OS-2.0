@@ -2084,8 +2084,12 @@ tr:hover .th-rowactions, tr:focus-within .th-rowactions { opacity: 1; }
 /* Scrolls, so the whole page can be walked through rather than just its fold.
    The iframe is rendered wide and scaled, so what you scroll is the desktop
    layout — not the mobile one the narrow column would otherwise trigger. */
-.th-pv-frame { height: 620px; border: 1px solid var(--th-line); border-radius: 12px; overflow-y: auto; overflow-x: hidden; background: #fff; }
-.th-pv-frame iframe { border: 0; display: block; }
+.th-pv-frame--card { height: 560px; }
+.th-pv-frame { position: relative; width: 100%; height: 620px; border: 1px solid var(--th-line); border-radius: 12px; overflow-y: auto; overflow-x: hidden; background: #fff; }
+/* Out of flow: an in-flow 1280px child makes its own container 1280px wide,
+   so every attempt to measure the available space returned the child's width
+   and the preview never scaled down. */
+.th-pv-frame iframe { position: absolute; top: 0; left: 0; border: 0; display: block; }
 
 /* Look controls, sitting under the preview they change. */
 .th-look { margin-top: 16px; border: 1px solid var(--th-line); border-radius: 12px; padding: 16px; background: var(--th-surface); }

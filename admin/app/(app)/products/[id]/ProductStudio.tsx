@@ -110,7 +110,14 @@ export function ProductStudio({
   useEffect(() => {
     const el = frameBox.current;
     if (!el) return;
-    const fit = () => setFrameScale(Math.min(1, el.clientWidth / FRAME_W));
+    // The parent, not the frame itself: the frame CONTAINS the 1280px child,
+    // so measuring it is circular and reports the child's width — which is why
+    // the preview rendered at full size and spilled across the admin.
+    // The iframe is positioned OUT OF FLOW, so the frame's own width is now a
+    // true measure of the space available rather than a reflection of its
+    // 1280px child. Measuring the child's container while the child defines it
+    // is what pinned the scale at half the column.
+    const fit = () => setFrameScale(Math.min(1, (el.clientWidth || FRAME_W) / FRAME_W));
     fit();
     const ro = new ResizeObserver(fit);
     ro.observe(el);
@@ -164,6 +171,20 @@ export function ProductStudio({
     // rather than re-styled in place.
     setFrameKey((k) => k + 1);
   }
+
+  const lookBool = (label: string, key: string) => (
+    <label className="th-look__field" key={key}>
+      <span>{label}</span>
+      <select
+        value={String(look[key] ?? 'false')}
+        disabled={!lookLoaded}
+        onChange={(e) => void saveLook({ [key]: e.target.value === 'true' } as unknown as Record<string, string>)}
+      >
+        <option value="true">On</option>
+        <option value="false">Off</option>
+      </select>
+    </label>
+  );
 
   const lookRow = (label: string, key: string, options: [string, string][]) => (
     <label className="th-look__field" key={key}>
@@ -298,17 +319,20 @@ export function ProductStudio({
 
       <div className="th-studio__canvas">
         {preview === 'card' ? (
-          <div className="th-pv-card">
-            <div className="th-pv-card__media">
-              {p.image ? <img src={p.image} alt={p.name} /> : <span className="th-hint">No image</span>}
-            </div>
-            <div className="th-pv-card__body">
-              <div className="th-pv-card__name">{p.name || 'Untitled product'}</div>
-              {!!p.categories.length && <div className="th-pv-card__sub">{p.categories[0]?.name}</div>}
-              <div className="th-pv-card__price">
-                {p.variants.length > 1 ? `From ${money(lowest)}` : money(lowest)}
-              </div>
-            </div>
+          /* The REAL card, built by the shop's own code path with the store's
+             own settings. The hand-built mock could not honour the sixteen
+             card settings, so it disagreed with the shop the moment any of
+             them was touched. */
+          <div className="th-pv-frame th-pv-frame--card" ref={frameBox}>
+            <iframe
+              key={`card-${frameKey}`}
+              title="Card preview"
+              src={`/shop?preview=card&q=${encodeURIComponent(p.name)}`}
+              style={{ width: FRAME_W, height: 1100, transform: `scale(${frameScale})`, transformOrigin: '0 0' }}
+            />
+            {/* Gives the scroll container the SCALED height — without it the
+                box either clips the page or scrolls past its end. */}
+            <div style={{ height: Math.round(1100 * frameScale) }} aria-hidden="true" />
           </div>
         ) : (
           /* The REAL page, in a scrolling frame. A hand-built mock drifts from
@@ -320,8 +344,9 @@ export function ProductStudio({
               title="Product page preview"
               src={`/product/${p.slug}`}
               loading="lazy"
-              style={{ width: FRAME_W, height: Math.round(1600 / frameScale), transform: `scale(${frameScale})`, transformOrigin: '0 0' }}
+              style={{ width: FRAME_W, height: 2200, transform: `scale(${frameScale})`, transformOrigin: '0 0' }}
             />
+            <div style={{ height: Math.round(2200 * frameScale) }} aria-hidden="true" />
           </div>
         )}
       </div>
@@ -336,7 +361,21 @@ export function ProductStudio({
           {preview === 'card' ? (
             <>
               {lookRow('Layout', 'cardPreset', [['editorial', 'Editorial'], ['retail', 'Retail'], ['detailed', 'Detailed'], ['sneaker', 'Sneaker'], ['data', 'Data']])}
+              {lookRow('Shell', 'cardShell', [['bare', 'Bare'], ['boxed', 'Boxed'], ['elevated', 'Elevated']])}
               {lookRow('Hover media', 'cardMedia', [['auto', 'Auto — follow the product'], ['still', 'Still'], ['fade', 'Fade'], ['gallery', 'Gallery arrows'], ['motion', 'Play video']])}
+              {lookRow('Second image', 'cardMediaSecondary', [['still', 'Still'], ['auto', 'Auto'], ['fade', 'Fade'], ['gallery', 'Gallery arrows'], ['motion', 'Play video']])}
+              {lookRow('Action', 'cardAction', [['none', 'None'], ['below', 'Below'], ['overlay', 'Overlay'], ['dual', 'Two buttons'], ['icons', 'Icons']])}
+              {lookRow('Shape', 'cardRatio', [['square', 'Square'], ['portrait', 'Portrait'], ['tall', 'Tall'], ['landscape', 'Landscape'], ['natural', 'Natural']])}
+              {lookRow('Image fit', 'cardFit', [['cover', 'Cover — fills, may crop'], ['contain', 'Contain — whole product']])}
+              {lookRow('Corners', 'cardRadius', [['sharp', 'Sharp'], ['soft', 'Soft'], ['round', 'Round'], ['pill', 'Pill'], ['squircle', 'Squircle']])}
+              {lookRow('Align', 'cardAlign', [['start', 'Left'], ['center', 'Centre'], ['end', 'Right']])}
+              {lookRow('Shadow', 'cardShadow', [['none', 'None'], ['soft', 'Soft'], ['strong', 'Strong']])}
+              {lookRow('Hover', 'cardHover', [['none', 'None'], ['lift', 'Lift'], ['zoom', 'Zoom'], ['both', 'Lift + zoom']])}
+              {lookRow('Spacing', 'cardGap', [['tight', 'Tight'], ['normal', 'Normal'], ['roomy', 'Roomy']])}
+              {lookRow('Reveal', 'cardReveal', [['none', 'None'], ['fade', 'Fade'], ['rise', 'Rise'], ['stagger', 'Stagger']])}
+              {lookBool('Subtitle', 'cardSubtitle')}
+              {lookBool('Badges', 'cardBadges')}
+              {lookBool('In-card picker', 'cardEvolve')}
             </>
           ) : (
             <>

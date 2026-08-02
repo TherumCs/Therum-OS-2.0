@@ -3,13 +3,13 @@ import { PAGE_CSP } from '../../site/pageCsp.js';
 import { timingSafeEqual } from 'node:crypto';
 import { db } from '../../lib/db.js';
 import { capabilityService } from '../../services/capability.service.js';
-import { layout, closedPage, esc, money, type StoreChrome, type SeoMeta } from '../../site/storefrontHtml.js';
+import { layout, closedPage, esc, money, CSS, type StoreChrome, type SeoMeta } from '../../site/storefrontHtml.js';
 import { SITE_WIDTHS } from '../../site/siteHtml.js';
 import { cached } from '../../lib/cache.js';
 import { buildNav } from './site.js';
 import { resolveCategoryPath, resolveCategoryFilter, categoryAndDescendantIds, categoryFacets } from '../../counter/categoryTree.js';
 import { settingsService } from '../../services/settings.service.js';
-import { productGrid, CARD_EVOLVE_RUNTIME, CARD_REVEAL_RUNTIME, type CardPreset } from '../../site/productGrid.js';
+import { productGrid, PRODUCT_GRID_FALLBACK_CSS, CARD_EVOLVE_RUNTIME, CARD_REVEAL_RUNTIME, type CardPreset } from '../../site/productGrid.js';
 import { resolveCustomer } from '../../counter/customerSession.js';
 import { milieuService } from '../../services/milieu.service.js';
 
@@ -495,6 +495,32 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
         wishlist: counter.wishlistEnabled && counter.wishlistOnCards,
       },
     );
+
+    /**
+     * BARE CARD PREVIEW — `?preview=card`.
+     *
+     * The admin's card preview used to be a hand-built mock, so it could not
+     * honour the sixteen card settings and silently disagreed with the shop.
+     * This returns the REAL card, built by the same code path with the same
+     * settings, and nothing else: no toolbar, no filters, no chrome.
+     *
+     * noindex, and it renders only what /shop would already render for the
+     * same visitor — so it exposes nothing the shop does not.
+     */
+    if ((req.query as { preview?: string }).preview === 'card') {
+      reply.header('content-security-policy', PAGE_CSP);
+      reply.header('x-robots-tag', 'noindex');
+      return reply.type('text/html; charset=utf-8').send(
+        `<!doctype html><html><head><meta charset="utf-8">
+         <meta name="viewport" content="width=device-width,initial-scale=1">
+         <meta name="robots" content="noindex">
+         <style>:root{--th-site-max:100%}${CSS}${PRODUCT_GRID_FALLBACK_CSS}
+           body{margin:0;padding:18px;background:var(--bg,#fff);display:flex;justify-content:center}
+           .c-product-grid__list{max-width:340px}</style>
+         </head><body>${cards}</body></html>`,
+      );
+    }
+
 
     const keep = [
       ...(category ? [{ name: 'category', value: esc(category) }] : []),

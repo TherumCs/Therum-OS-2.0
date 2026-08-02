@@ -21,7 +21,7 @@ export function money(minor: number, currency = 'USD'): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(minor / 100);
 }
 
-const CSS = `
+export const CSS = `
 :root{
   /* Action colour is the THEME's button colour (--button-color in the ported
      chrome), not a framework blue. The storefront shipped #3858e9, which
