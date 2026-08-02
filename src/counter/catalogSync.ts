@@ -335,7 +335,7 @@ export const catalogSyncService = {
         for (const v of p.variants) {
           const found = await db.productVariant.findFirst({
             where: { productId: existing.id, sourceId: v.sourceId },
-            select: { id: true, stockStatus: true, inventory: true },
+            select: { id: true, stockStatus: true, inventory: true, image: true },
           });
           if (found) {
             // Images and price are the provider's to own. `inventory` is NOT
@@ -355,7 +355,15 @@ export const catalogSyncService = {
               where: { id: found.id },
               data: {
                 price: v.price,
-                ...(v.image ? { image: v.image, images: v.images } : {}),
+                // Images are set ONLY when the variant has none.
+                //
+                // The provider's single rendered preview must not overwrite the
+                // photographs the merchant actually chose. Printful pushes the
+                // mockups it was told to publish INTO the store rather than
+                // exposing them for pulling, so those sets are richer than
+                // anything a re-sync can fetch — clobbering them would silently
+                // undo the whole gallery on the next sync.
+                ...(v.image && !found.image ? { image: v.image, images: v.images } : {}),
                 ...(v.colorCodes.length ? { colorCodes: v.colorCodes } : {}),
                 ...(providerOwnsStock ? { stockStatus: v.stockStatus, inventory: v.inventory } : {}),
               },
