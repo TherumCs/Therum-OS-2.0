@@ -175,8 +175,16 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
    One markup tree, four arrangements. The page is a two-column grid by
    default; each style re-arranges it rather than re-rendering it, so a layout
    change can never lose a control the way a second template would. */
-.pdp{display:grid;gap:36px;align-items:start}
-.pdp--classic{grid-template-columns:minmax(0,1.1fr) minmax(0,.9fr)}
+.pdp{display:grid;gap:44px;align-items:start;max-width:min(var(--th-site-max,1080px),1320px);margin:0 auto;padding:0 24px}
+/* A layout that ignores the site's own gutters stops being part of the site.
+   The full-bleed styles still READ as edge-to-edge because their imagery fills
+   the column — they simply stop escaping the grid the rest of the pages sit
+   on, which is what made the hero touch the browser chrome. */
+/* The details column is BOUNDED, not a fraction. As a 0.9fr it grew with the
+   viewport while its content did not, so a wide screen put ~300px of text in a
+   ~640px column and the slack read as dead space on the right of the page.
+   Bounding it hands the width back to the image instead. */
+.pdp--classic{grid-template-columns:minmax(0,1fr) minmax(300px,420px)}
 /* Image side is a column ORDER, not a different DOM order — the gallery stays
    first in the source so a screen reader and a keyboard meet the product
    before the form, whichever side it is painted on. */
@@ -189,7 +197,7 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 .pdp--apple .gallery-main{height:min(62vh,620px)}
 .pdp--apple .gallery-main img{width:100%;height:100%;object-fit:contain}
 .pdp--apple .pdp__info{max-width:560px}
-.pdp--apple .variant-picker,.pdp--apple .swatches{justify-content:center}
+.pdp--apple .variant-picker,.pdp--apple .swatches,.pdp--apple .gallery-strip{justify-content:center}
 .pdp--apple .product-title{font-size:clamp(28px,4vw,44px);letter-spacing:-.02em;line-height:1.1}
 .pdp--apple .price{font-size:20px}
 
@@ -201,23 +209,26 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
    the arrangement only becomes visible once the image stops being the page. */
 .pdp--athletic .gallery-main{height:min(60vh,600px)}
 .pdp--athletic .gallery-main img{width:100%;height:100%;object-fit:cover}
-.pdp--athletic .gallery-strip{display:flex;gap:2px}
-.pdp--athletic .pdp__info{position:relative;margin:-140px 0 0 auto;width:min(420px,92%);background:var(--sf);border:1px solid var(--bd2);border-radius:var(--radius-md);padding:24px;z-index:2;box-shadow:0 18px 48px rgba(0,0,0,.10)}
+.pdp--athletic .gallery-strip{display:flex;gap:10px;justify-content:flex-start}
+.pdp--athletic .pdp__info{position:relative;margin:-120px 24px 0 auto;width:min(400px,100%);background:var(--sf);border:1px solid var(--bd2);border-radius:var(--radius-md);padding:24px;z-index:2;box-shadow:0 18px 48px rgba(0,0,0,.10)}
 @media(max-width:900px){.pdp--athletic .pdp__info{margin:16px auto 0}}
 
 /* Editorial: oversized wordmark, overlapping hero, price inside the button. */
 .pdp--editorial{grid-template-columns:minmax(0,1fr);gap:0}
 .pdp--editorial .pdp__wordmark{font-size:clamp(56px,13vw,168px);line-height:.82;letter-spacing:-.04em;font-weight:800;text-transform:uppercase;margin:0 0 -.14em;overflow-wrap:anywhere}
-.pdp--editorial .pdp__media{position:relative;z-index:1;max-width:760px}
+/* Fills its column. Capped at 760 the hero left ~600px of dead page to its
+   right, which is not an editorial composition — it is a narrow layout in a
+   wide container. */
+.pdp--editorial .pdp__media{position:relative;z-index:1}
 .pdp--editorial .gallery-main{height:min(56vh,560px)}
 .pdp--editorial .gallery-main img{width:100%;height:100%;object-fit:cover}
-.pdp--editorial .pdp__info{max-width:620px;margin-top:28px}
+.pdp--editorial .pdp__info{max-width:760px;margin-top:28px}
 .pdp--editorial .product-title{display:none}
 .pdp--editorial .trust-row{display:flex;gap:24px;margin:14px 0 0;font-size:12px;color:var(--tx2,var(--tx));opacity:.8}
 
 /* Thumbnails beside the main image instead of under it. */
-.pdp--thumbside .gallery{display:grid;grid-template-columns:64px minmax(0,1fr);gap:10px;align-items:start}
-.pdp--thumbside .gallery-strip{display:grid;grid-auto-rows:64px;gap:8px;order:-1}
+.pdp--thumbside .gallery{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;align-items:start}
+.pdp--thumbside .gallery-strip{display:grid;grid-auto-rows:72px;gap:10px;order:-1;margin-top:0}
 .pdp--thumbnone .gallery-strip{display:none}
 .product-hero{display:grid;grid-template-columns:1fr 1fr;gap:36px;align-items:start}
 @media(max-width:860px){.product-hero{grid-template-columns:1fr}}
@@ -233,8 +244,14 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 .filter-chip:hover{color:var(--tx);border-color:var(--tx3)}
 .filter-chip.active{background:var(--ac-btn);border-color:var(--ac-btn);color:#fff}
 .gallery-main{margin-bottom:10px}
-.gallery-strip{display:flex;gap:8px;flex-wrap:wrap}
-.gallery-thumb{width:64px;height:64px;border-radius:var(--radius-md);border:2px solid transparent;padding:0;overflow:hidden;cursor:pointer;background:var(--sf2)}
+.gallery-strip{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;align-items:flex-start}
+/* One size everywhere, square, and aligned to the gallery's left edge. The
+   strip used to inherit whatever the layout gave it, so the same product
+   showed 64px thumbs in one style and stretched ones in another. */
+.gallery-thumb{width:72px;height:72px;flex:0 0 72px;border-radius:var(--radius-md);border:1px solid var(--bd2);padding:0;overflow:hidden;cursor:pointer;background:var(--sf2);transition:border-color var(--e)}
+.gallery-thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.gallery-thumb:hover{border-color:var(--tx)}
+.gallery-thumb.sel{border-color:var(--ac-btn);border-width:2px}
 .gallery-thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .gallery-thumb.sel{border-color:var(--ac-btn)}
 .product-desc{margin-top:22px;padding-top:18px;border-top:1px solid var(--bd);font-size:14px;color:var(--tx2);line-height:1.7}
