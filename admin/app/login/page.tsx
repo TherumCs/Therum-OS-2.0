@@ -43,9 +43,12 @@ export const dynamic = 'force-dynamic';
 // sign-in form only, no way to reach setup (the backend refuses it anyway —
 // see auth.service.ts's setup() — this just stops the dead end being offered
 // in the UI at all).
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ from?: string }> }) {
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ from?: string; next?: string }> }) {
   const params = await searchParams;
   const [setupNeeded, mode, branding] = await Promise.all([needsSetup(), colorMode(), loginBranding()]);
 
-  return <LoginScreen needsSetup={setupNeeded} from={params.from ?? '/'} colorMode={mode} branding={branding} />;
+  // BOTH names. The partner-approval redirect sends `next`; older links send
+  // `from`. Reading only one meant a partner connection that required signing
+  // in landed on the dashboard with the approval silently discarded.
+  return <LoginScreen needsSetup={setupNeeded} from={params.next ?? params.from ?? '/'} colorMode={mode} branding={branding} />;
 }

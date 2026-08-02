@@ -14,7 +14,23 @@ import type { LoginBranding } from '../../lib/loginBranding';
 // data. Only ever redirect somewhere this app actually serves.
 const KNOWN_ROUTES = ['/', '/products', '/orders', '/content', '/media', '/studio', '/extensions', '/import'];
 function safeRedirectTarget(from: string): string {
-  return KNOWN_ROUTES.includes(from) ? from : '/';
+  if (KNOWN_ROUTES.includes(from)) return from;
+  /**
+   * The partner-approval screen, which this app really does serve and which is
+   * the ONLY way to finish a store connection.
+   *
+   * A print-on-demand partner sends the merchant to /wc-auth/v1/authorize; if
+   * they are not signed in they are sent here first. Sending them to the
+   * dashboard afterwards throws the approval away — the merchant sees a login
+   * page, then a dashboard, and nothing to connect, with no clue that a
+   * pending approval ever existed.
+   *
+   * Matched on the exact path with a leading single slash, so this cannot be
+   * used to bounce anyone off-site: '//evil.example' and '/wc-auth-evil' both
+   * fail the test.
+   */
+  if (/^\/wc-auth\/v1\/authorize(?:[/?]|$)/.test(from)) return from;
+  return '/';
 }
 
 function ThIcon(): ReactNode {
