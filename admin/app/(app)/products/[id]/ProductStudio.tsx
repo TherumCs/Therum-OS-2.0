@@ -614,6 +614,21 @@ export function ProductStudio({
           {adding === 'variant' ? 'Cancel' : '+ Add a variant'}
         </button>
       </div>
+      {/* The variants as pills, the same shape as Categories and Tags above.
+          Clicking one selects it — the left rail and this panel drive the same
+          selection, so there is one idea of "the variant being edited" rather
+          than two lists that can disagree. */}
+      <div className="th-studio__chips">
+        {p.variants.map((v) => (
+          <button
+            key={v.id}
+            type="button"
+            className={'th-pv-chip' + (sel.kind === 'variant' && sel.id === v.id ? ' on' : '')}
+            onClick={() => setSel({ kind: 'variant', id: v.id })}
+          >{[v.color, v.size].filter(Boolean).join(' / ') || v.sku || 'Variant'}</button>
+        ))}
+        {!p.variants.length && <span className="th-hint">None yet.</span>}
+      </div>
       {adding === 'variant' && (
       <div className="th-studio__newvariant">
         {(['sku', 'color', 'size'] as const).map((f) => (

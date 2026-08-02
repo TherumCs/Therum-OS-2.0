@@ -39,6 +39,9 @@ export const CreateProductInput = z.object({
   description: z.string().optional(),
   image: MEDIA_URL.optional(),
   status: z.enum(['draft', 'active', 'archived']).default('draft'),
+  // A product can be created already unlisted or restricted — see
+  // counter/visibility.ts. Public is the safe default.
+  visibility: z.enum(['public', 'private', 'restricted']).default('public'),
   vendorId: z.string().optional(),
   sourceId: z.string().optional(),
   meta: z.record(z.string(), z.unknown()).default({}),

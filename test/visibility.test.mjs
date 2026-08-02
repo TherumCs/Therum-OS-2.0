@@ -11,6 +11,7 @@ import { buildServer } from '../dist/server.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { db, disconnectDb } from '../dist/lib/db.js';
 import { ensureSiteVisible } from './support/publicSite.mjs';
+import { productService } from '../dist/services/product.service.js';
 
 let app, vendor, milieu, member, outsider, pub, unlisted, restricted;
 
@@ -110,6 +111,35 @@ describe('THE ONE THAT MATTERS: the cart', () => {
       payload: { variantId: variantOf(pub), quantity: 1 },
     });
     assert.equal(res.statusCode, 201);
+  });
+});
+
+describe('the admin can actually change it', () => {
+  test('PATCHing visibility PERSISTS — the schema accepting it is not enough', async () => {
+    // This failed silently: `visibility` was validated, the API answered 200,
+    // and productService.update never listed the field, so the admin's control
+    // appeared to save and the product stayed public. Every field in that
+    // update object is written by hand, which is exactly how one goes missing —
+    // so the assertion is on the STORED value, not the response.
+    const { productService } = await import('../dist/services/product.service.js');
+    await productService.update(pub.id, { visibility: 'restricted' });
+    assert.equal((await db.product.findUnique({ where: { id: pub.id } })).visibility, 'restricted',
+      'visibility did not reach the database');
+
+    await productService.update(pub.id, { visibility: 'private' });
+    assert.equal((await db.product.findUnique({ where: { id: pub.id } })).visibility, 'private');
+
+    await productService.update(pub.id, { visibility: 'public' });
+    assert.equal((await db.product.findUnique({ where: { id: pub.id } })).visibility, 'public');
+  });
+
+  test('a product can be CREATED already unlisted', async () => {
+    const created = await productService.create({
+      name: 'vistest Born Private', slug: `vistest-born-private-${Date.now()}`,
+      status: 'active', visibility: 'private', vendorId: vendor.id, meta: {},
+      variants: [{ sku: `VIS-BP-${Date.now()}`, price: 1000, inventory: 0, stockStatus: 'in_stock', color: null, size: null, cost: null }],
+    });
+    assert.equal(created.visibility, 'private', 'created public despite asking for private');
   });
 });
 

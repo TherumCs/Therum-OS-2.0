@@ -97,6 +97,11 @@ export const productService = {
         description: input.description,
         image: input.image,
         status: input.status,
+        // Validated by the schema but never written — the API answered 200 and
+        // dropped it, so the admin's Visibility control appeared to save and a
+        // restricted product stayed public. Every field in this object has to
+        // be listed by hand, which is exactly how one goes missing.
+        visibility: input.visibility,
         vendorId: input.vendorId,
         sourceId: input.sourceId,
         meta: input.meta as Prisma.InputJsonValue,
@@ -131,6 +136,11 @@ export const productService = {
         image: input.image,
         ...(input.images !== undefined ? { images: input.images as Prisma.InputJsonValue } : {}),
         status: input.status,
+        // Validated by the schema but never written here — the API answered
+        // 200 and dropped it, so Visibility appeared to save and a restricted
+        // product stayed public. Every field is listed by hand in this object,
+        // which is exactly how one goes missing.
+        visibility: input.visibility,
         vendorId: input.vendorId,
         sourceId: input.sourceId,
         ...(input.meta !== undefined ? { meta: input.meta as Prisma.InputJsonValue } : {}),
