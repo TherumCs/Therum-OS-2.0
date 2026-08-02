@@ -798,6 +798,52 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
           ${taxonomyPills ? `<div class="taxonomy-row">${taxonomyPills}</div>` : ''}
         </div>
       </div>`, `
+/**
+ * Match the letterbox to the photograph.
+ *
+ * A contained image leaves bars either side. Painting them the store's surface
+ * colour makes a white-background product shot look like it failed to load, so
+ * the frame takes its colour FROM the image: the border ring is sampled and,
+ * when that ring is close to uniform, its colour becomes the background.
+ *
+ * The uniformity check is the important half. A shot that bleeds to its edges
+ * has a busy border, and averaging that gives a muddy colour that matches
+ * nothing — worse than the neutral it replaced. Those keep the default.
+ *
+ * Cross-origin images taint the canvas and throw on read; that is caught and
+ * the default kept, so a CDN-hosted image degrades instead of breaking.
+ */
+function frameToImage(img){
+  if(!img||!img.complete||!img.naturalWidth) return;
+  var box=img.closest('.gallery-main')||img.closest('.gallery-thumb');
+  if(!box) return;
+  try{
+    var N=24,c=document.createElement('canvas');c.width=N;c.height=N;
+    var x=c.getContext('2d',{willReadFrequently:true});
+    x.drawImage(img,0,0,N,N);
+    var d=x.getImageData(0,0,N,N).data,px=[];
+    for(var i=0;i<N;i++){
+      [[i,0],[i,N-1],[0,i],[N-1,i]].forEach(function(p){
+        var o=(p[1]*N+p[0])*4;
+        if(d[o+3]>16) px.push([d[o],d[o+1],d[o+2]]);
+      });
+    }
+    if(px.length<8) return;
+    var avg=px.reduce(function(a,p){return [a[0]+p[0],a[1]+p[1],a[2]+p[2]];},[0,0,0]).map(function(v){return v/px.length;});
+    // Spread across the ring. A busy border means the picture runs to the edge.
+    var spread=px.reduce(function(m,p){
+      return Math.max(m,Math.abs(p[0]-avg[0])+Math.abs(p[1]-avg[1])+Math.abs(p[2]-avg[2]));
+    },0);
+    if(spread>110) return;
+    box.style.background='rgb('+avg.map(Math.round).join(',')+')';
+  }catch(e){ /* tainted canvas — keep the default surface */ }
+}
+function matchFrames(){
+  document.querySelectorAll('.gallery-main img, .gallery-thumb img').forEach(function(img){
+    if(img.complete) frameToImage(img);
+    else img.addEventListener('load',function(){frameToImage(img);},{once:true});
+  });
+}
 function bindThumbs(){
   document.querySelectorAll('.gallery-thumb').forEach(b=>b.addEventListener('click',()=>{
     document.querySelectorAll('.gallery-thumb').forEach(x=>x.classList.remove('sel'));
@@ -808,9 +854,11 @@ function bindThumbs(){
     }else{
       main.innerHTML='<img src="'+b.dataset.src+'" alt="">';
     }
+    matchFrames();
   }));
 }
 bindThumbs();
+matchFrames();
 // The product-level gallery, kept so a variant's shots can be shown in front
 // of it instead of throwing the other angles away.
 const PRODUCT_SHOTS=${JSON.stringify(gallery.filter((g) => g.type === 'image').map((g) => ({ url: g.url, alt: g.alt })))};
@@ -888,6 +936,7 @@ function renderStrip(shots){
            '<img src="'+g.url+'" alt="'+(g.alt||'')+'" loading="lazy"></button>';
   }).join('');
   bindThumbs();
+  matchFrames();
 }
 /**
  * Picking a colour shows ONLY that colourway's photographs.
