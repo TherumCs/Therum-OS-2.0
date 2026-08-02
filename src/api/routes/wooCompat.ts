@@ -542,7 +542,11 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
-          key_id: issued.id,
+          // The NUMERIC id, not the cuid. WooCommerce's key_id is a database
+          // integer and partners parse it as one — a string fails that parse
+          // and the connection is rejected AFTER the keys were accepted, which
+          // shows up as "connection failed" with nothing wrong in either log.
+          key_id: issued.keyId,
           user_id: q.user_id,
           consumer_key: issued.consumerKey,
           consumer_secret: issued.consumerSecret,

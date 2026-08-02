@@ -29,6 +29,8 @@ const sha256 = (v: string): string => createHash('sha256').update(v).digest('hex
 
 export interface IssuedCredential {
   id: string;
+  /** The WooCommerce-shaped numeric id handed back to a partner. */
+  keyId: number;
   label: string;
   consumerKey: string;
   /** Returned ONCE. Never stored in a recoverable form. */
@@ -72,7 +74,7 @@ export const storeCredentials = {
     const row = await db.storeCredential.create({
       data: { label: clean, consumerKey, secretHash: sha256(consumerSecret), scope },
     });
-    return { id: row.id, label: row.label, consumerKey, consumerSecret, scope };
+    return { id: row.id, keyId: row.keyId, label: row.label, consumerKey, consumerSecret, scope };
   },
 
   /**

@@ -614,6 +614,16 @@ model AdminUser {
 // and never again, because a store credential is a full API login.
 model StoreCredential {
   id           String    @id @default(cuid())
+  /**
+   * A NUMERIC id, because WooCommerce's is one.
+   *
+   * The auth handshake hands `key_id` back to the partner, and WooCommerce's
+   * is a database auto-increment. Partners parse it as an integer; a cuid
+   * string fails that parse and the connection is rejected AFTER the keys were
+   * accepted — which reads as "connection failed" with nothing wrong on either
+   * side's logs.
+   */
+  keyId        Int       @unique @default(autoincrement()) @map("key_id")
   label        String
   consumerKey  String    @unique @map("consumer_key")
   secretHash   String    @map("secret_hash")
