@@ -14,6 +14,8 @@ interface Variant {
   stockStatus: string;
   /** The variant's OWN photo — a colourway is a different picture. */
   image?: string | null;
+  /** The other angles of this colourway. */
+  images?: { url: string; alt?: string }[];
   /** Provider hex for this colour; 2 entries = two-tone. */
   colorCodes?: string[];
   reserved: number;

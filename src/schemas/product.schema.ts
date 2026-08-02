@@ -1,6 +1,19 @@
 import { z } from 'zod';
 import { sortFields } from './listing.js';
 
+/**
+ * A media reference: an absolute http(s) URL, or a site-relative path.
+ *
+ * `z.string().url()` REJECTS site-relative paths, and this store's own media
+ * library serves everything from `/api/uploads/...` — so every field that took
+ * a picture refused the pictures the store itself had uploaded. Anything picked
+ * from the library 400'd, while remote CDN urls sailed through.
+ */
+const MEDIA_URL = z.string().min(1).max(2000).refine(
+  (v) => /^https?:\/\//i.test(v) || v.startsWith('/'),
+  'must be a URL or a path beginning with /',
+);
+
 const SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 export const VariantInput = z.object({
@@ -16,7 +29,7 @@ export const VariantInput = z.object({
   // How availability is decided. 'tracked' counts `inventory`; the rest decide
   // by status — see counter/availability.ts.
   stockStatus: z.enum(['tracked', 'in_stock', 'out_of_stock', 'backorder']).default('tracked'),
-  image: z.string().url().nullish(),
+  image: MEDIA_URL.nullish(),
   meta: z.record(z.string(), z.unknown()).default({}),
 });
 
@@ -24,7 +37,7 @@ export const CreateProductInput = z.object({
   name: z.string().min(1).max(240),
   slug: z.string().min(1).max(240).regex(SLUG, 'slug must be kebab-case').optional(),
   description: z.string().optional(),
-  image: z.string().url().optional(),
+  image: MEDIA_URL.optional(),
   status: z.enum(['draft', 'active', 'archived']).default('draft'),
   vendorId: z.string().optional(),
   sourceId: z.string().optional(),
@@ -40,15 +53,15 @@ export const UpdateProductInput = z.object({
   name: z.string().min(1).max(240).optional(),
   slug: z.string().min(1).max(240).regex(SLUG, 'slug must be kebab-case').optional(),
   description: z.string().optional(),
-  image: z.string().url().optional(),
+  image: MEDIA_URL.optional(),
   // Gallery (catalog presentation): ordered media — stills AND video. A
   // video entry should carry a poster (its still frame for non-hover
   // contexts); type defaults to image, or is inferred from the extension.
   images: z.array(z.object({
-    url: z.string().url(),
+    url: MEDIA_URL,
     alt: z.string().max(200).optional(),
     type: z.enum(['image', 'video']).optional(),
-    poster: z.string().url().optional(),
+    poster: MEDIA_URL.optional(),
   })).max(20).optional(),
   status: z.enum(['draft', 'active', 'archived']).optional(),
   // WHO may see it — a separate axis from `status`. See counter/visibility.ts.
@@ -82,7 +95,9 @@ export const UpdateVariantInput = z.object({
   size: z.string().max(80).nullable().optional(),
   inventory: z.number().int().min(0).optional(),
   stockStatus: z.enum(['tracked', 'in_stock', 'out_of_stock', 'backorder']).optional(),
-  image: z.string().url().nullish(),
+  image: MEDIA_URL.nullish(),
+  // The variant's OWN gallery — the other angles of this colourway.
+  images: z.array(z.object({ url: MEDIA_URL, alt: z.string().max(200).optional() })).max(20).optional(),
 });
 export type UpdateVariantInput = z.infer<typeof UpdateVariantInput>;
 

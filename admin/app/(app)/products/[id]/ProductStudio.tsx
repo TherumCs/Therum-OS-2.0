@@ -83,7 +83,7 @@ export function ProductStudio({
   // Which field last saved, so the confirmation appears NEXT TO the thing that
   // changed rather than only in the header where nobody is looking.
   const [savedField, setSavedField] = useState<string | null>(null);
-  const [pickerFor, setPickerFor] = useState<null | 'primary' | 'gallery'>(null);
+  const [pickerFor, setPickerFor] = useState<null | 'primary' | 'gallery' | { variantId: string }>(null);
   // Terms live in state, not straight off the props: a category created here
   // has to appear in the chip row immediately, without a page reload.
   const [cats, setCats] = useState<Term[]>(allCategories);
@@ -507,9 +507,55 @@ export function ProductStudio({
               }}
             />
           </label>
-          {selectedVariant.image && (
-            <img className="th-studio__preview" src={selectedVariant.image} alt={[selectedVariant.color, selectedVariant.size].filter(Boolean).join(' / ')} />
-          )}
+          {/* This colourway's own photographs. Product MEDIA above stays the
+              product-level set; these are what the storefront shows when a
+              shopper picks this colour. */}
+          <div className="th-studio__group-head">
+            <span>Images ({(selectedVariant.image ? 1 : 0) + (Array.isArray(selectedVariant.images) ? selectedVariant.images.length : 0)})</span>
+            <button type="button" className="th-pv-chip" disabled={busy} onClick={() => setPickerFor({ variantId: selectedVariant.id })}>Add</button>
+          </div>
+          <div className="th-studio__vgrid">
+            {[
+              ...(selectedVariant.image ? [{ url: selectedVariant.image, main: true }] : []),
+              ...((Array.isArray(selectedVariant.images) ? selectedVariant.images : []) as { url: string }[]).map((g) => ({ url: g.url, main: false })),
+            ].map((img, i) => (
+              <div key={img.url + i} className={'th-studio__vshot' + (img.main ? ' is-main' : '')}>
+                <img src={img.url} alt="" />
+                <div className="th-studio__vshot-acts">
+                  {!img.main && (
+                    <button
+                      type="button" title="Make this the colour's main image" disabled={busy}
+                      onClick={() => {
+                        const shots = (Array.isArray(selectedVariant.images) ? selectedVariant.images : []) as { url: string; alt?: string }[];
+                        // The old main is kept, not discarded — swapping which
+                        // photo leads should never lose one.
+                        const rest = shots.filter((g) => g.url !== img.url);
+                        const next = { image: img.url, images: selectedVariant.image ? [{ url: selectedVariant.image }, ...rest] : rest };
+                        setP({ ...p, variants: p.variants.map((x) => (x.id === selectedVariant.id ? { ...x, ...next } : x)) });
+                        void call('PATCH', `/api/products/${p.id}/variants/${selectedVariant.id}`, next);
+                      }}
+                    >★</button>
+                  )}
+                  <button
+                    type="button" title="Remove" disabled={busy}
+                    onClick={() => {
+                      const shots = (Array.isArray(selectedVariant.images) ? selectedVariant.images : []) as { url: string; alt?: string }[];
+                      const next = img.main
+                        // Removing the main promotes the next one rather than
+                        // leaving the colour with no picture to swap to.
+                        ? { image: shots[0]?.url ?? null, images: shots.slice(1) }
+                        : { images: shots.filter((g) => g.url !== img.url) };
+                      setP({ ...p, variants: p.variants.map((x) => (x.id === selectedVariant.id ? { ...x, ...next } : x)) });
+                      void call('PATCH', `/api/products/${p.id}/variants/${selectedVariant.id}`, next);
+                    }}
+                  >×</button>
+                </div>
+              </div>
+            ))}
+            {!selectedVariant.image && !(Array.isArray(selectedVariant.images) && selectedVariant.images.length) && (
+              <p className="th-hint th-studio__empty">No images for this colour yet.</p>
+            )}
+          </div>
           {!!(selectedVariant.colorCodes ?? []).length && (
             <p className="th-hint">
               <span className="th-studio__vthumb" style={{ ...swatchStyle(selectedVariant.colorCodes), width: 14, height: 14, display: 'inline-block', verticalAlign: 'middle', marginRight: 6 }} />
@@ -631,7 +677,20 @@ export function ProductStudio({
         kind="image"
         onClose={() => setPickerFor(null)}
         onPick={(asset) => {
-          if (pickerFor === 'primary') {
+          if (pickerFor && typeof pickerFor === 'object') {
+            // Straight onto the VARIANT. Its first image is the one the
+            // storefront swaps to when a shopper picks that colour, so an
+            // empty variant takes the new picture as its main.
+            const v = p.variants.find((x) => x.id === pickerFor.variantId);
+            if (v) {
+              const shots = Array.isArray(v.images) ? v.images : [];
+              const next = v.image
+                ? { images: [...shots, { url: asset.url, alt: asset.alt ?? undefined }] }
+                : { image: asset.url };
+              setP({ ...p, variants: p.variants.map((x) => (x.id === v.id ? { ...x, ...next } : x)) });
+              void call('PATCH', `/api/products/${p.id}/variants/${v.id}`, next);
+            }
+          } else if (pickerFor === 'primary') {
             setP({ ...p, image: asset.url });
             void patch({ image: asset.url });
           } else {
