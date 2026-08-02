@@ -411,6 +411,10 @@ export const CounterSettingsInput = z.object({
   cardMediaSecondary: z.enum(['auto', 'still', 'fade', 'gallery', 'motion']).optional(),
   /** Which rows of information the card carries. */
   cardPreset: z.enum(['editorial', 'retail', 'detailed', 'sneaker', 'data']).optional(),
+  // Product PAGE layout — separate from cardPreset, which styles the grid.
+  pdpStyle: z.enum(['classic', 'apple', 'athletic', 'editorial']).optional(),
+  pdpImageSide: z.enum(['left', 'right']).optional(),
+  pdpThumbs: z.enum(['bottom', 'side', 'none']).optional(),
   /**
    * Where the buy action lives.
    *   none     the card links to the product page — no add-to-cart at all

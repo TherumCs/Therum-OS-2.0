@@ -267,6 +267,19 @@ export interface CounterSettings {
   cardMedia: 'auto' | 'still' | 'fade' | 'gallery' | 'motion';
   cardMediaSecondary: 'auto' | 'still' | 'fade' | 'gallery' | 'motion';
   cardPreset: 'editorial' | 'retail' | 'detailed' | 'sneaker' | 'data';
+  /**
+   * PRODUCT PAGE layout. Separate from cardPreset, which styles the grid.
+   *
+   *   classic   — what the store has shipped: gallery left, details right.
+   *   apple     — one large centred image, generous space, tight type.
+   *   athletic  — full-bleed image row with the details floating over it.
+   *   editorial — oversized wordmark, overlapping hero, price in the button.
+   */
+  pdpStyle: 'classic' | 'apple' | 'athletic' | 'editorial';
+  /** Which side the imagery sits on. Ignored by styles that are centred or full-bleed. */
+  pdpImageSide: 'left' | 'right';
+  /** Where the thumbnail strip goes. */
+  pdpThumbs: 'bottom' | 'side' | 'none';
   cardAction: 'none' | 'below' | 'overlay' | 'dual' | 'icons';
   cardEvolve: boolean;
   cardAlign: 'start' | 'center' | 'end';
@@ -409,6 +422,9 @@ const COUNTER_DEFAULTS: CounterSettings = {
   // wrong on a store whose products have no ratings, sizes or was-prices yet.
   cardShell: 'bare',
   cardPreset: 'editorial',
+  pdpStyle: 'classic',
+  pdpImageSide: 'left',
+  pdpThumbs: 'bottom',
   // 'auto', so a product carrying a video renders as a motion card and one
   // with several photos gets arrows, without anyone visiting Settings. A hard
   // default here silently capped every card at that behaviour: 'fade' meant

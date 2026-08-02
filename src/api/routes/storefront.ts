@@ -762,16 +762,38 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
       ...p.tags.map((t) => `<a class="pill" href="/shop?tag=${esc(t.slug)}">#${esc(t.name)}</a>`),
     ].join(' ');
 
+    /**
+     * The product page LAYOUT, from Settings > Counter.
+     *
+     * One markup tree, four arrangements — the styles are CSS over the same
+     * DOM rather than four templates, because four templates is four places to
+     * forget the stock line or the variant picker. Image side and thumbnail
+     * position are separate axes on top, so a style is a starting point rather
+     * than a cage.
+     */
+    const counterCfg = await settingsService.getCounter();
+    const pdpStyle = counterCfg.pdpStyle ?? 'classic';
+    const pdpClasses = [
+      'pdp', `pdp--${pdpStyle}`,
+      counterCfg.pdpImageSide === 'right' ? 'pdp--imgright' : '',
+      counterCfg.pdpThumbs === 'side' ? 'pdp--thumbside' : '',
+      counterCfg.pdpThumbs === 'none' ? 'pdp--thumbnone' : '',
+    ].filter(Boolean).join(' ');
+    const price = money(firstAvailable?.price ?? variants[0]?.price ?? 0);
+
     html(reply, await page(`${p.name} — Therum Store`, `
-      <div class="product-hero">
-        ${galleryHtml}
-        <div>
+      <div class="${pdpClasses}">
+        ${pdpStyle === 'editorial' ? `<div class="pdp__wordmark">${esc(p.name.split(' ')[0] ?? p.name)}</div>` : ''}
+        <div class="pdp__media">${galleryHtml}</div>
+        <div class="pdp__info">
           ${p.vendor ? `<span class="pill">${esc(p.vendor.name)}</span>` : ''}
-          <h1 class="page-title" style="margin-top:10px">${esc(p.name)}</h1>
-          <div class="price-big" id="price">${money(firstAvailable?.price ?? variants[0]?.price ?? 0)}</div>
+          <h1 class="page-title product-title" style="margin-top:10px">${esc(p.name)}</h1>
+          <div class="price-big price" id="price">${price}</div>
           <div class="stock-note" id="stock">${firstAvailable ? esc(firstAvailable.stock) : 'Sold out'}</div>
           ${picker}
-          <button class="btn" id="add" ${firstAvailable ? '' : 'disabled'}>Add to cart</button>
+          ${/* Editorial puts the price INSIDE the button, which is the whole
+                point of that layout — the price is not repeated above it. */''}
+          <button class="btn" id="add" ${firstAvailable ? '' : 'disabled'}>Add to cart${pdpStyle === 'editorial' ? ` · <span id="btn-price">${price}</span>` : ''}</button>
           ${p.description ? `<div class="product-desc">${esc(p.description).replace(/\n/g, '<br>')}</div>` : ''}
           ${taxonomyPills ? `<div class="taxonomy-row">${taxonomyPills}</div>` : ''}
         </div>
@@ -804,7 +826,11 @@ function resolve(){
 }
 function applyVariant(v){
   sel=v;
-  document.getElementById('price').textContent=(v.price/100).toLocaleString('en-US',{style:'currency',currency:'USD'});
+  const fmt=(v.price/100).toLocaleString('en-US',{style:'currency',currency:'USD'});
+  document.getElementById('price').textContent=fmt;
+  // The editorial layout repeats the price inside the button; a variant change
+  // that updated one and not the other would show two different prices.
+  const bp=document.getElementById('btn-price'); if(bp) bp.textContent=fmt;
   document.getElementById('stock').textContent=v.stock;
   document.getElementById('add').disabled=!v.sellable;
   const nm=document.getElementById('swatch-name');if(nm&&v.color)nm.textContent=v.color;
