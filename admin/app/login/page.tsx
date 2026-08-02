@@ -1,4 +1,7 @@
+import { cookies, headers } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { LoginScreen } from './LoginScreen';
+import { COOKIE_NAME, verifyJwt } from '../../lib/session';
 import { DEFAULT_LOGIN_BRANDING, type LoginBranding } from '../../lib/loginBranding';
 
 const API = process.env.API_URL ?? 'http://localhost:4100';
@@ -45,6 +48,33 @@ export const dynamic = 'force-dynamic';
 // in the UI at all).
 export default async function LoginPage({ searchParams }: { searchParams: Promise<{ from?: string; next?: string }> }) {
   const params = await searchParams;
+
+  /**
+   * ALREADY SIGNED IN, and something is waiting for them.
+   *
+   * A partner sends the merchant to the approval screen; if the cookie is not
+   * visible at that moment they are bounced here. Rendering a password form to
+   * someone who is already authenticated leaves them staring at a login page
+   * with nothing to do and no way to reach the approval — which reads exactly
+   * like the connection being broken.
+   *
+   * Only the approval path is forwarded this way, and only when the session
+   * actually verifies. Everything else still gets the form.
+   */
+  const pending = params.next ?? params.from;
+  if (pending && /^\/wc-auth\/v1\/authorize(?:[/?]|$)/.test(pending)) {
+    const token = (await cookies()).get(COOKIE_NAME)?.value;
+    if (await verifyJwt(token)) {
+      // An ABSOLUTE url. Next prefixes a relative redirect with basePath, so
+      // redirect('/wc-auth/...') lands on '/tos-admin/wc-auth/...' and 404s —
+      // the same trap as the client-side push, on the server side.
+      const h = await headers();
+      const host = h.get('x-forwarded-host') ?? h.get('host') ?? '';
+      const proto = (h.get('x-forwarded-proto') ?? 'https').split(',')[0];
+      redirect(host ? `${proto}://${host}${pending}` : pending);
+    }
+  }
+
   const [setupNeeded, mode, branding] = await Promise.all([needsSetup(), colorMode(), loginBranding()]);
 
   // BOTH names. The partner-approval redirect sends `next`; older links send
