@@ -10,6 +10,8 @@ export interface Product {
   name: string;
   slug: string;
   status: string;
+  /** Primary image — the catalogue list shows it as a thumbnail. */
+  image?: string | null;
   variants: Variant[];
 }
 export interface OrderItem {

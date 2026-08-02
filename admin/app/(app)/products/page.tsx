@@ -24,7 +24,7 @@ async function perPage(): Promise<number> {
   return a?.itemsPerPage ?? PER_PAGE_FALLBACK;
 }
 
-interface SP { status?: string; q?: string; sort?: string; order?: string; cursor?: string; categoryId?: string; tagId?: string }
+interface SP { status?: string; q?: string; sort?: string; order?: string; cursor?: string; categoryId?: string; tagId?: string; view?: string; add?: string }
 
 export default async function ProductsPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
@@ -70,32 +70,65 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
       .catch(() => 'Filtered by tag');
   }
 
+  // Query-string helpers that PRESERVE the current filters — a view toggle that
+  // silently drops the search or the status filter is a reset button wearing a
+  // different icon.
+  const keep = (over: Record<string, string | undefined>) => {
+    const q = new URLSearchParams();
+    for (const [k, v] of Object.entries({ ...sp, ...over })) if (v) q.set(k, String(v));
+    q.delete('cursor');
+    return q.toString();
+  };
+  const grid = sp.view === 'grid';
+  const adding = sp.add === '1';
+  const viewQs = (v: string) => keep({ view: v === 'list' ? undefined : v, add: undefined });
+  const addQs = keep({ add: adding ? undefined : '1' });
+
   return (
     <section>
-      <h1>Product Catalog</h1>
+      {/* Title and the primary action on one line. The quick-add form used to
+          sit permanently between the tabs and the filters — three rows of
+          controls stacked before any product appeared, which is what made this
+          page read as jumbled. */}
+      <div className="th-pagehead">
+        <h1>Product Catalog</h1>
+        <a className="th-btn th-btn--primary" href={`${BASE_PATH}/products?${addQs}`}>
+          {adding ? 'Cancel' : '+ Add product'}
+        </a>
+      </div>
       <CatalogTabs current="products" counts={{ products: allC }} />
       {scopeLabel && (
         <p className="th-hint" style={{ marginTop: 12 }}>
           {scopeLabel} · <a href="/products">show all products</a>
         </p>
       )}
-      <form action={createProduct} className="row-form">
-        <input name="name" placeholder="Product name" required />
-        <input name="price" type="number" step="0.01" placeholder="Price (USD)" />
-        <button type="submit">Add product</button>
-      </form>
+      {adding && (
+        <form action={createProduct} className="th-quickadd">
+          <input name="name" placeholder="Product name" required autoFocus />
+          <input name="price" type="number" step="0.01" placeholder="Price (USD)" />
+          <button type="submit" className="th-btn th-btn--primary">Add product</button>
+        </form>
+      )}
       {err && <div className="notice">API offline — start it on :4100 ({err})</div>}
 
-      <ListControls
-        filters={[
-          { key: 'all', label: 'All', count: allC },
-          { key: 'active', label: 'Active', count: activeC },
-          { key: 'draft', label: 'Draft', count: draftC },
-          { key: 'archived', label: 'Archived', count: archivedC },
-        ]}
-        sorts={SORTS}
-        searchPlaceholder="Search products…"
-      />
+      <div className="th-listbar">
+        <ListControls
+          filters={[
+            { key: 'all', label: 'All', count: allC },
+            { key: 'active', label: 'Active', count: activeC },
+            { key: 'draft', label: 'Draft', count: draftC },
+            { key: 'archived', label: 'Archived', count: archivedC },
+          ]}
+          sorts={SORTS}
+          searchPlaceholder="Search products…"
+        />
+        {/* Plain links, not client state: the view survives a reload and a
+            shared URL, and this page stays a server component. */}
+        <div className="th-viewtoggle" role="group" aria-label="View">
+          <a className={grid ? '' : 'is-on'} href={`${BASE_PATH}/products?${viewQs('list')}`} aria-label="List view">☰</a>
+          <a className={grid ? 'is-on' : ''} href={`${BASE_PATH}/products?${viewQs('grid')}`} aria-label="Grid view">▦</a>
+        </div>
+      </div>
 
       {data && data.items.length === 0 && (
         <div className="th-lp-empty">
@@ -103,11 +136,28 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
           <div className="th-lp-empty-sub">Adjust filters or clear the search.</div>
         </div>
       )}
-      {data && data.items.length > 0 && (
-        <table>
+      {data && data.items.length > 0 && (grid ? (
+        <div className="th-pgrid">
+          {data.items.map((p) => (
+            <a key={p.id} className="th-pcard" href={`${BASE_PATH}/products/${p.id}`}>
+              <div className="th-pcard__img">
+                {p.image ? <img src={p.image} alt="" loading="lazy" /> : <span className="th-pcard__ph">No image</span>}
+              </div>
+              <div className="th-pcard__body">
+                <strong>{p.name}</strong>
+                <div className="th-pcard__meta">
+                  <span className={'pill pill-' + p.status}>{p.status}</span>
+                  <span>{p.variants.length ? money(Math.min(...p.variants.map((v) => v.price))) : '—'}</span>
+                </div>
+              </div>
+            </a>
+          ))}
+        </div>
+      ) : (
+        <table className="th-ptable">
           <thead>
             <tr>
-              <th>Name</th>
+              <th colSpan={2}>Product</th>
               <th>Status</th>
               <th>Variants</th>
               <th>From</th>
@@ -117,12 +167,17 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
           <tbody>
             {data.items.map((p) => (
               <tr key={p.id}>
+                {/* A thumbnail is the fastest way to find a product in a list
+                    of caps that all read "… Snapback". */}
+                <td className="th-ptable__thumbcell">
+                  <span className="th-ptable__thumb">
+                    {p.image ? <img src={p.image} alt="" loading="lazy" /> : null}
+                  </span>
+                </td>
                 <td>
                   {/* BASE_PATH, not a bare /products/… — a plain <a> does not
                       get the basePath prepended the way next/link does, so an
-                      absolute path here lands on the STOREFRONT. The original
-                      relative href avoided that by accident and would have
-                      broken from any deeper URL. */}
+                      absolute path here lands on the STOREFRONT. */}
                   <a href={`${BASE_PATH}/products/${p.id}`} style={{ fontWeight: 600 }}>{p.name}</a>
                   <div className="sub">{p.slug}</div>
                 </td>
@@ -132,24 +187,14 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
                 <td>{p.variants.length}</td>
                 <td>{p.variants.length ? money(Math.min(...p.variants.map((v) => v.price))) : '—'}</td>
                 <td className="th-rowactions">
-                  {/* A bold name that happens to be clickable is not an
-                      affordance. Edit and View, on every row, like every other
-                      store admin. View goes to the real storefront page. */}
                   <a className="th-btn th-btn--xs" href={`${BASE_PATH}/products/${p.id}`}>Edit</a>
                   <a className="th-btn th-btn--xs" href={`/product/${p.slug}`} target="_blank" rel="noreferrer">View ↗</a>
                 </td>
               </tr>
             ))}
-            {!data.items.length && (
-              <tr>
-                <td colSpan={5} className="muted">
-                  No products yet.
-                </td>
-              </tr>
-            )}
           </tbody>
         </table>
-      )}
+      ))}
       {data && <ListPager nextCursor={data.nextCursor ?? null} shown={data.items.length} total={data.total ?? data.items.length} />}
     </section>
   );

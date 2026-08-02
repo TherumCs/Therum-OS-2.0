@@ -2044,3 +2044,38 @@ tr:hover .th-rowactions, tr:focus-within .th-rowactions { opacity: 1; }
 .th-studio__vshot-acts { position: absolute; top: 2px; right: 2px; display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
 .th-studio__vshot:hover .th-studio__vshot-acts { opacity: 1; }
 .th-studio__vshot-acts button { width: 20px; height: 20px; border: 0; border-radius: 4px; background: rgba(0,0,0,.72); color: #fff; font-size: 12px; line-height: 1; cursor: pointer; }
+
+/* ── Catalogue list ────────────────────────────────────────────────────────
+   The page used to stack a tab row, a permanent add form and a filter row
+   before a single product appeared. Title and primary action share a line,
+   the add form hides behind it, and the remaining controls get real spacing. */
+.th-pagehead { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 4px; }
+.th-pagehead h1 { margin: 0; }
+
+.th-quickadd { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 16px 0 4px; padding: 16px; border: 1px solid var(--th-line); border-radius: 12px; background: var(--th-surface); }
+.th-quickadd input { min-width: 200px; }
+
+.th-listbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 20px 0 16px; }
+.th-listbar > *:first-child { flex: 1 1 auto; min-width: 0; }
+
+.th-viewtoggle { display: inline-flex; border: 1px solid var(--th-line); border-radius: 10px; overflow: hidden; flex: 0 0 auto; }
+.th-viewtoggle a { display: flex; align-items: center; justify-content: center; width: 38px; height: 36px; font-size: 15px; color: var(--th-muted); text-decoration: none; }
+.th-viewtoggle a + a { border-left: 1px solid var(--th-line); }
+.th-viewtoggle a.is-on { background: var(--th-ink, #070707); color: #fff; }
+
+/* List view: a thumbnail column, because a page of "… Snapback" reads faster
+   as pictures than as text. */
+.th-ptable td, .th-ptable th { padding-top: 12px; padding-bottom: 12px; }
+.th-ptable__thumbcell { width: 56px; padding-right: 0 !important; }
+.th-ptable__thumb { display: block; width: 44px; height: 44px; border-radius: 8px; overflow: hidden; background: var(--th-line); }
+.th-ptable__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Grid view. */
+.th-pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; }
+.th-pcard { display: flex; flex-direction: column; border: 1px solid var(--th-line); border-radius: 12px; overflow: hidden; background: var(--th-surface); text-decoration: none; color: inherit; transition: border-color .12s, transform .12s; }
+.th-pcard:hover { border-color: var(--th-ink, #070707); transform: translateY(-2px); }
+.th-pcard__img { aspect-ratio: 1; background: var(--th-line); display: flex; align-items: center; justify-content: center; }
+.th-pcard__img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.th-pcard__ph { font-size: 11px; color: var(--th-muted); }
+.th-pcard__body { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.th-pcard__meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
