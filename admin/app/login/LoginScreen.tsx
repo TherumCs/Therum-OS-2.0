@@ -29,8 +29,21 @@ function safeRedirectTarget(from: string): string {
    * used to bounce anyone off-site: '//evil.example' and '/wc-auth-evil' both
    * fail the test.
    */
-  if (/^\/wc-auth\/v1\/authorize(?:[/?]|$)/.test(from)) return from;
+  if (isApprovalPath(from)) return from;
   return '/';
+}
+
+/**
+ * The partner-approval screen lives at the SITE ROOT, not inside this app.
+ *
+ * This admin runs under basePath '/tos-admin', so router.push('/wc-auth/...')
+ * resolves to '/tos-admin/wc-auth/...' — a path nothing serves. Landing there
+ * looks identical to the approval being lost, which is the bug this whole
+ * redirect was added to fix. Anything matching this leaves via a full-page
+ * navigation instead.
+ */
+function isApprovalPath(target: string): boolean {
+  return /^\/wc-auth\/v1\/authorize(?:[/?]|$)/.test(target);
 }
 
 function ThIcon(): ReactNode {
@@ -99,6 +112,15 @@ function backgroundStyle(branding: LoginBranding): CSSProperties {
 // Server Action's ID is a content hash baked into the loaded page's bundle,
 // so it goes stale across a dev-server restart ("Invalid Server Actions
 // request"). A Route Handler is an ordinary HTTP endpoint; no such coupling.
+function makeGoAfterLogin(from: string, router: { push: (href: string) => void }) {
+  return () => {
+    const target = safeRedirectTarget(from);
+    // Outside the app's basePath, so the Next router cannot take us there.
+    if (isApprovalPath(target)) window.location.assign(target);
+    else router.push(target);
+  };
+}
+
 export function LoginScreen({
   needsSetup,
   from,
@@ -111,6 +133,7 @@ export function LoginScreen({
   branding: LoginBranding;
 }) {
   const router = useRouter();
+  const goAfterLogin = makeGoAfterLogin(from, router);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Set once the password step succeeds on a 2FA-enabled account — the
@@ -144,7 +167,7 @@ export function LoginScreen({
         setChallengeToken(body.challengeToken);
         return;
       }
-      router.push(safeRedirectTarget(from));
+      goAfterLogin();
     } catch {
       setError('Could not reach the server. Check that the API is running and try again.');
     } finally {
@@ -168,7 +191,7 @@ export function LoginScreen({
         setError(asErrorString(body?.error, 'Incorrect code.'));
         return;
       }
-      router.push(safeRedirectTarget(from));
+      goAfterLogin();
     } catch {
       setError('Could not reach the server. Check that the API is running and try again.');
     } finally {
