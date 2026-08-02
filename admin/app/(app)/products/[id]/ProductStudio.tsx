@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { useRouter } from 'next/navigation';
 import { BASE_PATH } from '../../../../lib/session';
 import { MediaPicker } from '../../MediaPicker';
@@ -91,6 +91,31 @@ export function ProductStudio({
   // Forms stay behind a button so the panel is a list of what IS set, not a
   // wall of empty inputs.
   const [adding, setAdding] = useState<'' | 'category' | 'tag' | 'variant'>('');
+  // Store-wide look settings, edited here because this is where you can SEE
+  // them. They are NOT per-product, and the panel says so — a control that
+  // silently restyles the whole catalogue is worse than no control.
+  const [look, setLook] = useState<Record<string, string>>({});
+  const [lookLoaded, setLookLoaded] = useState(false);
+  const [frameKey, setFrameKey] = useState(0);
+  /**
+   * The frame renders at DESKTOP width and is scaled to fit the column.
+   *
+   * Left to the column's own width the iframe is ~300px, so the storefront
+   * serves its mobile layout — a preview of a layout you were not editing.
+   * Rendering at 1280 and scaling down shows the real desktop composition.
+   */
+  const FRAME_W = 1280;
+  const frameBox = useRef<HTMLDivElement | null>(null);
+  const [frameScale, setFrameScale] = useState(0.3);
+  useEffect(() => {
+    const el = frameBox.current;
+    if (!el) return;
+    const fit = () => setFrameScale(Math.min(1, el.clientWidth / FRAME_W));
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [preview]);
   const [milieuIds, setMilieuIds] = useState<string[]>(initialMilieuIds);
   const [emails, setEmails] = useState<string[]>(initialEmails);
   const [unknown, setUnknown] = useState<string[]>([]);
@@ -122,6 +147,32 @@ export function ProductStudio({
     setAdding('');
   }
   const [newVariant, setNewVariant] = useState({ sku: '', price: '', color: '', size: '', inventory: '0', stockStatus: 'in_stock' });
+
+  useEffect(() => {
+    void fetch(`${BASE_PATH}/api/settings/counter`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((c: Record<string, string> | null) => { if (c) setLook(c); setLookLoaded(true); })
+      .catch(() => setLookLoaded(true));
+  }, []);
+
+  async function saveLook(patch: Record<string, string>): Promise<void> {
+    setLook({ ...look, ...patch });
+    await fetch(`${BASE_PATH}/api/settings/counter`, {
+      method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify(patch),
+    }).catch(() => {});
+    // The frame renders the REAL page, so it is refetched to show the change
+    // rather than re-styled in place.
+    setFrameKey((k) => k + 1);
+  }
+
+  const lookRow = (label: string, key: string, options: [string, string][]) => (
+    <label className="th-look__field" key={key}>
+      <span>{label}</span>
+      <select value={look[key] ?? options[0]?.[0] ?? ''} disabled={!lookLoaded} onChange={(e) => void saveLook({ [key]: e.target.value })}>
+        {options.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+      </select>
+    </label>
+  );
 
   async function call(method: string, path: string, body?: unknown): Promise<unknown> {
     setBusy(true);
@@ -260,35 +311,47 @@ export function ProductStudio({
             </div>
           </div>
         ) : (
-          <div className="th-pv-page">
-            <div className="th-pv-page__media">
-              {p.image ? <img src={p.image} alt={p.name} /> : <span className="th-hint">No image</span>}
-              {gallery.length > 0 && (
-                <div className="th-pv-page__strip">
-                  {gallery.slice(0, 5).map((g, i) => <img key={`${g.url}-${i}`} src={g.url} alt="" />)}
-                </div>
-              )}
-            </div>
-            <div className="th-pv-page__info">
-              <h2>{p.name || 'Untitled product'}</h2>
-              <div className="th-pv-page__price">{p.variants.length > 1 ? `From ${money(lowest)}` : money(lowest)}</div>
-              {!!p.variants.length && (
-                <div className="th-pv-page__variants">
-                  {p.variants.map((v) => (
-                    <span key={v.id} className={'th-pv-chip' + (sel.kind === 'variant' && sel.id === v.id ? ' on' : '')}>
-                      {[v.color, v.size].filter(Boolean).join(' / ') || v.sku || '—'}
-                    </span>
-                  ))}
-                </div>
-              )}
-              <p className="th-pv-page__desc">{p.description || 'No description yet.'}</p>
-              <button type="button" className="th-btn th-btn-primary" disabled>Add to cart</button>
-            </div>
+          /* The REAL page, in a scrolling frame. A hand-built mock drifts from
+             the storefront the moment either changes, and then it lies about
+             the thing it exists to show. */
+          <div className="th-pv-frame" ref={frameBox}>
+            <iframe
+              key={frameKey}
+              title="Product page preview"
+              src={`/product/${p.slug}`}
+              loading="lazy"
+              style={{ width: FRAME_W, height: Math.round(1600 / frameScale), transform: `scale(${frameScale})`, transformOrigin: '0 0' }}
+            />
           </div>
         )}
       </div>
+
+      {/* Look controls, under the thing they change. */}
+      <div className="th-look">
+        <div className="th-look__head">
+          <span>{preview === 'card' ? 'Card style' : 'Product page style'}</span>
+          <span className="th-hint">Applies to the whole store</span>
+        </div>
+        <div className="th-look__grid">
+          {preview === 'card' ? (
+            <>
+              {lookRow('Layout', 'cardPreset', [['editorial', 'Editorial'], ['retail', 'Retail'], ['detailed', 'Detailed'], ['sneaker', 'Sneaker'], ['data', 'Data']])}
+              {lookRow('Hover media', 'cardMedia', [['auto', 'Auto — follow the product'], ['still', 'Still'], ['fade', 'Fade'], ['gallery', 'Gallery arrows'], ['motion', 'Play video']])}
+            </>
+          ) : (
+            <>
+              {lookRow('Layout', 'pdpStyle', [['classic', 'Classic — gallery + details'], ['apple', 'Apple — centred'], ['athletic', 'Athletic — image grid'], ['editorial', 'Editorial — big type']])}
+              {lookRow('Images on', 'pdpImageSide', [['left', 'Left'], ['right', 'Right']])}
+              {lookRow('Thumbnails', 'pdpThumbs', [['bottom', 'Below the image'], ['side', 'Beside the image'], ['none', 'Hidden']])}
+            </>
+          )}
+        </div>
+      </div>
+
       <p className="th-hint th-studio__note">
-        A preview, not the live page — card styling follows Customization, which this does not re-implement.
+        {preview === 'card'
+          ? 'A preview, not the live page — card styling follows Customization, which this does not re-implement.'
+          : 'The live product page, rendered in a frame. Scroll it like the real thing.'}
       </p>
     </div>
   );

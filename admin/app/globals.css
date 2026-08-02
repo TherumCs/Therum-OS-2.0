@@ -2079,3 +2079,17 @@ tr:hover .th-rowactions, tr:focus-within .th-rowactions { opacity: 1; }
 .th-pcard__ph { font-size: 11px; color: var(--th-muted); }
 .th-pcard__body { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .th-pcard__meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+
+/* The real storefront page, framed and scrollable. */
+/* Scrolls, so the whole page can be walked through rather than just its fold.
+   The iframe is rendered wide and scaled, so what you scroll is the desktop
+   layout — not the mobile one the narrow column would otherwise trigger. */
+.th-pv-frame { height: 620px; border: 1px solid var(--th-line); border-radius: 12px; overflow-y: auto; overflow-x: hidden; background: #fff; }
+.th-pv-frame iframe { border: 0; display: block; }
+
+/* Look controls, sitting under the preview they change. */
+.th-look { margin-top: 16px; border: 1px solid var(--th-line); border-radius: 12px; padding: 16px; background: var(--th-surface); }
+.th-look__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--th-muted); }
+.th-look__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.th-look__field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--th-muted); }
+.th-look__field select { width: 100%; }
