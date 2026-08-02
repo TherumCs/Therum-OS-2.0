@@ -694,7 +694,17 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
 
     const swatches = colors.length > 1
       ? `<label>Colour</label>
-         <div class="swatches" id="swatches">${colors.map((c, i) => {
+         <div class="swatches" id="swatches">
+           ${/*
+              "All" shows every shot across every colourway. It is a GALLERY
+              VIEW, not a colour: it deliberately does not change which variant
+              is being bought, so the Add button never ends up with nothing
+              selected. The first colour stays selected underneath.
+            */''}
+           <button type="button" class="swatch swatch--all" data-all="1" title="All colours" aria-label="Show every image">
+             <span class="swatch-all-mark">ALL</span>
+           </button>
+           ${colors.map((c, i) => {
             const v = firstOf(c)!;
             const paint = fill(v.colorCodes);
             const inner = paint
@@ -732,7 +742,14 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
           <div class="thumb gallery-main" id="gallery-main">${gallery[0]?.type === 'video'
             ? `<video controls muted playsinline src="${esc(gallery[0].url)}"${gallery[0].poster ? ` poster="${esc(gallery[0].poster)}"` : ''}></video>`
             : `<img src="${esc(gallery[0]?.url ?? '')}" alt="${esc(gallery[0]?.alt ?? p.name)}">`}</div>
-          ${gallery.length > 1 ? `<div class="gallery-strip">${gallery.map((g, i) => `
+          ${/*
+              The strip is rendered whenever the product has more than one shot
+              OR any variant carries its own — a synced print-on-demand product
+              has ONE product image and all its photography on the variants, so
+              gating the container on the product gallery alone left the script
+              with nothing to fill and no thumbnails at all.
+            */''}
+          ${gallery.length > 1 || variants.some((v) => v.image) ? `<div class="gallery-strip">${gallery.map((g, i) => `
             <button type="button" class="gallery-thumb${i === 0 ? ' sel' : ''}" data-src="${esc(g.url)}" data-type="${g.type}"${g.poster ? ` data-poster="${esc(g.poster)}"` : ''} aria-label="${esc(g.type === 'video' ? 'Play video' : g.alt)}">
               <img src="${esc(g.type === 'video' ? (g.poster ?? gallery.find((x) => x.type === 'image')?.url ?? '') : g.url)}" alt="${esc(g.alt)}" loading="lazy">
               ${g.type === 'video' ? '<span class="play-badge">▶</span>' : ''}
@@ -795,6 +812,15 @@ function applyVariant(v){
 }
 const sw=document.getElementById('swatches');
 if(sw)sw.addEventListener('click',(e)=>{
+  const all=e.target.closest('button[data-all]');
+  if(all){
+    sw.querySelectorAll('button').forEach(x=>x.classList.remove('sel'));
+    all.classList.add('sel');
+    // Gallery view only: the selected variant is untouched, so Add to cart
+    // still refers to the colour already chosen rather than going ambiguous.
+    showAllShots();
+    return;
+  }
   const b=e.target.closest('button[data-color]');if(!b||b.disabled)return;
   sw.querySelectorAll('button').forEach(x=>x.classList.remove('sel'));
   b.classList.add('sel');
@@ -825,22 +851,42 @@ if(picker)picker.addEventListener('click',(e)=>{
  * what WooCommerce does. The variant's own shots go in front of the product
  * gallery rather than replacing it, so the other angles stay reachable.
  */
-function showVariantShots(v){
-  if(!v||!v.image)return;
+function renderStrip(shots){
   var strip=document.querySelector('.gallery-strip');
   var main=document.getElementById('gallery-main');
-  if(main)main.innerHTML='<img src="'+v.image+'" alt="'+(v.label||'')+'">';
+  if(!shots.length)return;
+  if(main)main.innerHTML='<img src="'+shots[0].url+'" alt="'+(shots[0].alt||'')+'">';
   if(!strip)return;
-  var own=[{url:v.image,alt:v.label}].concat(v.images||[]);
-  var rest=PRODUCT_SHOTS.filter(function(g){
-    return !own.some(function(o){return o.url===g.url;});
-  });
-  strip.innerHTML=own.concat(rest).map(function(g,i){
+  strip.innerHTML=shots.map(function(g,i){
     return '<button type="button" class="gallery-thumb'+(i===0?' sel':'')+'" data-src="'+g.url+'" data-type="image" aria-label="'+(g.alt||'')+'">'+
            '<img src="'+g.url+'" alt="'+(g.alt||'')+'" loading="lazy"></button>';
   }).join('');
   bindThumbs();
 }
+/**
+ * Picking a colour shows ONLY that colourway's photographs.
+ *
+ * The strip used to lead with the variant's shots and keep every other
+ * colour's behind them, so choosing black still left five other hats in the
+ * thumbnails. Filtering is the point of choosing.
+ */
+function showVariantShots(v){
+  if(!v||!v.image)return;
+  renderStrip([{url:v.image,alt:v.label}].concat(v.images||[]));
+}
+/** Every shot the product has, in variant order, then the product gallery. */
+function showAllShots(){
+  var seen={},all=[];
+  VARIANTS.forEach(function(v){
+    [].concat(v.image?[{url:v.image,alt:v.label}]:[], v.images||[]).forEach(function(g){
+      if(g&&g.url&&!seen[g.url]){seen[g.url]=1;all.push(g);}
+    });
+  });
+  PRODUCT_SHOTS.forEach(function(g){ if(!seen[g.url]){seen[g.url]=1;all.push(g);} });
+  renderStrip(all);
+}
+// Seed from the selected variant so the strip matches the colour that is
+// already chosen, rather than showing the product image alone.
 if(sel)showVariantShots(sel);
 document.getElementById('add').addEventListener('click',(e)=>{if(sel)addToCart(sel.id,1,e.target)});
 `, {

@@ -10,7 +10,10 @@ import { esc } from './storefrontHtml.js';
 
 const CSS = `
 :root{
-  --ac:#e83b3b;--ac-btn:#3858e9;--ac-btn-h:#2e45c5;
+  /* Same ink as the storefront and the ported theme (--button-color). Content
+     pages and shop pages sit next to each other in one nav; two different
+     action colours reads as two different sites. */
+  --ac:#e83b3b;--ac-btn:#070707;--ac-btn-h:#252525;
   --sf:#ffffff;--sf2:#f5f5f5;--bd:rgba(0,0,0,0.08);--bd2:rgba(0,0,0,0.16);
   --bg:#fafafa;--tx:#0a0a0a;--tx2:#666666;--tx3:#999999;
   --f:-apple-system,BlinkMacSystemFont,'Inter','Helvetica Neue',Arial,sans-serif;

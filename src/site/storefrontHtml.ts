@@ -23,7 +23,10 @@ export function money(minor: number, currency = 'USD'): string {
 
 const CSS = `
 :root{
-  --ac:#e83b3b;--ac-btn:#3858e9;--ac-btn-h:#2e45c5;
+  /* Action colour is the THEME's button colour (--button-color in the ported
+     chrome), not a framework blue. The storefront shipped #3858e9, which
+     matched nothing else on the site and read as a stray admin control. */
+  --ac:#e83b3b;--ac-btn:#070707;--ac-btn-h:#252525;
   --sf:#ffffff;--sf2:#f5f5f5;--bd:rgba(0,0,0,0.08);--bd2:rgba(0,0,0,0.16);
   --bg:#fafafa;--tx:#0a0a0a;--tx2:#666666;--tx3:#999999;
   --ok:#10b981;--err:#ef4444;
@@ -59,12 +62,14 @@ main{padding:40px 0 80px}
 .card .name{font-weight:600;font-size:15px}
 .card .vendor{color:var(--tx3);font-size:12px}
 .card .price{margin-top:auto;padding-top:10px;font-weight:700;font-size:15px;font-variant-numeric:tabular-nums}
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--ac-btn);color:#fff;border:0;border-radius:var(--radius-md);padding:11px 20px;font-size:14px;font-weight:600;font-family:var(--f);cursor:pointer;transition:background var(--e)}
-.btn:hover{background:var(--ac-btn-h)}
+/* Measured from the ported theme's .c-button: 12px/600, .06em tracking,
+   uppercase, square, 18px 50px, ink fill with a 1px ink border. */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--ac-btn);color:#fff;border:1px solid var(--ac-btn);border-radius:0;padding:18px 40px;font-size:12px;line-height:1;font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-family:var(--f);cursor:pointer;transition:background var(--e),border-color var(--e),color var(--e)}
+.btn:hover{background:var(--ac-btn-h);border-color:var(--ac-btn-h)}
 .btn:disabled{opacity:0.5;cursor:default}
-.btn.ghost{background:transparent;color:var(--tx);border:1px solid var(--bd2)}
-.btn.ghost:hover{background:var(--sf2)}
-.btn.sm{padding:7px 12px;font-size:13px}
+.btn.ghost{background:transparent;color:var(--tx);border:1px solid var(--tx)}
+.btn.ghost:hover{background:var(--ac-btn);border-color:var(--ac-btn);color:#fff}
+.btn.sm{padding:12px 25px;font-size:11px}
 input[type=email],input[type=text],select{font-family:var(--f);font-size:14px;padding:10px 12px;border:1px solid var(--bd2);border-radius:var(--radius-md);background:var(--sf);color:var(--tx);width:100%}
 input:focus,select:focus{outline:2px solid var(--ac-btn);outline-offset:-1px;border-color:transparent}
 label{font-size:13px;font-weight:600;color:var(--tx2);display:block;margin-bottom:6px}
@@ -113,7 +118,7 @@ table.lines .num{text-align:right;font-variant-numeric:tabular-nums}
 .method-list{display:flex;flex-direction:column;gap:8px}
 .method-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px;background:var(--sf2);border:1.5px solid transparent;border-radius:var(--radius-md);cursor:pointer;transition:all var(--e)}
 .method-row:hover{background:#eee;border-color:var(--bd2)}
-.method-row.active{border-color:var(--ac-btn);background:rgba(56,88,233,0.06)}
+.method-row.active{border-color:var(--ac-btn);background:rgba(7,7,7,0.05)}
 .method-row.disabled{opacity:.55;cursor:default}
 .method-row.disabled:hover{background:var(--sf2);border-color:transparent}
 .method-l{display:flex;align-items:center;gap:12px}
@@ -137,7 +142,7 @@ table.lines .num{text-align:right;font-variant-numeric:tabular-nums}
 @media(max-width:540px){.crypto-grid{grid-template-columns:repeat(3,1fr)}}
 .crypto-chip{display:flex;flex-direction:column;align-items:center;gap:4px;padding:12px 8px;background:var(--sf2);border:1.5px solid transparent;border-radius:var(--radius-md);cursor:pointer;transition:all var(--e)}
 .crypto-chip:hover{background:#eee;border-color:var(--bd2)}
-.crypto-chip.active{border-color:var(--ac-btn);background:rgba(56,88,233,0.06)}
+.crypto-chip.active{border-color:var(--ac-btn);background:rgba(7,7,7,0.05)}
 .crypto-chip.disabled{opacity:.55;cursor:default}
 .crypto-sym{width:30px;height:30px;border-radius:50%;display:flex;align-items:center;justify-content:center;font:700 11px var(--f);color:#fff;letter-spacing:-0.02em;background:#f7931a}
 .sym-crypto_btc{background:#f7931a}.sym-crypto_eth{background:#627eea}.sym-crypto_usdc{background:#2775ca}
@@ -156,6 +161,10 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 .swatch img{width:100%;height:100%;object-fit:cover;display:block}
 .swatch-blank{display:block;width:100%;height:100%;background:var(--bd2)}
 .swatch-fill{display:block;width:100%;height:100%}
+/* "All" is a view, not a colour, so it reads as a label rather than a chip of
+   paint that would imply a colourway the product does not have. */
+.swatch--all{background:var(--sf);border-style:dashed}
+.swatch-all-mark{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--tx)}
 .swatch.sel{outline:2px solid var(--ac-btn);outline-offset:2px;border-color:transparent}
 .swatch:disabled{opacity:.35;cursor:default}
 .swatch-name{font-size:13px;color:var(--tx);margin-bottom:10px}
