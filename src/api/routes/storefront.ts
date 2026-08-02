@@ -520,7 +520,13 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
          <meta name="robots" content="noindex">
          <style>:root{--th-site-max:100%}${CSS}${PRODUCT_GRID_FALLBACK_CSS}
            body{margin:0;padding:18px;background:var(--bg,#fff);display:flex;justify-content:center}
-           .c-product-grid__list{max-width:340px}</style>
+           .c-product-grid__list{max-width:340px}
+           /* INERT. This is a picture of a card, not a card: a preview inside
+              the admin must not be able to add to the operator's cart or
+              navigate the frame away to the product page. Hover still works,
+              because hover behaviour is part of what is being previewed. */
+           .card-btn,.card-icon,.c-product-card a,[data-quick-buy],[data-evolve-open]{pointer-events:none}
+           </style>
          </head><body>${cards}</body></html>`,
       );
     }

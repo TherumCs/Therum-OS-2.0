@@ -110,6 +110,32 @@ export function ProductStudio({
   const frameBox = useRef<HTMLDivElement | null>(null);
   const [frameScale, setFrameScale] = useState(0.3);
   const [cardScale, setCardScale] = useState(1);
+  // The card frame sizes ITSELF to the card. A fixed height either clips the
+  // card or leaves it swimming in empty box, and neither is a preview.
+  const [cardH, setCardH] = useState(560);
+  const cardFrame = useRef<HTMLIFrameElement | null>(null);
+  /**
+   * Size the card frame to the card.
+   *
+   * Measured from the PARENT rather than the iframe's load event: a cached
+   * frame fires load before React attaches the handler, and the height then
+   * stays at its initial guess forever — which is exactly what happened. This
+   * polls briefly instead, so it cannot miss the event, and stops as soon as
+   * the height settles.
+   */
+  useEffect(() => {
+    if (preview !== 'card') return;
+    let last = 0, stable = 0;
+    const tick = window.setInterval(() => {
+      const body = cardFrame.current?.contentDocument?.body;
+      if (!body) return;
+      const h = Math.ceil(body.scrollHeight) + 4;
+      if (h === last) { if (++stable > 3) window.clearInterval(tick); return; }
+      last = h; stable = 0; setCardH(h);
+    }, 250);
+    const stop = window.setTimeout(() => window.clearInterval(tick), 6000);
+    return () => { window.clearInterval(tick); window.clearTimeout(stop); };
+  }, [preview, frameKey]);
   useEffect(() => {
     const el = frameBox.current;
     if (!el) return;
@@ -123,9 +149,8 @@ export function ProductStudio({
     const fit = () => {
       const w = el.clientWidth || FRAME_W;
       setFrameScale(Math.min(1, w / FRAME_W));
-      // Cards are allowed to scale UP to fill the column, capped so a very wide
-      // panel does not blow one card up past legibility.
-      setCardScale(Math.min(1.8, w / CARD_FRAME_W));
+      // Kept for the page frame only; the card renders at natural size.
+      setCardScale(1);
     };
     fit();
     const ro = new ResizeObserver(fit);
@@ -332,19 +357,22 @@ export function ProductStudio({
              own settings. The hand-built mock could not honour the sixteen
              card settings, so it disagreed with the shop the moment any of
              them was touched. */
-          <div className="th-pv-frame th-pv-frame--card" ref={frameBox}>
+          <div className="th-pv-frame th-pv-frame--card" ref={frameBox} style={{ height: cardH }}>
             <iframe
               key={`card-${frameKey}`}
+              ref={cardFrame}
               title="Card preview"
               src={`/shop?preview=card&q=${encodeURIComponent(p.name)}`}
               /* A CARD is small, so it renders at a narrow width and scales UP
                  to fill the column — the page frame keeps the desktop width
                  because a page has to be seen in its real proportions. */
-              style={{ width: CARD_FRAME_W, height: 900, transform: `scale(${cardScale})`, transformOrigin: '0 0' }}
+              /* NO transform. A card at its natural width already fits this
+                 column, and scaling it meant the frame's height and the
+                 content's height were computed from two different numbers —
+                 which clipped the bottom of the card by whatever they
+                 disagreed by. Width 100%, height measured, nothing scaled. */
+              style={{ width: '100%', height: cardH }}
             />
-            {/* Gives the scroll container the SCALED height — without it the
-                box either clips the page or scrolls past its end. */}
-            <div style={{ height: Math.round(900 * cardScale) }} aria-hidden="true" />
           </div>
         ) : (
           /* The REAL page, in a scrolling frame. A hand-built mock drifts from
