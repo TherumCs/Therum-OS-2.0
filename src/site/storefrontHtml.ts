@@ -213,19 +213,26 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 .pdp--apple .gallery-strip > .gallery-thumb{height:64px}
 
 /* Athletic: the imagery runs edge to edge and the details float over it. */
-.pdp--athletic{grid-template-columns:minmax(0,1fr);gap:0;position:relative}
+/* Two columns: imagery on the left, the buy controls on the right. The info
+   used to float ON the photograph, which meant the hero had to be cropped to
+   leave room for it — and cropping a product shot to fit a layout is the
+   layout winning an argument it should not be in. */
+.pdp--athletic{grid-template-columns:minmax(0,1fr) minmax(300px,400px);gap:32px;position:relative}
 .pdp--athletic .pdp__media{width:100%}
 /* The hero is CAPPED. Without a height the product image simply fills the
    viewport and every one of these layouts renders as the same giant photo —
    the arrangement only becomes visible once the image stops being the page. */
-.pdp--athletic .gallery-main{height:min(60vh,600px)}
-.pdp--athletic .gallery-main img{width:100%;height:100%;object-fit:cover}
-/* Athletic is the exception: fixed thumbs tucked at the corner of the bleed,
-   not a full-width strip, which is how the reference composes it. */
-.pdp--athletic .gallery-strip{display:flex;gap:10px;justify-content:flex-start}
-.pdp--athletic .gallery-strip > .gallery-thumb{flex:0 0 72px;height:72px}
+.pdp--athletic .gallery-main{height:min(58vh,560px);display:flex;align-items:center;justify-content:center;background:var(--sf2)}
+/* CONTAIN, not cover: the whole product, scaled down, rather than a crop of it. */
+.pdp--athletic .gallery-main img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}
+/* A real grid of images under the hero, not a row of chips — big enough to be
+   worth looking at, and sitting to the LEFT of the colour and cart controls. */
+.pdp--athletic .gallery-strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin-top:10px}
+.pdp--athletic .gallery-strip > .gallery-thumb{flex:none;height:auto;aspect-ratio:1;background:var(--sf2)}
+.pdp--athletic .gallery-strip > .gallery-thumb img{object-fit:contain;padding:6px}
+.pdp--athletic .pdp__info{position:static;margin:0;width:auto;box-shadow:none;background:transparent;border:0;padding:0}
 .pdp--athletic .pdp__info{position:relative;margin:-120px 24px 0 auto;width:min(400px,100%);background:var(--sf);border:1px solid var(--bd2);border-radius:var(--radius-md);padding:24px;z-index:2;box-shadow:0 18px 48px rgba(0,0,0,.10)}
-@media(max-width:900px){.pdp--athletic .pdp__info{margin:16px auto 0}}
+@media(max-width:900px){.pdp--athletic{grid-template-columns:minmax(0,1fr)}}
 
 /* Editorial: oversized wordmark, overlapping hero, price inside the button. */
 .pdp--editorial{grid-template-columns:minmax(0,1fr);gap:0}
@@ -234,8 +241,13 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
    right, which is not an editorial composition — it is a narrow layout in a
    wide container. */
 .pdp--editorial .pdp__media{position:relative;z-index:1}
-.pdp--editorial .gallery-main{height:min(56vh,560px)}
-.pdp--editorial .gallery-main img{width:100%;height:100%;object-fit:cover}
+.pdp--editorial .gallery-main{height:min(56vh,560px);display:flex;align-items:center;justify-content:center;background:var(--sf2)}
+/* The hero stays large but is never cut — scaled to fit rather than filled. */
+.pdp--editorial .gallery-main img{max-width:100%;max-height:100%;width:auto;height:auto;object-fit:contain}
+/* 16:9 thumbs: wide enough to span the full hero width without becoming tall
+   squares that push the buy controls off the screen. */
+.pdp--editorial .gallery-strip > .gallery-thumb{height:auto;aspect-ratio:16/9;background:var(--sf2)}
+.pdp--editorial .gallery-strip > .gallery-thumb img{object-fit:contain;padding:6px}
 .pdp--editorial .pdp__info{max-width:760px;margin-top:28px}
 .pdp--editorial .product-title{display:none}
 .pdp--editorial .trust-row{display:flex;gap:24px;margin:14px 0 0;font-size:12px;color:var(--tx2,var(--tx));opacity:.8}
