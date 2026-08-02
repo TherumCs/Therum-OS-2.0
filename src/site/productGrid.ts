@@ -1164,15 +1164,26 @@ export const PRODUCT_GRID_FALLBACK_CSS = `
 /* ── ACTIONS ────────────────────────────────────────────────────────────── */
 .card-actions{display:flex;flex-direction:column;gap:8px;margin-top:2px}
 .card-actions--dual{flex-direction:column}
-.card-btn{display:block;text-align:center;padding:11px 14px;border-radius:999px;text-decoration:none;
-  font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;border:solid 1px currentColor}
-.card-btn--solid{background:var(--button-color,#111);color:var(--white-color,#fff)!important;border-color:var(--button-color,#111)}
+/* The SAME button language as the rest of the site.
+   Cards shipped pill-shaped buttons while every other button on the store is
+   square, uppercase and ink — so a card looked like it came from a different
+   product. This matches the ported theme's .c-button spec (12px/600, .06em
+   tracking, uppercase, square, 1px border) at card scale, and every preset
+   uses it, so one button and two buttons read the same everywhere. */
+.card-btn{display:block;text-align:center;padding:12px 14px;border-radius:0;text-decoration:none;line-height:1;
+  font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;
+  border:solid 1px var(--button-color,#070707);transition:background .15s linear,color .15s linear,border-color .15s linear}
+.card-btn--solid{background:var(--button-color,#070707);color:var(--white-color,#fff)!important;border-color:var(--button-color,#070707)}
+.card-btn--solid:hover{background:#252525;border-color:#252525}
+/* The second of the two buttons: outlined, and it FILLS on hover, so the pair
+   reads as one control set rather than a button beside a link. */
 .card-btn--ghost{background:transparent;color:inherit}
-.card-btn--out{background:transparent;color:var(--text-color-light,#999);cursor:default}
+.card-btn--ghost:hover{background:var(--button-color,#070707);color:var(--white-color,#fff)!important;border-color:var(--button-color,#070707)}
+.card-btn--out{background:transparent;color:var(--text-color-light,#999);border-color:currentColor;cursor:default}
 .card-icons{display:flex;gap:8px;margin-top:2px}
 .card-icon{flex:1;display:inline-flex;align-items:center;justify-content:center;height:38px;border-radius:10px;
   border:0;background:var(--background-color-dark,#f4f4f5);cursor:pointer;text-decoration:none;color:inherit;font-size:15px}
-.card-icon--solid{background:var(--button-color,#111);color:var(--white-color,#fff)}
+.card-icon--solid{border-radius:0;background:var(--button-color,#111);color:var(--white-color,#fff)}
 .card-icon--off{background:var(--background-color-dark,#f4f4f5);color:var(--text-color-light,#bbb);cursor:default}
 .card-icon__heart:before{content:'\\2661';font-size:17px;line-height:1}
 .card-icon[aria-pressed="true"] .card-icon__heart:before{content:'\\2665'}

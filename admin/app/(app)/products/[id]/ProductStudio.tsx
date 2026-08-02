@@ -105,8 +105,11 @@ export function ProductStudio({
    * Rendering at 1280 and scaling down shows the real desktop composition.
    */
   const FRAME_W = 1280;
+  // A single card only needs a card's worth of width.
+  const CARD_FRAME_W = 430;
   const frameBox = useRef<HTMLDivElement | null>(null);
   const [frameScale, setFrameScale] = useState(0.3);
+  const [cardScale, setCardScale] = useState(1);
   useEffect(() => {
     const el = frameBox.current;
     if (!el) return;
@@ -117,7 +120,13 @@ export function ProductStudio({
     // true measure of the space available rather than a reflection of its
     // 1280px child. Measuring the child's container while the child defines it
     // is what pinned the scale at half the column.
-    const fit = () => setFrameScale(Math.min(1, (el.clientWidth || FRAME_W) / FRAME_W));
+    const fit = () => {
+      const w = el.clientWidth || FRAME_W;
+      setFrameScale(Math.min(1, w / FRAME_W));
+      // Cards are allowed to scale UP to fill the column, capped so a very wide
+      // panel does not blow one card up past legibility.
+      setCardScale(Math.min(1.8, w / CARD_FRAME_W));
+    };
     fit();
     const ro = new ResizeObserver(fit);
     ro.observe(el);
@@ -328,11 +337,14 @@ export function ProductStudio({
               key={`card-${frameKey}`}
               title="Card preview"
               src={`/shop?preview=card&q=${encodeURIComponent(p.name)}`}
-              style={{ width: FRAME_W, height: 1100, transform: `scale(${frameScale})`, transformOrigin: '0 0' }}
+              /* A CARD is small, so it renders at a narrow width and scales UP
+                 to fill the column — the page frame keeps the desktop width
+                 because a page has to be seen in its real proportions. */
+              style={{ width: CARD_FRAME_W, height: 900, transform: `scale(${cardScale})`, transformOrigin: '0 0' }}
             />
             {/* Gives the scroll container the SCALED height — without it the
                 box either clips the page or scrolls past its end. */}
-            <div style={{ height: Math.round(1100 * frameScale) }} aria-hidden="true" />
+            <div style={{ height: Math.round(900 * cardScale) }} aria-hidden="true" />
           </div>
         ) : (
           /* The REAL page, in a scrolling frame. A hand-built mock drifts from

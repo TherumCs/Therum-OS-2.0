@@ -443,7 +443,11 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
           // sends the shopper to the PDP rather than guessing for them.
           hasOptions: p.variants.length > 1,
           quickVariantId: p.variants.length === 1 ? (p.variants[0]?.id ?? null) : null,
-          stock: p.variants.reduce((n, v) => n + Math.max(0, v.inventory - v.reserved), 0),
+          // availableOf, NOT raw inventory. A print-on-demand line carries
+          // inventory 0 and stockStatus 'in_stock', so counting the column
+          // made every POD product read as SOLD OUT on its card — which also
+          // collapsed the two-button action to a single "Sold out" chip.
+          stock: p.variants.reduce((n, v) => n + availableOf(v), 0),
           brand: p.vendor?.name ?? null,
           colors: [...new Set(p.variants.map((v) => v.color).filter((c): c is string => !!c))],
           // Same hex the product page paints, keyed by colour name, so a card
@@ -456,7 +460,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
           sizes: [...new Set(p.variants.map((v) => v.size).filter((z): z is string => !!z))],
           variants: p.variants.map((v) => ({
             id: v.id, color: v.color, size: v.size, price: v.price,
-            available: Math.max(0, v.inventory - v.reserved),
+            available: availableOf(v),
           })),
           rating: ratings.get(p.id) ?? null,
           memberPct,

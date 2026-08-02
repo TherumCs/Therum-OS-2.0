@@ -2084,7 +2084,8 @@ tr:hover .th-rowactions, tr:focus-within .th-rowactions { opacity: 1; }
 /* Scrolls, so the whole page can be walked through rather than just its fold.
    The iframe is rendered wide and scaled, so what you scroll is the desktop
    layout — not the mobile one the narrow column would otherwise trigger. */
-.th-pv-frame--card { height: 560px; }
+/* Roomier than the page frame: a card is small, so it can be shown big. */
+.th-pv-frame--card { height: 780px; }
 .th-pv-frame { position: relative; width: 100%; height: 620px; border: 1px solid var(--th-line); border-radius: 12px; overflow-y: auto; overflow-x: hidden; background: #fff; }
 /* Out of flow: an in-flow 1280px child makes its own container 1280px wide,
    so every attempt to measure the available space returned the child's width
