@@ -280,10 +280,16 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 /* One size everywhere, square, and aligned to the gallery's left edge. The
    strip used to inherit whatever the layout gave it, so the same product
    showed 64px thumbs in one style and stretched ones in another. */
-.gallery-thumb{height:92px;border-radius:var(--radius-md);border:1px solid var(--bd2);padding:0;overflow:hidden;cursor:pointer;background:var(--sf2);transition:border-color var(--e)}
+/* The ring is QUIET until it means something. Every thumb used to carry a
+   visible box, so the row read as a set of framed tiles and the selected one
+   had to shout to stand out. Unselected thumbs now show no border at all; the
+   selection is the only ring on screen and needs no extra weight to be found.
+   The border is always 2px and only changes COLOUR, so selecting one cannot
+   nudge the row by a pixel. */
+.gallery-thumb{height:92px;border-radius:var(--radius-md);border:2px solid transparent;padding:0;overflow:hidden;cursor:pointer;background:var(--sf2);transition:border-color var(--e)}
 .gallery-thumb img{width:100%;height:100%;object-fit:cover;display:block}
-.gallery-thumb:hover{border-color:var(--tx)}
-.gallery-thumb.sel{border-color:var(--ac-btn);border-width:2px}
+.gallery-thumb:hover{border-color:var(--bd2)}
+.gallery-thumb.sel{border-color:var(--ac-btn)}
 .gallery-thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .gallery-thumb.sel{border-color:var(--ac-btn)}
 .product-desc{margin-top:22px;padding-top:18px;border-top:1px solid var(--bd);font-size:14px;color:var(--tx2);line-height:1.7}
