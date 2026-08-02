@@ -198,8 +198,19 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 .pdp--apple .gallery-main img{width:100%;height:100%;object-fit:contain}
 .pdp--apple .pdp__info{max-width:560px}
 .pdp--apple .variant-picker,.pdp--apple .swatches,.pdp--apple .gallery-strip{justify-content:center}
-.pdp--apple .product-title{font-size:clamp(28px,4vw,44px);letter-spacing:-.02em;line-height:1.1}
-.pdp--apple .price{font-size:20px}
+.pdp--apple .product-title{font-size:clamp(32px,5vw,56px);letter-spacing:-.03em;line-height:1.05;font-weight:700;margin:0 0 6px}
+.pdp--apple .price{font-size:19px;font-weight:600;opacity:.9;margin-bottom:4px}
+.pdp--apple .stock-note{font-size:13px;opacity:.65;margin-bottom:28px}
+/* Apple labels each choice above a centred row, with the CHOSEN value spelled
+   out beside it — the swatch alone never tells you what you picked. */
+.pdp--apple .pdp__info label{display:block;font-size:13px;font-weight:600;letter-spacing:0;text-transform:none;margin:26px 0 10px;opacity:.9}
+.pdp--apple .swatch-name{font-size:13px;opacity:.7;margin:10px 0 0}
+.pdp--apple .single-size{font-size:13px;opacity:.7}
+.pdp--apple .btn{min-width:260px;margin-top:32px;border-radius:var(--radius-pill,999px);padding:16px 34px}
+.pdp--apple .product-desc{margin-top:34px;font-size:15px;line-height:1.7;opacity:.85;max-width:520px;margin-left:auto;margin-right:auto}
+.pdp--apple .taxonomy-row{justify-content:center}
+.pdp--apple .gallery-strip{max-width:420px;margin-left:auto;margin-right:auto}
+.pdp--apple .gallery-strip > .gallery-thumb{height:64px}
 
 /* Athletic: the imagery runs edge to edge and the details float over it. */
 .pdp--athletic{grid-template-columns:minmax(0,1fr);gap:0;position:relative}
@@ -209,7 +220,10 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
    the arrangement only becomes visible once the image stops being the page. */
 .pdp--athletic .gallery-main{height:min(60vh,600px)}
 .pdp--athletic .gallery-main img{width:100%;height:100%;object-fit:cover}
+/* Athletic is the exception: fixed thumbs tucked at the corner of the bleed,
+   not a full-width strip, which is how the reference composes it. */
 .pdp--athletic .gallery-strip{display:flex;gap:10px;justify-content:flex-start}
+.pdp--athletic .gallery-strip > .gallery-thumb{flex:0 0 72px;height:72px}
 .pdp--athletic .pdp__info{position:relative;margin:-120px 24px 0 auto;width:min(400px,100%);background:var(--sf);border:1px solid var(--bd2);border-radius:var(--radius-md);padding:24px;z-index:2;box-shadow:0 18px 48px rgba(0,0,0,.10)}
 @media(max-width:900px){.pdp--athletic .pdp__info{margin:16px auto 0}}
 
@@ -229,6 +243,7 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 /* Thumbnails beside the main image instead of under it. */
 .pdp--thumbside .gallery{display:grid;grid-template-columns:72px minmax(0,1fr);gap:12px;align-items:start}
 .pdp--thumbside .gallery-strip{display:grid;grid-auto-rows:72px;gap:10px;order:-1;margin-top:0}
+.pdp--thumbside .gallery-strip > .gallery-thumb{flex:none;height:72px}
 .pdp--thumbnone .gallery-strip{display:none}
 .product-hero{display:grid;grid-template-columns:1fr 1fr;gap:36px;align-items:start}
 @media(max-width:860px){.product-hero{grid-template-columns:1fr}}
@@ -244,11 +259,16 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 .filter-chip:hover{color:var(--tx);border-color:var(--tx3)}
 .filter-chip.active{background:var(--ac-btn);border-color:var(--ac-btn);color:#fff}
 .gallery-main{margin-bottom:10px}
-.gallery-strip{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;align-items:flex-start}
+/* The strip spans the width of the image above it, so the gallery reads as one
+   block rather than a big picture with a few chips loose underneath. Each thumb
+   takes an equal share; the height is fixed so a wide image cannot make them
+   tall enough to compete with the hero. */
+.gallery-strip{display:flex;gap:10px;margin-top:12px;align-items:stretch}
+.gallery-strip > .gallery-thumb{flex:1 1 0;min-width:0}
 /* One size everywhere, square, and aligned to the gallery's left edge. The
    strip used to inherit whatever the layout gave it, so the same product
    showed 64px thumbs in one style and stretched ones in another. */
-.gallery-thumb{width:72px;height:72px;flex:0 0 72px;border-radius:var(--radius-md);border:1px solid var(--bd2);padding:0;overflow:hidden;cursor:pointer;background:var(--sf2);transition:border-color var(--e)}
+.gallery-thumb{height:92px;border-radius:var(--radius-md);border:1px solid var(--bd2);padding:0;overflow:hidden;cursor:pointer;background:var(--sf2);transition:border-color var(--e)}
 .gallery-thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .gallery-thumb:hover{border-color:var(--tx)}
 .gallery-thumb.sel{border-color:var(--ac-btn);border-width:2px}
