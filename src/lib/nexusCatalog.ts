@@ -82,6 +82,24 @@ export interface CatalogProvider {
   connectsVia?: 'api-key' | 'oauth' | 'store-pull-woo' | 'store-pull-shopify';
   /** Extra guidance shown under the fields — the "where do I find this" line. */
   note?: string;
+  /**
+   * The provider's OWN connect page, for the "approve on their site" route.
+   *
+   * Distinct from OAuth: there is no consent callback and nothing comes back
+   * automatically. You are sent to the page where this provider starts the
+   * connection from ITS side — which for the print-on-demand partners is how
+   * the whole thing is meant to begin. Only set where such a page genuinely
+   * exists; an "Authorize" button that opens a marketing page is worse than no
+   * button, because it looks like a step that was completed.
+   */
+  authorizeUrl?: string;
+  /**
+   * Also accepts a plain provider-issued API token, ALONGSIDE whatever else it
+   * supports. Printful is the case that proves it matters: its WooCommerce
+   * connection wants a key pair this store issues, AND its API takes a private
+   * token — two working routes, and the operator has to be able to pick.
+   */
+  apiTokenAlso?: { label: string; hint?: string };
 }
 
 export const CATEGORY_LABELS: Record<ConnectionCategory, string> = {
@@ -152,11 +170,11 @@ export const nexusCatalog: CatalogProvider[] = [
   // The panel asked for a Consumer key + secret, which no longer authenticates
   // anything — so it is a token field now. Store ID is still needed by accounts
   // with more than one store.
-  { id: 'printful', name: 'Printful', category: 'fulfillment', authType: 'apikey', join: '|', issuedBy: 'provider', credentialHint: 'Copy these three values out of Printful and paste them here.', fields: [{ label: 'Website' }, { label: 'Consumer key', secret: true }, { label: 'Consumer secret', secret: true }] },
-  { id: 'printify', name: 'Printify', category: 'fulfillment', authType: 'apikey', join: '|', issuedBy: 'provider', credentialHint: 'Copy these three values out of Printify and paste them here.', fields: [{ label: 'Website' }, { label: 'Consumer key', secret: true }, { label: 'Consumer secret', secret: true }] },
-  { id: 'gelato', name: 'Gelato', category: 'fulfillment', authType: 'apikey', join: '|', issuedBy: 'provider', credentialHint: 'Copy these three values out of Gelato and paste them here.', fields: [{ label: 'Website' }, { label: 'Consumer key', secret: true }, { label: 'Consumer secret', secret: true }] },
+  { id: 'printful', name: 'Printful', category: 'fulfillment', authType: 'apikey', join: '|', issuedBy: 'provider', credentialHint: 'Copy these three values out of Printful and paste them here.', fields: [{ label: 'Website' }, { label: 'Consumer key', secret: true }, { label: 'Consumer secret', secret: true }], authorizeUrl: 'https://www.printful.com/dashboard/store', apiTokenAlso: { label: 'Printful private token', hint: 'developers.printful.com > Tokens > Create a token. Reads their API directly — this is what pulls your catalogue.' } },
+  { id: 'printify', name: 'Printify', category: 'fulfillment', authType: 'apikey', join: '|', issuedBy: 'provider', credentialHint: 'Copy these three values out of Printify and paste them here.', fields: [{ label: 'Website' }, { label: 'Consumer key', secret: true }, { label: 'Consumer secret', secret: true }], authorizeUrl: 'https://printify.com/app/store/manage', apiTokenAlso: { label: 'Printify personal access token', hint: 'printify.com > My profile > Connections > Generate token.' } },
+  { id: 'gelato', name: 'Gelato', category: 'fulfillment', authType: 'apikey', join: '|', issuedBy: 'provider', credentialHint: 'Copy these three values out of Gelato and paste them here.', fields: [{ label: 'Website' }, { label: 'Consumer key', secret: true }, { label: 'Consumer secret', secret: true }], authorizeUrl: 'https://dashboard.gelato.com/stores', apiTokenAlso: { label: 'Gelato API key', hint: 'dashboard.gelato.com > Developers > API keys.' } },
   { id: 'gooten', name: 'Gooten', category: 'fulfillment', authType: 'apikey', join: '|', issuedBy: 'provider', credentialHint: 'Copy these three values out of Gooten and paste them here.', fields: [{ label: 'Website' }, { label: 'Consumer key', secret: true }, { label: 'Consumer secret', secret: true }] },
-  { id: 'spod', name: 'SPOD', category: 'fulfillment', authType: 'apikey', join: '|', issuedBy: 'provider', credentialHint: 'Copy these three values out of SPOD and paste them here.', fields: [{ label: 'Website' }, { label: 'Consumer key', secret: true }, { label: 'Consumer secret', secret: true }] },
+  { id: 'spod', name: 'SPOD', category: 'fulfillment', authType: 'apikey', join: '|', issuedBy: 'provider', credentialHint: 'Copy these three values out of SPOD and paste them here.', fields: [{ label: 'Website' }, { label: 'Consumer key', secret: true }, { label: 'Consumer secret', secret: true }], authorizeUrl: 'https://spod.com/dashboard' },
   // Bam's named POD partners (2026-07-24): store-and-hold until their fleet
   // modules land — no live testers wired until each API is verified.
   { id: 'podplus', name: 'Podplus', category: 'fulfillment', authType: 'apikey', join: '|', issuedBy: 'provider', credentialHint: 'Copy these three values out of Podplus and paste them here.', fields: [{ label: 'Website' }, { label: 'Consumer key', secret: true }, { label: 'Consumer secret', secret: true }] },

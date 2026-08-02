@@ -805,6 +805,16 @@ model Connection {
   credentialEncrypted String    @map("credential_encrypted")
   maskedPreview       String    @map("masked_preview")
   status              String    @default("connected") // connected | error
+  /**
+   * WHICH connect route this credential came from.
+   *
+   * A provider can offer several — Printful takes a key pair this store issues
+   * AND a private token of its own — and the stored string means different
+   * things in each case. Without this the tester has to guess, and testing a
+   * token as if it were a store key reports "failed" for a credential that is
+   * perfectly good.
+   */
+  method              String?   @default("fields")
   connectedAt         DateTime  @default(now()) @map("connected_at")
   lastTestedAt        DateTime? @map("last_tested_at")
   lastTestOk          Boolean?  @map("last_test_ok")

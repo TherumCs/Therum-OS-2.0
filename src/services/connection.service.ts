@@ -108,6 +108,29 @@ const OAUTH_CAPABLE = new Set(oauthService.providers());
 
 /** The consumer key/secret pair a POD partner gives you, checked against the
  *  website it gave you with it. */
+/**
+ * Testers for the API-TOKEN route, keyed by provider.
+ *
+ * A provider that offers more than one way in needs more than one test. The
+ * store-pull tester logs in to the MERCHANT'S site with a key pair; a private
+ * token is for the PROVIDER'S API. Running the wrong one reports a failure for
+ * a credential that works, which is how a good key gets thrown away and
+ * regenerated.
+ */
+export const TOKEN_TESTERS: Record<string, Tester> = {
+  printful: async (c) => {
+    const [token, storeId] = c.split('|');
+    const headers: Record<string, string> = { authorization: `Bearer ${token}` };
+    if (storeId) headers['X-PF-Store-Id'] = storeId;
+    return get('https://api.printful.com/stores', headers);
+  },
+  printify: async (c) => {
+    const [token] = c.split('|');
+    return get('https://api.printify.com/v1/shops.json', { authorization: `Bearer ${token}` });
+  },
+  gelato: async (c) => get('https://ecommerce.gelatoapis.com/v1/stores', { 'X-API-KEY': c.split('|')[0] ?? c }),
+};
+
 const wooStyle: Tester = async (c) => {
   // The consumer key/secret pair comes FROM the provider — Printful issues it
   // in its own dashboard — so it is checked against the PROVIDER's API, not
@@ -458,8 +481,13 @@ export const connectionService = {
         ...p,
         connected: Boolean(row),
         maskedPreview: row?.maskedPreview ?? null,
+        authorizeUrl: p.authorizeUrl ?? null,
+        apiTokenAlso: p.apiTokenAlso ?? null,
         status: row?.status ?? null,
         connectedAt: row?.connectedAt ?? null,
+        // Which route this credential came from, so the card can say so and
+        // reopen on the right form instead of the default one.
+        method: row?.method ?? null,
         lastTestedAt: row?.lastTestedAt ?? null,
         lastTestOk: row?.lastTestOk ?? null,
         testable: Boolean(TESTERS[p.id]) || p.id.startsWith('custom-'),
@@ -471,17 +499,20 @@ export const connectionService = {
     });
   },
 
-  async connect(providerId: string, credential: string, actorId: string) {
+  async connect(providerId: string, credential: string, actorId: string, method = 'fields') {
     const provider = findProvider(providerId);
     if (!provider) throw new NotFoundError('Unknown provider', 'providerId');
     if (!credential.trim()) throw new ConflictError('Credential is required.', 'credential');
-    validateCredential(provider, credential);
+    // Field validation applies to the FIELDS route only. A private token is
+    // one opaque string and would fail a "needs 3 values" check written for
+    // the store-pull form.
+    if (method === 'fields') validateCredential(provider, credential);
     const encrypted = encryptSecret(credential);
     const masked = maskSecret(credential);
     await db.connection.upsert({
       where: { provider: providerId },
-      update: { credentialEncrypted: encrypted, maskedPreview: masked, status: 'connected', connectedAt: new Date(), lastTestedAt: null, lastTestOk: null },
-      create: { provider: providerId, category: provider.category, credentialEncrypted: encrypted, maskedPreview: masked },
+      update: { credentialEncrypted: encrypted, maskedPreview: masked, status: 'connected', connectedAt: new Date(), lastTestedAt: null, lastTestOk: null, method },
+      create: { provider: providerId, category: provider.category, credentialEncrypted: encrypted, maskedPreview: masked, method },
     });
     await db.connectionAuditLog.create({ data: { provider: providerId, action: 'connect', actorId } });
     return { provider: providerId, maskedPreview: masked };
@@ -498,7 +529,11 @@ export const connectionService = {
   async test(providerId: string, actorId: string): Promise<TestResult> {
     // Custom connectors can opt into testing by storing "key|https://url" —
     // the test is a bearer GET against the URL they named. No URL = no test.
-    let tester = TESTERS[providerId];
+    // The method the credential was SAVED with decides the test. Falling back
+    // to the default tester when a token route has none is deliberate: a wrong
+    // test is worse than no test.
+    const saved = await db.connection.findUnique({ where: { provider: providerId }, select: { method: true } });
+    let tester = saved?.method === 'api-token' ? TOKEN_TESTERS[providerId] ?? TESTERS[providerId] : TESTERS[providerId];
     if (!tester && providerId.startsWith('custom-')) {
       tester = async (c: string) => {
         const pipeAt = c.indexOf('|https://');

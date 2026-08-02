@@ -14,6 +14,12 @@ export interface ConnectionRow {
   issuedBy?: 'provider' | 'your-store';
   connectsVia?: 'api-key' | 'oauth' | 'store-pull-woo' | 'store-pull-shopify';
   oauthCapable?: boolean;
+  /** The provider's own connect page, for the "approve on their site" route. */
+  authorizeUrl?: string | null;
+  /** This provider ALSO accepts a plain token it issues. */
+  apiTokenAlso?: { label: string; hint?: string } | null;
+  /** Which route the stored credential came from. */
+  method?: string | null;
   // Structured parts for key+secret-style providers (see nexusCatalog.ts) —
   // rendered as one input each, joined with `join` into the vault string.
   fields?: { label: string; secret?: boolean; optional?: boolean; example?: string }[];
@@ -41,6 +47,41 @@ export interface ConnectionRow {
  * provider's own token is for a different job entirely.
  */
 export type ConnectMode = 'store-pull' | 'oauth' | 'api-key';
+
+export interface ConnectMethod { key: 'fields' | 'api-token' | 'oauth' | 'store-pull'; label: string; blurb: string }
+
+/**
+ * EVERY route this provider offers, so the operator picks rather than the
+ * screen deciding for them.
+ *
+ * The old behaviour chose one and hid the rest, which is exactly how Printful
+ * became impossible: it accepts a key pair this store issues AND a private
+ * token of its own, and only one of those was ever on screen.
+ */
+export function connectMethods(r: {
+  connectsVia?: string; authType?: string; oauthCapable?: boolean;
+  authorizeUrl?: string | null; apiTokenAlso?: { label: string } | null; fields?: unknown[];
+}): ConnectMethod[] {
+  const out: ConnectMethod[] = [];
+  const storePull = r.connectsVia === 'store-pull-woo' || r.connectsVia === 'store-pull-shopify';
+  if (storePull) {
+    out.push({ key: 'store-pull', label: 'Store key', blurb: 'This store issues a key pair and the provider logs in with it.' });
+  } else if (r.authType !== 'oauth' || r.fields?.length) {
+    out.push({ key: 'fields', label: 'Provider details', blurb: 'Paste what the provider gives you.' });
+  }
+  if (r.apiTokenAlso) {
+    out.push({ key: 'api-token', label: 'API token', blurb: 'A token the provider issues, for calling their API directly.' });
+  }
+  if (r.authorizeUrl) {
+    out.push({ key: 'oauth', label: 'Authorize on their site', blurb: 'Open the provider and start the connection from their end.' });
+  }
+  if (r.authType === 'oauth' || r.oauthCapable) {
+    if (!out.some((m) => m.key === 'oauth')) {
+      out.push({ key: 'oauth', label: 'Sign in', blurb: 'Authorise in the browser — nothing to paste.' });
+    }
+  }
+  return out;
+}
 
 export function connectMode(r: { connectsVia?: string; authType?: string; oauthCapable?: boolean }): ConnectMode {
   if (r.connectsVia === 'store-pull-woo' || r.connectsVia === 'store-pull-shopify') return 'store-pull';
@@ -203,6 +244,10 @@ export function ConnectionsClient({
   // the management surface"). '__custom__' = the blank-card add-custom form.
   const [openId, setOpenId] = useState<string | null>(null);
   const [credential, setCredential] = useState('');
+  // Which route the operator picked, per provider. Defaults to the first one
+  // the provider offers; a connected provider reopens on the route it was
+  // connected with rather than snapping back to the default.
+  const [methodFor, setMethodFor] = useState<Record<string, string>>({});
   // Per-part values for providers with structured fields (key+secret etc).
   const [fieldValues, setFieldValues] = useState<string[]>([]);
 
@@ -257,7 +302,7 @@ export function ConnectionsClient({
     setActionError('');
   }
 
-  async function connect(id: string, value?: string): Promise<void> {
+  async function connect(id: string, value?: string, method?: string): Promise<void> {
     const cred = value ?? credential;
     if (!cred.trim()) return;
     setBusy(id);
@@ -265,7 +310,7 @@ export function ConnectionsClient({
       const res = await fetch(`${BASE_PATH}/api/connections/${id}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ credential: cred }),
+        body: JSON.stringify({ credential: cred, method: method ?? methodFor[id] ?? 'fields' }),
       });
       if (await surface(res)) {
         setCredential('');
@@ -400,8 +445,68 @@ export function ConnectionsClient({
                 </div>
               )}
 
+              {/* HOW to connect — the operator chooses, rather than the screen
+                  choosing for them and hiding the rest. Only rendered when the
+                  provider genuinely offers more than one route; a single-route
+                  provider gets no pointless picker. */}
+              {r && !r.connected && connectMethods(r).length > 1 && (
+                <div style={{ marginTop: 16 }}>
+                  <p style={{ margin: '0 0 8px', fontSize: 11, fontWeight: 600, color: 'var(--th-muted)' }}>How do you want to connect?</p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                    {connectMethods(r).map((m) => {
+                      const on = (methodFor[r.id] ?? connectMethods(r)[0]?.key) === m.key;
+                      return (
+                        <button
+                          key={m.key}
+                          type="button"
+                          onClick={() => { setMethodFor({ ...methodFor, [r.id]: m.key }); setCredential(''); setFieldValues([]); }}
+                          style={{
+                            padding: '7px 12px', fontSize: 12, borderRadius: 8, cursor: 'pointer',
+                            border: '1px solid ' + (on ? 'var(--th-ink, #070707)' : 'var(--th-line)'),
+                            background: on ? 'var(--th-ink, #070707)' : 'transparent',
+                            color: on ? '#fff' : 'inherit', fontWeight: on ? 600 : 400,
+                          }}
+                        >{m.label}</button>
+                      );
+                    })}
+                  </div>
+                  <p style={{ margin: '8px 0 0', fontSize: 11, color: 'var(--th-muted)', lineHeight: 1.5 }}>
+                    {connectMethods(r).find((m) => m.key === (methodFor[r.id] ?? connectMethods(r)[0]?.key))?.blurb}
+                  </p>
+                </div>
+              )}
+
+              {/* API TOKEN — a token the provider issues, for calling its API
+                  directly. Separate from the store-key route above because the
+                  two are different credentials for different directions, and
+                  the tester picks its check from whichever was used. */}
+              {r && r.apiTokenAlso && !r.connected && (methodFor[r.id] ?? connectMethods(r)[0]?.key) === 'api-token' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--th-muted)' }}>{r.apiTokenAlso.label}
+                    <input type="password" value={credential} onChange={(e) => setCredential(e.target.value)} style={{ width: '100%', marginTop: 4 }} autoFocus />
+                  </label>
+                  {r.apiTokenAlso.hint && <p style={{ margin: 0, fontSize: 11, color: 'var(--th-muted)', lineHeight: 1.5 }}>{r.apiTokenAlso.hint}</p>}
+                  <button type="button" onClick={() => void connect(r.id, credential.trim(), 'api-token')} disabled={busy === r.id || !credential.trim()}>Save token</button>
+                </div>
+              )}
+
+              {/* AUTHORIZE ON THEIR SITE — no callback, nothing comes back
+                  automatically. It opens the page where this provider starts
+                  the connection from its end, which for the print partners is
+                  how it is meant to begin. */}
+              {r && r.authorizeUrl && !r.connected && (methodFor[r.id] ?? connectMethods(r)[0]?.key) === 'oauth' && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
+                  <a className="th-btn" href={r.authorizeUrl} target="_blank" rel="noreferrer" style={{ textAlign: 'center' }}>
+                    Open {r.name} ↗
+                  </a>
+                  <p style={{ margin: 0, fontSize: 11, color: 'var(--th-muted)', lineHeight: 1.5 }}>
+                    Approve the connection there, then come back and run Test. Nothing is saved here by opening the link — that is why this route still needs one of the others to hold a credential.
+                  </p>
+                </div>
+              )}
+
               {/* OAuth providers */}
-              {r && connectMode(r) === 'oauth' && !r.connected && (
+              {r && connectMode(r) === 'oauth' && !r.connected && (methodFor[r.id] ?? connectMethods(r)[0]?.key) === 'oauth' && !r.authorizeUrl && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
                   {/* The button is shown ONLY when an OAuth app actually
                       exists for this provider. Showing it unconditionally is
@@ -502,7 +607,7 @@ export function ConnectionsClient({
                 </div>
               )}
 
-              {r && connectMode(r) === 'store-pull' && (
+              {r && connectMode(r) === 'store-pull' && (r.connected || (methodFor[r.id] ?? connectMethods(r)[0]?.key) === 'store-pull') && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
                   {/* The step nobody can guess: these partners present a LIST
                       of platforms (Shopify / Woo / Wix / Etsy …) and you have
@@ -549,7 +654,7 @@ export function ConnectionsClient({
                 </div>
               )}
 
-              {r && connectMode(r) === 'api-key' && !r.connected && (
+              {r && connectMode(r) === 'api-key' && !r.connected && (methodFor[r.id] ?? connectMethods(r)[0]?.key) === 'fields' && (
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginTop: 16 }}>
                   {/* Where the values come from, shown BEFORE the boxes. Every
                       provider used to render one identical "API key" field, so

@@ -12,8 +12,8 @@ export async function connectionRoutes(app: FastifyInstance): Promise<void> {
 
   app.post('/connections/:provider', { preHandler: [app.authenticate, requireConnectionsWrite] }, async (req, reply) => {
     const { provider } = req.params as { provider: string };
-    const { credential } = ConnectInput.parse(req.body);
-    reply.status(201).send(await connectionService.connect(provider, credential, req.user.sub));
+    const { credential, method } = ConnectInput.parse(req.body);
+    reply.status(201).send(await connectionService.connect(provider, credential, req.user.sub, method));
   });
 
   app.delete('/connections/:provider', { preHandler: [app.authenticate, requireConnectionsWrite] }, async (req, reply) => {
