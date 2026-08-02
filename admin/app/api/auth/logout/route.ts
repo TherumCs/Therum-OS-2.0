@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
-import { COOKIE_NAME } from '../../../../lib/session';
+import { COOKIE_NAME, sessionCookieDomain } from '../../../../lib/session';
 
-export async function POST(): Promise<NextResponse> {
+export async function POST(req: Request): Promise<NextResponse> {
   const response = NextResponse.json({ ok: true });
   // Explicit path: '/' to match login/setup's cookie exactly — kept for
   // clarity, though as of Next 14.2.35 it's not actually load-bearing:
@@ -14,6 +14,8 @@ export async function POST(): Promise<NextResponse> {
   // state, which looks identical to logout silently no-op'ing. See
   // test/http-auth-e2e.test.mjs for the regression coverage and how this
   // was verified.
-  response.cookies.delete({ name: COOKIE_NAME, path: '/' });
+  // Deleted with the SAME domain it was written with — a mismatch leaves the
+  // shared cookie alive and the merchant still signed in on the other host.
+  response.cookies.delete({ name: COOKIE_NAME, path: '/', domain: sessionCookieDomain(req.headers.get('host')) });
   return response;
 }

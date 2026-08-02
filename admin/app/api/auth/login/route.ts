@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { COOKIE_NAME } from '../../../../lib/session';
+import { COOKIE_NAME, sessionCookieDomain } from '../../../../lib/session';
 
 const API = process.env.API_URL ?? 'http://localhost:4100';
 
@@ -37,6 +37,9 @@ export async function POST(req: Request): Promise<NextResponse> {
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       path: '/',
+      // Shared across the apex and www, so a session started on one host is
+      // seen by the other — see sessionCookieDomain.
+      domain: sessionCookieDomain(req.headers.get('host')),
       maxAge: 60 * 60 * 12,
     });
     return response;

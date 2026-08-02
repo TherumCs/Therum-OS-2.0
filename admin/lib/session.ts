@@ -152,3 +152,26 @@ export function shouldRenew(token: string): boolean {
     return false;
   }
 }
+
+/**
+ * The domain the session cookie should be written for.
+ *
+ * `sidemoney.co` and `www.sidemoney.co` are separate cookie origins, and both
+ * serve this app. Sign in on one and the other sees no session at all — which
+ * is invisible until a partner sends the merchant to whichever host they typed
+ * into the partner's form, and they land on a login page that will not stick.
+ *
+ * Writing the cookie for the registrable host (the www. stripped) makes it
+ * valid for the apex AND every subdomain, so it stops mattering which one the
+ * merchant or the partner uses.
+ *
+ * Returns undefined for localhost and bare IPs: a Domain attribute is invalid
+ * for those, and setting one makes the browser silently drop the cookie —
+ * which would break development entirely.
+ */
+export function sessionCookieDomain(host: string | null | undefined): string | undefined {
+  if (!host) return undefined;
+  const name = host.split(':')[0]!.toLowerCase();
+  if (name === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(name) || !name.includes('.')) return undefined;
+  return name.replace(/^www\./, '');
+}
