@@ -83,6 +83,29 @@ function rec(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 }
 
+// Elementor names each element's class `elementor-element-<id>` and generates
+// its whole layout stylesheet against that name — widths, padding, flex, the
+// lot. Our WP import shortened it to `el-<id>`, which kept the ids but severed
+// every rule that styles them: the home page carried 63 such elements and not
+// one matched, so the layout fell back to generic container defaults and
+// rendered narrow and unstyled.
+//
+// Restore the name the stylesheet is written against. The short form stays so
+// anything already keyed to it keeps working, and non-Elementor classes are
+// untouched — only the exact `el-<7-or-more hex>` shape is expanded.
+const ELEMENTOR_ID = /^el-([0-9a-f]{7,})$/;
+
+export function expandElementorIds(cssClasses: string): string {
+  return cssClasses
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((c) => {
+      const m = ELEMENTOR_ID.exec(c);
+      return m ? `${c} elementor-element elementor-element-${m[1]}` : c;
+    })
+    .join(' ');
+}
+
 // Imported-layout renderer. Raw HTML passthrough is deliberate: this content
 // comes from an authenticated admin import (same trust level as Bricks itself
 // rendering its own saved markup).
@@ -92,7 +115,7 @@ function renderBricksNode(node: CanvasNode): string {
   const name = typeof p.__name === 'string' && p.__name ? p.__name : node.type;
   const kids = (node.children ?? []).map(renderCanvas).join('');
   const classes = ['brxe-' + name];
-  if (typeof s._cssClasses === 'string' && s._cssClasses) classes.push(s._cssClasses);
+  if (typeof s._cssClasses === 'string' && s._cssClasses) classes.push(expandElementorIds(s._cssClasses));
   const bgUrl = rec(rec(s._background).image).url;
   const style = typeof bgUrl === 'string' && bgUrl ? ` style="background-image:url('${esc(bgUrl)}')"` : '';
   // Element attributes (Bricks `_attributes`) — href, aria-*, data-*, role…

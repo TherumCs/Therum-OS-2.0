@@ -206,6 +206,18 @@ function pageCssOf(meta: unknown): string | undefined {
   return css.slice(0, 200_000);
 }
 
+/**
+ * The Elementor wrapper class a ported page's stylesheet is scoped to.
+ *
+ * Validated to the exact `elementor-<digits>` shape here rather than trusted
+ * from meta: it lands in a class attribute, and a stored value is only as
+ * trustworthy as whoever last edited the page.
+ */
+function pageScopeOf(meta: unknown): string | undefined {
+  const scope = (meta as { elementorScope?: unknown } | null)?.elementorScope;
+  return typeof scope === 'string' && /^elementor-\d+$/.test(scope) ? scope : undefined;
+}
+
 function bareOrArticle(
   ctx: { chrome: ChromeCtx },
   r: { title: string; html: string; publishedAt: Date | string | null; type: string; meta?: unknown },
@@ -304,7 +316,7 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
           headExtra: headExtraFor(r),
           siteName: ctx.siteName,
           nav: ctx.nav,
-          body: bareOrArticle(ctx, r, false, showTitle(ctx.site, r.meta)), pageCss: pageCssOf(r.meta),
+          body: bareOrArticle(ctx, r, false, showTitle(ctx.site, r.meta)), pageCss: pageCssOf(r.meta), pageScope: pageScopeOf(r.meta),
         }));
       } catch {
         // configured homepage unpublished/deleted — fall through to landing
@@ -347,7 +359,7 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
       const r = await contentService.renderBySlug(slug, `${originOf(req)}/blog`);
       if (r.type !== 'post') return notFound(reply, `/blog/${slug}`, req);
       const ctx = await buildNav('/blog', req);
-      send(reply, sitePage({ ...ctx.chrome, title: `${r.title} — ${ctx.siteName}`, headExtra: headExtraFor(r), siteName: ctx.siteName, nav: ctx.nav, body: bareOrArticle(ctx, r, true, showTitle(ctx.site, r.meta)), pageCss: pageCssOf(r.meta) }));
+      send(reply, sitePage({ ...ctx.chrome, title: `${r.title} — ${ctx.siteName}`, headExtra: headExtraFor(r), siteName: ctx.siteName, nav: ctx.nav, body: bareOrArticle(ctx, r, true, showTitle(ctx.site, r.meta)), pageCss: pageCssOf(r.meta), pageScope: pageScopeOf(r.meta) }));
     } catch {
       return notFound(reply, `/blog/${slug}`, req);
     }
@@ -375,7 +387,7 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
       const r = await contentService.renderBySlug(slug, `${originOf(req)}/work`);
       if (r.type !== 'case_study') return notFound(reply, `/work/${slug}`, req);
       const ctx = await buildNav('/work', req);
-      send(reply, sitePage({ ...ctx.chrome, title: `${r.title} — ${ctx.siteName}`, headExtra: headExtraFor(r), siteName: ctx.siteName, nav: ctx.nav, body: bareOrArticle(ctx, r, true, showTitle(ctx.site, r.meta)), pageCss: pageCssOf(r.meta) }));
+      send(reply, sitePage({ ...ctx.chrome, title: `${r.title} — ${ctx.siteName}`, headExtra: headExtraFor(r), siteName: ctx.siteName, nav: ctx.nav, body: bareOrArticle(ctx, r, true, showTitle(ctx.site, r.meta)), pageCss: pageCssOf(r.meta), pageScope: pageScopeOf(r.meta) }));
     } catch {
       return notFound(reply, `/work/${slug}`, req);
     }
@@ -395,7 +407,7 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
       const r = await contentService.renderBySlug(slug, originOf(req));
       if (r.type !== 'page') return notFound(reply, `/${slug}`, req);
       const ctx = await buildNav(`/${slug}`, req);
-      send(reply, sitePage({ ...ctx.chrome, title: `${r.title} — ${ctx.siteName}`, headExtra: headExtraFor(r), siteName: ctx.siteName, nav: ctx.nav, body: bareOrArticle(ctx, r, false, showTitle(ctx.site, r.meta)), pageCss: pageCssOf(r.meta) }));
+      send(reply, sitePage({ ...ctx.chrome, title: `${r.title} — ${ctx.siteName}`, headExtra: headExtraFor(r), siteName: ctx.siteName, nav: ctx.nav, body: bareOrArticle(ctx, r, false, showTitle(ctx.site, r.meta)), pageCss: pageCssOf(r.meta), pageScope: pageScopeOf(r.meta) }));
     } catch {
       return notFound(reply, `/${slug}`, req);
     }

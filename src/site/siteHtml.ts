@@ -169,6 +169,19 @@ export interface SitePage {
    * inert on any page that has none.
    */
   pageCss?: string;
+  /**
+   * Elementor page scope, from `content.meta.elementorScope` (e.g.
+   * `elementor-165012`).
+   *
+   * Elementor scopes a page's entire generated stylesheet to a wrapper class
+   * named after the WP post id — every rule reads
+   * `.elementor-165012 .elementor-element.elementor-element-<id>`. Without the
+   * wrapper in the markup those rules match nothing, however correct the
+   * element ids are. That was the home page: 203 rules present, zero applied.
+   *
+   * Only set on pages imported from Elementor; everything else is unaffected.
+   */
+  pageScope?: string;
 }
 
 // The one place the storefront column width is decided. It used to be a
@@ -194,7 +207,12 @@ export function sitePage(p: SitePage): string {
   const footer = p.chromeFooter
     ? `<div id="brx-footer">${p.chromeFooter}</div>`
     : `<footer class="site"><div class="wrap"><span>© ${new Date().getFullYear()} ${esc(p.siteName)}</span>${p.showPlatformCredit === false ? '' : '<span>Powered by Therum OS</span>'}</div></footer>`;
-  const main = hasChrome ? `<main id="brx-content">${p.body}</main>` : `<main><div class="wrap">
+  // An Elementor-imported page is wrapped in the scope its stylesheet is
+  // written against; everything else renders exactly as before.
+  const scoped = /^elementor-\d+$/.test(p.pageScope ?? '')
+    ? `<div class="elementor ${p.pageScope}">${p.body}</div>`
+    : p.body;
+  const main = hasChrome ? `<main id="brx-content">${scoped}</main>` : `<main><div class="wrap">
 ${p.body}
 </div></main>`;
   const html = `<!doctype html>

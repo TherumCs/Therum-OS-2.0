@@ -13,6 +13,8 @@ import { esc } from './html.js';
 // in the media library and the media library is what broke, the "we'll be back
 // shortly" page is what the visitor sees unstyled.
 
+import { moneyGlobe } from './moneyGlobe.js';
+
 export function maintenancePage(m: Maintenance, siteName: string, logoUrl?: string | null): string {
   const comingSoon = m.mode === 'coming-soon';
   const heading = m.heading || (comingSoon ? 'Coming soon' : 'We will be back shortly');
@@ -21,7 +23,14 @@ export function maintenancePage(m: Maintenance, siteName: string, logoUrl?: stri
   // The still is the floor, not the fallback: it is what shows while the video
   // buffers, what iOS Low Power Mode leaves you with, and what anyone who asked
   // their OS to reduce motion keeps. The video layers on top when it can.
-  const bg = poster
+  // The rotating money planet is the hero of the coming-soon page. Its texture,
+  // when set, is the background image — a FLAT (equirectangular) money collage
+  // maps cleanly onto the sphere; a photo of a sphere would pinch at the poles.
+  const globe = comingSoon && m.backgroundImage ? moneyGlobe(m.backgroundImage) : null;
+
+  const bg = globe
+    ? 'background:#07080b'
+    : poster
     ? `background-image:linear-gradient(rgba(0,0,0,.55),rgba(0,0,0,.62)),url('${esc(poster)}');background-size:cover;background-position:center`
     : 'background:radial-gradient(120% 120% at 50% 0%,#1b2030 0%,#0b0d12 60%,#07080b 100%)';
 
@@ -139,10 +148,13 @@ ${
     .notify{flex-direction:column;border-radius:0}
     .notify button{width:100%}
   }
+${globe ? globe.css : ''}
 </style>
-</head><body>
+</head><body class="${globe ? 'coming' : ''}">
+  ${globe ? '<div class="space"></div>' : ''}
   ${video}
   <div class="box">
+    ${globe ? globe.markup : ''}
     ${logoUrl ? `<img class="logo" src="${esc(logoUrl)}" alt="${esc(siteName)}">` : ''}
     <h1>${esc(heading)}</h1>
     ${m.message ? `<p>${esc(m.message)}</p>` : ''}
@@ -153,6 +165,7 @@ ${
     <div class="foot">${esc(siteName)}</div>
   </div>
 <script>
+${globe ? globe.script : ''}
 (function(){
   // COUNTDOWN. Rendered hidden and revealed by script: a "--:--:--" that never
   // ticks because JS failed is worse than no countdown at all.
