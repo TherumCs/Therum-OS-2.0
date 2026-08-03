@@ -39,6 +39,17 @@ export async function gmailAuthRoutes(app: FastifyInstance): Promise<void> {
     url.searchParams.set('scope', GMAIL_SEND_SCOPE);
     url.searchParams.set('access_type', 'offline');
     url.searchParams.set('prompt', 'consent select_account');
+    // Google SKIPS the account chooser when the browser has exactly one signed
+    // in Google session, so `select_account` alone lands you on whichever
+    // account that happens to be with no way to change it. `?as=<address>`
+    // names the mailbox to authorise and Google honours it over the active
+    // session; the value is passed through as a hint only, so a wrong address
+    // still lands on a chooser rather than failing.
+    const wanted = (req.query as { as?: string }).as;
+    if (typeof wanted === 'string' && wanted.includes('@')) {
+      // No CR/LF into a URL parameter, and nothing long enough to be a payload.
+      url.searchParams.set('login_hint', wanted.replace(/[\r\n]/g, '').slice(0, 320));
+    }
     url.searchParams.set('state', signState(GMAIL_STATE_PREFIX + '/tos-admin/settings/connections'));
     reply.redirect(url.toString());
   });
