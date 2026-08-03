@@ -91,6 +91,18 @@ export const PORTED_DOC_CSS = `
 
 :where(#brx-content .brxe-container,#brx-content .brxe-block,#brx-content .brxe-section){
   width:100%;max-width:100%}
+/* Elementor's base rule is "display: var(--display)", and --display is set
+   ONLY by a page's own generated stylesheet. A ported page that has the
+   container class but not that stylesheet resolves the var to nothing, which
+   computes as "unset" — and an unset div is INLINE. That collapsed 226
+   containers on the About page.
+   Zero specificity via :where() so the generated rules, which are plain class
+   selectors, still win wherever they exist. Block is what these containers
+   were before they carried the class, so pages without a stylesheet render
+   exactly as they did.
+   Not scoped to #brx-content: the ported header and footer carry these
+   containers too, and they render outside it. */
+:where(.e-con){--display:block}
 /* The column, as a DEFAULT — a Bricks section that sets its own width or goes
    full-bleed (a hero, a banner slider) overrides this rather than being caged
    at 1400px with 40px gutters. Prose pages, which set no width, keep it. */

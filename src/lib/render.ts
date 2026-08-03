@@ -93,15 +93,33 @@ function rec(v: unknown): Record<string, unknown> {
 // Restore the name the stylesheet is written against. The short form stays so
 // anything already keyed to it keeps working, and non-Elementor classes are
 // untouched — only the exact `el-<7-or-more hex>` shape is expanded.
+// The id alone is still not enough. Elementor's per-element rules set only
+// CUSTOM PROPERTIES — `--min-height`, `--display`, `--flex-direction` — and
+// nothing reads them until the element also carries the structural class the
+// base stylesheet declares them on:
+//
+//     .e-con { min-height: var(--min-height); ... }
+//
+// Without `e-con` a section that declares `--min-height:100vh` renders at its
+// content height, which is why the ported heroes came out 242px instead of
+// 900px. Elementor splits every element into exactly two kinds — a container
+// (`e-con`) or a widget (`elementor-widget-<type>`) — so that is the split
+// reproduced here, keyed off the Bricks element name the import wrote.
 const ELEMENTOR_ID = /^el-([0-9a-f]{7,})$/;
+const CONTAINER_NAMES = new Set(['container', 'section', 'block']);
 
-export function expandElementorIds(cssClasses: string): string {
+export function expandElementorIds(cssClasses: string, name: string): string {
+  // `e-con-full` is the unboxed variant: the ported markup has no
+  // `.e-con-inner` wrapper, which is what the boxed variant styles.
+  const structural = CONTAINER_NAMES.has(name)
+    ? 'e-con e-flex e-con-full'
+    : `elementor-widget elementor-widget-${name}`;
   return cssClasses
     .split(/\s+/)
     .filter(Boolean)
     .map((c) => {
       const m = ELEMENTOR_ID.exec(c);
-      return m ? `${c} elementor-element elementor-element-${m[1]}` : c;
+      return m ? `${c} elementor-element elementor-element-${m[1]} ${structural}` : c;
     })
     .join(' ');
 }
@@ -115,7 +133,7 @@ function renderBricksNode(node: CanvasNode): string {
   const name = typeof p.__name === 'string' && p.__name ? p.__name : node.type;
   const kids = (node.children ?? []).map(renderCanvas).join('');
   const classes = ['brxe-' + name];
-  if (typeof s._cssClasses === 'string' && s._cssClasses) classes.push(expandElementorIds(s._cssClasses));
+  if (typeof s._cssClasses === 'string' && s._cssClasses) classes.push(expandElementorIds(s._cssClasses, name));
   const bgUrl = rec(rec(s._background).image).url;
   const style = typeof bgUrl === 'string' && bgUrl ? ` style="background-image:url('${esc(bgUrl)}')"` : '';
   // Element attributes (Bricks `_attributes`) — href, aria-*, data-*, role…
