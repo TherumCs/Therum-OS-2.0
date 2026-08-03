@@ -1,6 +1,9 @@
 import { randomBytes } from 'node:crypto';
 import { Prisma, type OrderStatus } from '@prisma/client';
 import { db } from '../lib/db.js';
+import { emit } from '../counter/webhookDelivery.js';
+import { routeOrder } from '../counter/fulfillmentRouting.js';
+import { orderWebhookPayload } from '../counter/orderWebhookPayload.js';
 import { hookBus } from '../lib/hooks.js';
 import { NotFoundError, ConflictError, ValidationError } from '../lib/errors.js';
 import { milieuService } from './milieu.service.js';
@@ -28,7 +31,9 @@ const orderInclude = {
       variant: {
         select: {
           id: true, sku: true, price: true, color: true, size: true,
-          product: { select: { id: true, name: true, slug: true, image: true } },
+          // fulfillmentProvider is selected because order routing reads it to
+          // decide which factory gets each line.
+          product: { select: { id: true, name: true, slug: true, image: true, fulfillmentProvider: true } },
         },
       },
     },
@@ -197,6 +202,16 @@ export const orderService = {
         });
       });
       await hookBus.run('onOrderCreate', order);
+      // Tell every connected partner. Fire-and-forget on purpose: a POD
+      // partner's endpoint being slow or down must never fail a customer's
+      // order. Failures are recorded in webhook_deliveries.
+      emit({ topic: 'order.created', resourceId: order.id, payload: orderWebhookPayload(order) });
+      // PUSH partners (Printful, Printify) never subscribe to a webhook — in
+      // their model they are the client and this store is the shop they read.
+      // Nothing would tell them an order happened, so the store calls their
+      // Orders API. Fire-and-forget for the same reason the webhook is: a
+      // factory being down must not fail a paid order.
+      void routeOrder(order).catch(() => { /* recorded in fulfillment_routes */ });
       return order;
     } catch (err) {
       // Unique-collision on idempotencyKey (concurrent double-submit) → return the winner.
@@ -209,7 +224,7 @@ export const orderService = {
   },
 
   async transition(id: string, input: TransitionOrderInput) {
-    return db.$transaction(async (tx) => {
+    const result = await db.$transaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { id }, include: { items: true } });
       if (!order) throw new NotFoundError('Order not found', 'id');
 
@@ -247,8 +262,19 @@ export const orderService = {
       }
 
       const updated = await tx.order.update({ where: { id }, data: { status: to }, include: orderInclude });
-      return stripAccessToken(updated);
+      return { stripped: stripAccessToken(updated), full: updated };
     });
+
+    // AFTER the commit, never inside it. Emitting from within the transaction
+    // would announce a status change to every partner and then let a rollback
+    // un-happen it — and a fulfilment partner that has already started
+    // printing cannot un-print.
+    emit({
+      topic: 'order.updated',
+      resourceId: result.full.id,
+      payload: orderWebhookPayload(result.full),
+    });
+    return result.stripped;
   },
 
   // Called by the payment webhook: mark paid + advance pending → processing.

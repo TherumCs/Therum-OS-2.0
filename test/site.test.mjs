@@ -2,10 +2,27 @@
 // drafts never leak, SEO head injection, themed 404, nav assembly.
 import { test, before, after, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
+import { readdir, readFile } from 'node:fs/promises';
 import { buildServer } from '../dist/server.js';
 import { settingsService } from '../dist/services/settings.service.js';
 import { closeQueues } from '../dist/lib/queue.js';
 import { db, disconnectDb } from '../dist/lib/db.js';
+
+/**
+ * A REAL signed admin session.
+ *
+ * This used to be the string 'whatever', and it worked — because the gate
+ * tested only that a cookie by that name existed. Same defect, same shape, as
+ * the wc-auth fixture in counter.test.mjs: a fake credential proves nothing
+ * except that the code accepts fakes.
+ */
+function signSession(role = 'admin') {
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const now = Math.floor(Date.now() / 1000);
+  const data = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: 'test-admin', role, iat: now, exp: now + 3600 })}`;
+  return `${data}.${createHmac('sha256', process.env.JWT_SECRET).update(data).digest('base64url')}`;
+}
 
 let app;
 let savedSite;
@@ -185,8 +202,42 @@ describe('maintenance / coming soon', () => {
 
   test('a signed-in admin still sees the real site', async () => {
     await settingsService.setMaintenance({ mode: 'maintenance' });
-    const r = await get('/', { cookie: 'th_session=whatever' });
+    const r = await get('/', { cookie: `th_session=${signSession()}` });
     assert.equal(r.statusCode, 200, 'you cannot verify a fix you cannot look at');
+  });
+
+  test('every HTML escaper covers the single quote', async () => {
+    /**
+     * The browser copies of esc() escaped [&<>"] while the server's escaped
+     * [&<>"'] — divergent duplicates of a security primitive, where the weaker
+     * one is XSS-exploitable the moment its output lands in a single-quoted
+     * attribute. There were SIX copies; a grep for one declaration form found
+     * five, and the sixth was on the checkout path.
+     *
+     * This asserts on the SOURCE because the copies live inside browser
+     * runtime strings that never execute server-side, so no unit call can
+     * reach them.
+     */
+    const dir = new URL('../src/', import.meta.url);
+    const files = await readdir(new URL('site/', dir));
+    const offenders = [];
+    for (const name of files.filter((f) => f.endsWith('.ts'))) {
+      const src = await readFile(new URL(`site/${name}`, dir), 'utf8');
+      // Any character class that escapes < but not ' is the weak variant.
+      for (const m of src.matchAll(/replace\(\/\[([^\]]*)\]\/g/g)) {
+        const cls = m[1];
+        if (cls.includes('<') && !cls.includes("'")) offenders.push(`site/${name}: [${cls}]`);
+      }
+    }
+    assert.deepEqual(offenders, [], 'an HTML escaper is missing the single quote');
+  });
+
+  test('a cookie that only LOOKS like a session does not lift the gate', async () => {
+    // The site is pre-launch, so this page is the one thing holding an
+    // unfinished store back. Guessing the cookie name must not be enough.
+    await settingsService.setMaintenance({ mode: 'maintenance' });
+    const forged = await get('/', { cookie: 'th_session=whatever' });
+    assert.equal(forged.statusCode, 503, 'an unverifiable cookie bypassed maintenance');
   });
 
   // helmet's global default is script-src 'self', which blocks inline scripts.
@@ -210,14 +261,14 @@ describe('maintenance / coming soon', () => {
       heading: 'Everybody has a side.',
       countdownTo: '2027-01-01T00:00:00.000Z',
       countdownLabel: 'Doors open in',
-      instagram: 'sidemoneyco',
+      instagram: 'examplestore',
       emailCapture: true,
     });
     const r = await get('/');
     assert.match(r.body, /Everybody has a side/);
     assert.match(r.body, /data-countdown-to="2027-01-01/, 'the target is rendered for the script');
     assert.match(r.body, /Doors open in/);
-    assert.match(r.body, /instagram\.com\/sidemoneyco/);
+    assert.match(r.body, /instagram\.com\/examplestore/);
     assert.match(r.body, /<form[^>]*data-notify/, 'the form element itself');
     // Rendered hidden, revealed by script: digits frozen at "--" because JS
     // failed look broken in a way no countdown at all does not.

@@ -1,5 +1,76 @@
 # Changelog
 
+## [2.0.0-beta.7] — Payments, partner bridges and sign-in (2026-08-03)
+
+### Payments — 12 methods from three gateways
+- **PayPal gateway** (`lib/payments/paypalGateway.ts`), Orders v2. There was no
+  PayPal implementation at all: the method registry named it as the provider for
+  PayPal, Venmo and PayPal Credit, but `GATEWAYS` held only mock/stripe/square,
+  so all three could never route. A redirect gateway — `payWithToken` is
+  deliberately absent, and `capture` is exported separately rather than widening
+  the shared contract for one provider. Webhook signatures verified through
+  PayPal's own endpoint; a forged signature is refused.
+- **Sezzle gateway** (`lib/payments/sezzleGateway.ts`), v2 sessions. Sandbox by
+  default; only an explicit `|live` reaches production.
+- **Stripe method management from the admin** (`counter/stripeMethods.ts`) —
+  read and toggle Stripe's payment methods without the Stripe dashboard, plus a
+  DRIFT report naming every method this store offers that Stripe would refuse.
+  That report immediately found Google Pay live here and disabled there.
+- **Pin the Stripe payment-method configuration.** An account can hold several
+  and every Connect platform that onboarded the merchant leaves one behind;
+  unpinned, Stripe resolves the ambiguity itself and a shopper's chosen method
+  can be declined at the till.
+- Methods can be `hidden` — kept in the registry but out of the strip, for what
+  is parked rather than abandoned. A group with no visible method no longer
+  renders an empty tab.
+
+### Partner bridges
+- **WooCommerce approval screen signs you in on itself.** Bouncing to the admin
+  login produced four separate failures in a row, each looking identical from
+  the merchant's side: a login page with nothing to approve.
+- **Session lifetime 12 hours -> 30 days.** A single-operator store logged itself
+  out overnight, and an expired session is invisible — the browser drops the
+  cookie, so the admin still looks signed in while a partner connect lands on a
+  sign-in screen.
+- **Shopify bridge gained writes and webhooks** — product create/update/delete
+  and webhook registration, sharing the Woo bridge's delivery pipeline. Fixed
+  `shop.domain` returning an empty string, which several integrations key their
+  whole connection on.
+- Order routing to fulfilment partners, with a status endpoint that reports when
+  orders would reach nobody.
+
+### Sign-in
+- **Sign in with Google** for the admin, the partner approval screen, and
+  shoppers. A verified Google email proves identity, never authority: an
+  account must be explicitly linked (`AdminUser.googleEmail`), and unverified
+  emails are refused outright.
+- Session cookie verification centralised in `lib/adminSession.ts`. There were
+  three copies and they disagreed — the weakest guarded credential issuance.
+
+### Security
+- **The credential-vending hole, closed.** `hasAdminSession` tested only that a
+  cookie *named* `th_session` existed. Any value passed, so a single header
+  minted read/write store keys to any callback.
+- **Six HTML escapers were missing the single quote** — safe in double-quoted
+  attributes, an XSS hole in single-quoted ones. A seventh was found on the
+  checkout path. A test now fails if an eighth appears.
+- `return_url` validated (was a bare 500); maintenance gate uses a verified
+  session; `uuid` overridden to a patched release.
+
+### Multi-tenant hygiene
+- **Removed every hardcoded tenant domain and address.** Host fallbacks no
+  longer name a specific site, contact topics ship with empty addresses, and
+  Sezzle refuses to build a return URL rather than guess one. A default address
+  belonging to whoever the software was first built for would route a new
+  store's customer mail to a stranger — and look like it was working.
+
+### Tests
+- 437 -> 497. New coverage for Google sign-in authority, Plaid containment,
+  Shopify bridge writes, PayPal, fulfilment routing and HTML escaping.
+- **Two fixtures were fake** — `th_session=admin-session-for-tests` and
+  `th_session=whatever` — and passed for exactly the reason an attacker's forged
+  cookie passed. Both now sign real tokens.
+
 ## [2.0.0-beta.6] — Shop grid and quick checkout, in the order a shopper reads them (2026-08-01)
 
 The last cut before the VPS. Two storefront fixes, both found by measuring the
@@ -200,7 +271,7 @@ driven end to end and verified working. Highlights of this release:
 
 ## [Unreleased] — earlier beta.1 shakedown work (2026-07-27)
 
-Sidemoney-beta shakedown pass. Everything below came out of driving the real admin
+the reference store-beta shakedown pass. Everything below came out of driving the real admin
 at `localhost:10009/tos-admin` rather than reading code, so each item is a defect
 that was actually reproduced, or a behaviour Bam asked for by name.
 
@@ -347,12 +418,12 @@ punch-list (product editor, media picker, site settings + menu editor).
 
 Status: **beta** — feature-complete core, 134/134 regression at cut. Known
 not-yet: no live payment processed (sandbox E2E pending), Builder undogfooded on
-a real site, VPS deploy unproven. First consumer: the Sidemoney build.
+a real site, VPS deploy unproven. First consumer: the the reference store build.
 
 
-## [2.0.0-beta.1] — Pre-Sidemoney punch list (2026-07-25)
+## [2.0.0-beta.1] — Pre-the reference store punch list (2026-07-25)
 
-The alpha→beta gap-closers so the Sidemoney build session starts clean.
+The alpha→beta gap-closers so the the reference store build session starts clean.
 
 ### Built
 - **Settings → Site** (new section — documented 2.0-native addition, outside the
@@ -548,7 +619,7 @@ and never throw). **Full regression 123/123, exit 0.**
 `docs/superpowers/specs/2026-07-24-wp-bridge-design.md` — the Studio App that runs WP
 themes, bounded WP plugins, and Bricks WITHOUT full WordPress. Three tiers (theme PHP
 shim → Bricks importer/renderer → bounded plugin compat), research checklist gated
-before code. First consumer: the Sidemoney local build session.
+before code. First consumer: the the reference store local build session.
 
 ## [2.0.0-beta.1] — Catalog presentation (2026-07-24)
 
@@ -582,7 +653,7 @@ Apparel/#Basics pills. **Full regression 121/121, exit 0; post-suite leak check:
 
 ## [2.0.0-beta.1] — Base Theme: the public site frontend (2026-07-24)
 
-2.0 finally has a face. Bam: "default theme so stuff is just popping up" — Sidemoney
+2.0 finally has a face. Bam: "default theme so stuff is just popping up" — the reference store
 needs to ship; the full theme system is recorded in docs/FUTURE-BUILDOUT.md.
 
 ### Built
@@ -603,7 +674,7 @@ needs to ship; the full theme system is recorded in docs/FUTURE-BUILDOUT.md.
 ### Verified
 - 7/7 site tests: landing + homepage modes, SEO head injection, draft leak-proofing,
   type-scoped URLs, /shop not shadowed by /:slug, settings auth. Live browser: real
-  landing with the actual published Sidemoney Rebrand case study, /work/sidemoney-
+  landing with the actual published the reference store Rebrand case study, /work/the reference store-
   rebrand rendering with correct canonical. **Full regression 116/116, exit 0.**
 
 ## [2.0.0-beta.1] — C5a: Square gateway (2026-07-24)
@@ -1019,7 +1090,7 @@ match; content PATCH path genuinely fixed.
 - **`UpdateContentInput = CreateContentInput.partial()` kept the .default()s** — any
   partial PATCH silently injected `type:'page'`, `status:'draft'`,
   `bodyFormat:'canvas'`, `seo:{}`. The very first meta-only save through the new PATCH
-  path un-typed AND un-published the real "Sidemoney Rebrand" case study and reset its
+  path un-typed AND un-published the real "the reference store Rebrand" case study and reset its
   seo. Latent since Folio shipped — nothing PATCHed through this schema before (publish
   uses its own route). Update schema rebuilt with plainly-optional fields, zero
   defaults; parse of `{meta}` now yields exactly `{meta}`. Row fully restored (type,
@@ -1047,7 +1118,7 @@ long list; rename the nav entry to "Nexus."
   own comment predicted exactly this). Full canvas/builder, SEO, publish flow inherited
   from Folio — `type: case_study` existed in the schema since Folio shipped, deliberately
   not user-facing until this app. NewContentButton type union widened.
-- Proof it rides the real pipeline: on first render the page surfaced "Sidemoney
+- Proof it rides the real pipeline: on first render the page surfaced "the reference store
   Rebrand" — a pre-existing case_study row invisible to the UI until today.
 
 ### Changed — Nexus
