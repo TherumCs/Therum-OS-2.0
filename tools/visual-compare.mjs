@@ -20,6 +20,7 @@ import { spawn } from 'node:child_process';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 const REFERENCE = process.env.REFERENCE_ORIGIN ?? 'http://localhost:10025';
 const OURS = process.env.SITE_ORIGIN ?? 'https://sidemoney.co';
@@ -46,7 +47,9 @@ const WIDTHS = (process.env.COMPARE_WIDTHS ?? '1440,768,390').split(',').map(Num
 
 // Tolerance is per-breakpoint because content that reflows legitimately
 // differs by a few px; anything past this is a real layout difference.
-const HEIGHT_TOLERANCE = 0.06; // 6% of the reference section height
+const HEIGHT_TOLERANCE = 0.06;      // per section, vs the reference section height
+const PAGE_HEIGHT_TOLERANCE = 0.10; // whole page, vs the reference page height
+const PIXEL_TOLERANCE = 12;         // % of pixels allowed to differ from the reference
 
 function cdp(port) {
   const profile = mkdtempSync(join(tmpdir(), 'vc-'));
@@ -74,8 +77,12 @@ async function connect(port) {
 function client(ws) {
   let id = 0;
   const waiting = new Map();
+  const failures = [];
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
+    if (m.method === 'Network.responseReceived' && m.params.response.status >= 400) {
+      failures.push(`${m.params.response.status} ${m.params.response.url.split('/').pop().slice(0, 40)}`);
+    }
     if (m.id && waiting.has(m.id)) { waiting.get(m.id)(m); waiting.delete(m.id); }
   };
   const send = (method, params = {}) => new Promise((res) => {
@@ -84,14 +91,21 @@ function client(ws) {
   const evaluate = async (expression) =>
     (await send('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }))
       .result?.result?.value;
-  return { send, evaluate };
+  return { send, evaluate, failures };
 }
 
 // The measurement. Sections are the top-level children of whatever holds the
 // page body, so the same shape is read on both sides even though the wrappers
 // are named differently.
 const MEASURE = `(() => {
-  const root = document.querySelector('.elementor')
+  // The reference wraps its FOOTER in .elementor-505 as well as wrapping page
+  // content in .elementor-<page id>. Taking the first .elementor match meant
+  // that on any page without its own Elementor design we compared our page
+  // body against their footer — which is why one footer element reported the
+  // same bogus delta across eight unrelated pages. Skip any wrapper that sits
+  // inside a header or footer.
+  const inChrome = (el) => !!el.closest('header, footer, #brx-header, #brx-footer');
+  const root = [...document.querySelectorAll('.elementor')].find((el) => !inChrome(el))
     || document.querySelector('#brx-content')
     || document.querySelector('main')
     || document.body;
@@ -114,6 +128,18 @@ const MEASURE = `(() => {
   });
 })()`;
 
+// Geometry alone is blind to a whole class of breakage. A missing webfont or
+// background image does not change layout height — the icon becomes an empty
+// box, the hero goes blank, and every section still measures exactly right. The
+// imported stylesheet shipped without the 15 files it references and every
+// geometric check still passed while the live page had boxes for icons and no
+// hero. So the asset layer is checked explicitly, and a pixel diff backs it up.
+const ASSET_HEALTH = `(() => ({
+  brokenImages: [...document.images].filter((i) => i.complete && i.naturalWidth === 0).length,
+  totalImages: document.images.length,
+  fontsUnloaded: [...document.fonts].filter((f) => f.status === 'error').map((f) => f.family),
+}))()`;
+
 async function measure(page, origin, path, width) {
   await page.send('Emulation.setDeviceMetricsOverride', {
     width, height: 900, deviceScaleFactor: 1, mobile: width < 768,
@@ -127,7 +153,38 @@ async function measure(page, origin, path, width) {
   }
   await page.evaluate('window.scrollTo(0,0)');
   await new Promise((r) => setTimeout(r, 900));
-  return JSON.parse(await page.evaluate(MEASURE));
+  const geometry = JSON.parse(await page.evaluate(MEASURE));
+  return { ...geometry, ...(await page.evaluate(ASSET_HEALTH)) };
+}
+
+// Percentage of pixels that differ between two screenshots, computed in the
+// browser so this needs no image library. Compared at a coarse scale: the
+// question is "does this look like the reference", not "is it byte-identical",
+// and antialiasing differences must not drown the signal.
+async function pixelDiff(page, aPng, bPng) {
+  const script = `(async () => {
+    const load = (b64) => new Promise((res, rej) => {
+      const im = new Image();
+      im.onload = () => res(im); im.onerror = rej;
+      im.src = 'data:image/png;base64,' + b64;
+    });
+    const [a, b] = await Promise.all([load(${JSON.stringify(aPng)}), load(${JSON.stringify(bPng)})]);
+    const W = 240, H = Math.min(1200, Math.max(a.height, b.height) / Math.max(a.width, b.width) * W | 0);
+    const draw = (im) => {
+      const c = new OffscreenCanvas(W, H);
+      const x = c.getContext('2d');
+      x.fillStyle = '#fff'; x.fillRect(0, 0, W, H);
+      x.drawImage(im, 0, 0, W, im.height * (W / im.width));
+      return x.getImageData(0, 0, W, H).data;
+    };
+    const da = draw(a), db = draw(b);
+    let diff = 0;
+    for (let i = 0; i < da.length; i += 4) {
+      if (Math.abs(da[i] - db[i]) + Math.abs(da[i+1] - db[i+1]) + Math.abs(da[i+2] - db[i+2]) > 90) diff++;
+    }
+    return Math.round((diff / (da.length / 4)) * 100);
+  })()`;
+  try { return await page.evaluate(script); } catch { return null; }
 }
 
 async function shoot(page, width, height, file) {
@@ -136,7 +193,9 @@ async function shoot(page, width, height, file) {
     format: 'png', captureBeyondViewport: true,
     clip: { x: 0, y: 0, width, height: Math.min(height, 16000), scale: 1 },
   });
-  if (shot.result) writeFileSync(file, Buffer.from(shot.result.data, 'base64'));
+  if (!shot.result) return null;
+  writeFileSync(file, Buffer.from(shot.result.data, 'base64'));
+  return shot.result.data;
 }
 
 export async function run(pages = PAGE_MAP, widths = WIDTHS) {
@@ -147,17 +206,24 @@ export async function run(pages = PAGE_MAP, widths = WIDTHS) {
   const page = client(ws);
   await page.send('Page.enable');
   await page.send('Runtime.enable');
+  // A 404 on a font or image never shows up in geometry, so watch the wire.
+  await page.send('Network.enable');
 
   const results = [];
   for (const [ourPath, refPath] of pages) {
     for (const width of widths) {
       const ref = await measure(page, REFERENCE, refPath, width);
       const refFile = join(OUT, `${ourPath.replace(/\W+/g, '_')}-${width}-ref.png`);
-      await shoot(page, width, ref.height, refFile);
+      const refPng = await shoot(page, width, ref.height, refFile);
 
+      // Only OUR request failures count — the reference's own 404s are not ours
+      // to fix, so the sink is cleared before loading our page.
+      page.failures.length = 0;
       const ours = await measure(page, OURS, ourPath, width);
       const ourFile = join(OUT, `${ourPath.replace(/\W+/g, '_')}-${width}-ours.png`);
-      await shoot(page, width, ours.height, ourFile);
+      const ourPng = await shoot(page, width, ours.height, ourFile);
+      const failedRequests = [...page.failures];
+      const pixels = refPng && ourPng ? await pixelDiff(page, refPng, ourPng) : null;
 
       const overflow = ours.scrollWidth - width;
       const heightDelta = ref.height ? Math.abs(ours.height - ref.height) / ref.height : 1;
@@ -176,24 +242,39 @@ export async function run(pages = PAGE_MAP, widths = WIDTHS) {
           const d = Math.abs(b.h - a.h) / a.h;
           if (d > HEIGHT_TOLERANCE) badSections.push({ i: a.id, ref: a.h, ours: b.h, off: `${Math.round(d * 100)}%` });
         }
-      } else {
-        const pairs = Math.min(ref.sections.length, ours.sections.length);
-        for (let i = 0; i < pairs; i++) {
-          const a = ref.sections[i], b = ours.sections[i];
-          if (!a.h) continue;
-          const d = Math.abs(b.h - a.h) / a.h;
-          if (d > HEIGHT_TOLERANCE) badSections.push({ i, ref: a.h, ours: b.h, off: `${Math.round(d * 100)}%` });
-        }
       }
+      // When NEITHER side has Elementor ids the page has no Elementor design at
+      // all (policy pages, shop, blog — theme/Woo templates). The two roots are
+      // then different containers holding different numbers of wrappers, so
+      // comparing child N to child N is meaningless: it reported shop's first
+      // section as "2407% off" purely from wrapper mismatch. Page height and
+      // overflow still mean something on those pages, so judge on those alone.
       const problems = [];
       if (overflow > 1) problems.push(`overflows viewport by ${overflow}px`);
+      // Total height has to be a pass criterion in its own right. Without it a
+      // page whose sections happen to match can still be missing most of its
+      // content and report clean — the blog read "pass" at 1133px against a
+      // 3141px reference.
+      if (heightDelta > PAGE_HEIGHT_TOLERANCE)
+        problems.push(`page height ${ours.height} vs ${ref.height} (${Math.round(heightDelta * 100)}% off)`);
       if (missing.length) problems.push(`${missing.length} reference section(s) absent: ${missing.join(',')}`);
       if (badSections.length) problems.push(`${badSections.length} section(s) off height`);
       if (ours.collapsed > ref.collapsed)
         problems.push(`${ours.collapsed - ref.collapsed} extra collapsed container(s)`);
+      // The asset layer. These are pass criteria in their own right — a page can
+      // be geometrically perfect and still be boxes and blank rectangles.
+      if (ours.brokenImages > 0)
+        problems.push(`${ours.brokenImages}/${ours.totalImages} images failed to load`);
+      if (ours.fontsUnloaded?.length)
+        problems.push(`webfont(s) failed: ${ours.fontsUnloaded.join(',')}`);
+      if (failedRequests.length)
+        problems.push(`${failedRequests.length} request(s) 4xx/5xx: ${[...new Set(failedRequests)].slice(0, 3).join(' ')}`);
+      if (pixels !== null && pixels > PIXEL_TOLERANCE)
+        problems.push(`${pixels}% of pixels differ from the reference`);
 
       results.push({
         page: ourPath, width, pass: problems.length === 0, problems, badSections, missing,
+        pixelDiff: pixels, brokenImages: ours.brokenImages, failedRequests,
         refHeight: ref.height, ourHeight: ours.height, heightDelta: `${Math.round(heightDelta * 100)}%`,
         refShot: refFile, ourShot: ourFile,
       });
@@ -216,7 +297,11 @@ export async function run(pages = PAGE_MAP, widths = WIDTHS) {
   return results;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+// pathToFileURL, not string concatenation: this repo lives under "Local Sites",
+// and a raw `file://${path}` leaves the space unencoded so the comparison never
+// matches — the script exits 0 having run nothing, which reads exactly like a
+// clean pass.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const results = await run();
   process.exit(results.some((r) => !r.pass) ? 1 : 0);
 }

@@ -65,23 +65,28 @@ footer.site .wrap{max-width:1080px;display:flex;justify-content:space-between;ga
 `;
 
 /**
- * Shared layout for the PORTED DOCUMENT pages — FAQ, About, and the policy
- * set (privacy, cookies, terms, returns, accessibility).
+ * Structural repairs for the ported pages. Deliberately NOT a layout.
  *
- * These came from Elementor, which keeps each element's styling in a
- * generated stylesheet keyed to that element's id. The port carried the ids
- * and not the stylesheet, so the pages arrived structurally correct and
- * completely unstyled — every heading pinned to the viewport edge.
+ * This used to impose a centred 1400px column, 40px gutters and a type scale,
+ * because the port had carried Elementor's element ids without the stylesheet
+ * that styles them and the pages arrived completely unstyled. That was a
+ * stand-in for a stylesheet we did not have.
  *
- * I tried porting the reference's computed styles element by element and it
- * does not hold up: width in the reference comes from ancestors that the
- * conversion flattened, so per-element widths either do nothing or shrink each
- * heading to its own text. These pages are DOCUMENTS, though — a centred
- * column with a type scale is what they actually are, and one stylesheet that
- * says so beats seven brittle snapshots.
+ * We have it now: the reference site's full CSS is extracted from every page
+ * at every breakpoint and served as one universal stylesheet. The stand-in
+ * then stopped being a fallback and became a competitor — it was overriding
+ * the real theme layout, which is what left the policy pages 13-24% off the
+ * reference height while looking superficially fine.
  *
- * A page that needs a real designed layout (contact) still carries its own
- * meta.css, which is injected after this and wins.
+ * So what remains here is only what the imported CSS cannot do for itself:
+ * an accessible heading, an img guard, the --display default that stops
+ * Elementor containers computing to `inline`, and a narrow-viewport cap for
+ * elements whose width was snapshotted at 375px. Layout belongs to the
+ * imported stylesheet. Anything added back here should be treated as evidence
+ * that the extraction missed something, and fixed there instead.
+ *
+ * A page that needs a genuinely custom layout still carries its own meta.css,
+ * injected after this and after the universal sheet, so it wins.
  */
 export const PORTED_DOC_CSS = `
 /* A heading that exists for the document outline but not for the eye. Used
@@ -103,34 +108,16 @@ export const PORTED_DOC_CSS = `
    Not scoped to #brx-content: the ported header and footer carry these
    containers too, and they render outside it. */
 :where(.e-con){--display:block}
-/* The column, as a DEFAULT — a Bricks section that sets its own width or goes
-   full-bleed (a hero, a banner slider) overrides this rather than being caged
-   at 1400px with 40px gutters. Prose pages, which set no width, keep it. */
-:where(#brx-content) > :where(.brxe-container,.brxe-section,.brxe-block){
-  max-width:var(--th-site-max,1400px);margin-left:auto;margin-right:auto;
-  padding-left:40px;padding-right:40px}
-/* The ported header hard-codes its own 1170px column. Content wider than the
-   header reads as misaligned rather than roomy, so the header is pulled onto
-   the SAME variable — one number moves both. */
-.c-header--desktop,.c-header--mobile,.c-header__inner,.c-shop-header__inner{
-  max-width:var(--th-site-max,1400px)!important;margin-left:auto;margin-right:auto}
-/* Nested containers must not re-pad — the column already has its gutters. */
-:where(#brx-content .brxe-container .brxe-container){padding-left:0;padding-right:0}
-#brx-content h1,#brx-content h2,#brx-content h3,#brx-content h4{
-  line-height:1.1;margin:0 0 .4em;letter-spacing:-.01em}
-#brx-content h1{font-size:clamp(38px,5vw,64px)}
-#brx-content h2{font-size:clamp(24px,3vw,34px);margin-top:1.6em}
-#brx-content h3{font-size:clamp(18px,2vw,22px);margin-top:1.4em}
-#brx-content p,#brx-content li{font-size:16px;line-height:1.75;margin:0 0 1em}
-#brx-content ul,#brx-content ol{margin:0 0 1.2em 1.3em}
-/* Underline PROSE links only. A blanket rule underlined every accordion
-   title and swallowed the +/- toggles, which are links too. */
-#brx-content .brxe-text a,#brx-content p a,#brx-content li a{
-  text-decoration:underline;text-underline-offset:3px}
-#brx-content .brxe-text{max-width:78ch}
-/* The FAQ accordions: the theme ships the toggle, not the spacing. */
-#brx-content .brxe-accordion,#brx-content [class*="accordion"]{width:100%}
 :where(#brx-content) img{max-width:100%;height:auto}
+/* Nodes the conversion invented — no element of this id exists on the
+   reference. display:contents keeps them and their children in the DOM while
+   removing the box they were never supposed to contribute. See th-no-ref in
+   src/lib/render.ts. */
+/* !important is deliberate and is the narrow case that warrants it: .e-con
+   sets display from a custom property at class specificity, and the imported
+   sheet is linked after this one, so it wins every tie. This has to beat it —
+   the node does not exist on the reference at all. */
+.th-no-ref{display:contents!important}
 /* Some ported elements carry a width snapshotted from a 375px-wide render —
    the contact page's h1 is a literal 354.984px sitting inside a correct 320px
    container. On anything narrower than that snapshot they push the document
@@ -140,10 +127,6 @@ export const PORTED_DOC_CSS = `
    375 so wider layouts, where the snapshots are harmless, are untouched. */
 @media(max-width:374px){
   :where(#brx-content) :where([class*="el-"]){max-width:100%}
-}
-@media(max-width:767px){
-  #brx-content > .brxe-container,#brx-content > .brxe-section,
-  #brx-content > .brxe-block{padding-left:20px;padding-right:20px}
 }
 `;
 
