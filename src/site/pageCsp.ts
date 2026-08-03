@@ -25,7 +25,12 @@
 export const PAGE_CSP =
   "default-src 'self'; " +
   "script-src 'self' 'unsafe-inline'; " +
-  "style-src 'self' 'unsafe-inline'; " +
+  // Google Fonts serves the stylesheet from googleapis and the font files
+  // from gstatic. The reference site's theme asks for Manrope; without these
+  // the family resolves to a fallback and every page renders in the wrong
+  // typeface. Two named hosts, not a wildcard.
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+  "font-src 'self' data: https://fonts.gstatic.com; " +
   'img-src \'self\' data: https:; ' +
   // Hosted product video and posters.
   "media-src 'self' https:; " +

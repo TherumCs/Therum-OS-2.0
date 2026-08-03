@@ -20,7 +20,7 @@ const CSS = `
   --e:0.15s ease;--radius-md:10px;--radius-lg:14px;--radius-pill:999px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:var(--f);background:var(--bg);color:var(--tx);line-height:1.65;-webkit-font-smoothing:antialiased}
+:where(body){font-family:var(--f);background:var(--bg);color:var(--tx);line-height:1.65;-webkit-font-smoothing:antialiased}
 a{color:inherit;text-decoration:none}
 .wrap{max-width:840px;margin:0 auto;padding:0 24px}
 header.site{background:var(--sf);border-bottom:1px solid var(--bd);position:sticky;top:0;z-index:10}
@@ -237,7 +237,7 @@ ${p.body}
 ${p.headExtra ?? ''}
 <style>:root{--th-site-max:${siteMax}}${CSS}${BANNER_STYLES}${hasChrome ? HEADER_CART_CSS + PORTED_DOC_CSS : ''}</style>
 ${p.dock ? `<style>${p.dock.styles}</style>` : ''}
-${p.chromeCssUrl ? `<link rel="stylesheet" href="${esc(p.chromeCssUrl)}">` : ''}
+${p.chromeCssUrl ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap"><link rel="stylesheet" href="${esc(p.chromeCssUrl)}">` : ''}
 ${p.pageCss ? `<style>${p.pageCss}</style>` : ''}
 </head>
 <body class="${BODY_CLASS}">
