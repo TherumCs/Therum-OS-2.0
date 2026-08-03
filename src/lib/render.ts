@@ -1,6 +1,6 @@
 // Renders a builder canvas tree to HTML — the publish-time half of the
 // builder↔Folio loop. Mirrors builder/src/lib/serialize.ts (keep in sync).
-import { PORTED_ELEMENT_CLASSES } from '../site/portedElementClasses.js';
+import { PORTED_ELEMENT_IDS } from '../site/portedElementIds.js';
 export interface CanvasNode {
   id: string;
   type: string;
@@ -84,101 +84,29 @@ function rec(v: unknown): Record<string, unknown> {
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 }
 
-// Elementor names each element's class `elementor-element-<id>` and generates
-// its whole layout stylesheet against that name — widths, padding, flex, the
-// lot. Our WP import shortened it to `el-<id>`, which kept the ids but severed
-// every rule that styles them: the home page carried 63 such elements and not
-// one matched, so the layout fell back to generic container defaults and
-// rendered narrow and unstyled.
+// Ported elements keep the ONE class our markup already carries: `el-<id>`.
 //
-// Restore the name the stylesheet is written against. The short form stays so
-// anything already keyed to it keeps working, and non-Elementor classes are
-// untouched — only the exact `el-<7-or-more hex>` shape is expanded.
-// The id alone is still not enough. Elementor's per-element rules set only
-// CUSTOM PROPERTIES — `--min-height`, `--display`, `--flex-direction` — and
-// nothing reads them until the element also carries the structural class the
-// base stylesheet declares them on:
+// PORTING.md rule 2 is NOTHING ELEMENTOR. The stylesheet is generated from the
+// reference's computed styles and keyed to `.el-<id>` (tools/bricks-css.mjs),
+// so the id alone is the styling hook. Nothing about the old builder's class
+// vocabulary — no `elementor-element-*`, no `e-con`, no `elementor-widget-*`,
+// no wrapper layers — is emitted any more.
 //
-//     .e-con { min-height: var(--min-height); ... }
-//
-// Without `e-con` a section that declares `--min-height:100vh` renders at its
-// content height, which is why the ported heroes came out 242px instead of
-// 900px. Elementor splits every element into exactly two kinds — a container
-// (`e-con`) or a widget (`elementor-widget-<type>`) — so that is the split
-// reproduced here, keyed off the Bricks element name the import wrote.
+// Ids the reference has no element for are still marked: the conversion
+// invented those nodes, and as empty flex children they eat space the design
+// never allotted them (one took 475px out of the home hero's button row).
 const ELEMENTOR_ID = /^el-([0-9a-f]{7,})$/;
-const CONTAINER_NAMES = new Set(['container', 'section', 'block']);
 
-export function expandElementorIds(cssClasses: string, name: string): string {
+export function expandElementorIds(cssClasses: string, _name: string): string {
   return cssClasses
     .split(/\s+/)
     .filter(Boolean)
     .map((c) => {
       const m = ELEMENTOR_ID.exec(c);
       if (!m) return c;
-      const id = m[1]!;
-      const base = `${c} elementor-element elementor-element-${id}`;
-      // The reference's own class list wins whenever we have it. Deriving the
-      // widget name from our element name produced `elementor-widget-button`
-      // where the stylesheet says `elementor-widget-ideapark-button`, so no
-      // rule matched and the button rendered at content width.
-      const known = PORTED_ELEMENT_CLASSES[id];
-      if (known) return `${base} ${known}`;
-      // No entry means the reference has no such element: the conversion
-      // invented this node. Seven of them sit in the home page's hero, and as
-      // empty flex children they were eating the row — one took 475px, which
-      // squeezed the two real buttons from 306px and 177px down to 176px and
-      // 102px and wrapped their labels onto a second line.
-      //
-      // `th-no-ref` lets the stylesheet take them out of layout without
-      // deleting anything: the node and its children stay in the DOM, it just
-      // stops generating a box of its own. Removing a box the reference never
-      // had can only move us toward it.
-      return `${base} th-no-ref ${CONTAINER_NAMES.has(name) ? 'e-con e-flex e-con-full' : 'elementor-widget'}`;
+      return PORTED_ELEMENT_IDS.has(m[1]!) ? c : `${c} th-no-ref`;
     })
     .join(' ');
-}
-
-// The reference wraps every widget in three layers, and the theme's rules
-// target the INNERMOST one:
-//
-//   div.elementor-widget.elementor-widget-ideapark-button
-//     div.elementor-widget-container
-//       div.c-ip-button__wrap
-//         a.c-button.c-ip-button.c-button--outline   <- every button rule is here
-//           span.c-ip-button__text
-//
-// Our import flattened all of that into a single <a> carrying the WRAPPER's
-// classes, so `.c-ip-button` never existed on the page and not one button rule
-// could match. The hero buttons rendered at their text width — 143px against
-// the reference's 306px — and the logo and scroll arrow shrank the same way.
-//
-// Rebuilding the layers is what makes the imported stylesheet apply. Shapes are
-// read off the reference markup, per Forge's source-router rule; a widget type
-// not listed still gets the wrapper, which is the part Elementor's own layout
-// rules need.
-const WIDGET_SHAPE: Record<string, { open: string; close: string; innerClass: string }> = {
-  'ideapark-button': {
-    open: '<div class="elementor-widget-container"><div class="c-ip-button__wrap">',
-    close: '</div></div>',
-    innerClass: 'c-button c-ip-button c-button--outline',
-  },
-  heading: { open: '', close: '', innerClass: 'elementor-heading-title elementor-size-default' },
-  image: { open: '', close: '', innerClass: 'attachment-full size-full' },
-  'text-editor': { open: '<div class="elementor-widget-container">', close: '</div>', innerClass: '' },
-};
-
-// A spacer carries its height on an inner element, and the import dropped the
-// inner markup on some of them — leaving a widget that measured 0 where the
-// reference has 40px. Rebuilt only when the node has no children of its own,
-// so a spacer that DID import intact is left alone.
-const SPACER_INNER = '<div class="elementor-spacer"><div class="elementor-spacer-inner"></div></div>';
-
-// The real widget type, ignoring the width modifiers that share the prefix
-// (`elementor-widget__width-initial`, `elementor-widget-tablet__width-auto`).
-function widgetTypeOf(classes: string): string | null {
-  const t = classes.split(/\s+/).find((c) => c.startsWith('elementor-widget-') && !c.includes('__'));
-  return t ? t.slice('elementor-widget-'.length) : null;
 }
 
 // Imported-layout renderer. Raw HTML passthrough is deliberate: this content
@@ -193,28 +121,10 @@ function renderBricksNode(node: CanvasNode): string {
   const expanded = typeof s._cssClasses === 'string' && s._cssClasses
     ? expandElementorIds(s._cssClasses, name)
     : '';
-  // A widget's Elementor classes belong on the wrapper this renderer adds
-  // below, not on the element itself; putting them on the element is what left
-  // the theme's inner classes with nowhere to live.
-  // ONLY wrap widget types whose real structure was read off the reference.
-  // Injecting a generic `elementor-widget-container` for the rest guessed at a
-  // layer that is not always there: the running-line marquee has none, so the
-  // injected box landed inside the scrolling strip as a 9th flex child sitting
-  // on top of the text — the reference has exactly one child there. A widget
-  // with no verified shape keeps its classes on the element, as before.
-  const widgetType = expanded ? widgetTypeOf(expanded) : null;
-  const shape = widgetType ? WIDGET_SHAPE[widgetType] : undefined;
-  const widget = shape ? widgetType : null;
-  // A BOXED container carries its width on an inner element, not on itself:
-  //   .e-con { --content-width: min(100%, var(--container-max-width,1140px)) }
-  //   .e-con-boxed > .e-con-inner { width: var(--content-width) }
-  // We emitted the container and no inner, so nothing constrained the content
-  // and the About page ran 1360px wide against the reference's 1170px — which
-  // is every one of that page's 391 width findings, one missing element.
-  const boxed = expanded.includes('e-con-boxed');
-  const kids = boxed ? `<div class="e-con-inner">${rawKids}</div>` : rawKids;
-  if (expanded && !widget) classes.push(expanded);
-  if (shape?.innerClass) classes.push(shape.innerClass);
+  if (expanded) classes.push(expanded);
+  // No wrapper layers. The generated stylesheet targets `.el-<id>` directly,
+  // so the element carrying the id is the element that gets styled.
+  const kids = rawKids;
   const bgUrl = rec(rec(s._background).image).url;
   const style = typeof bgUrl === 'string' && bgUrl ? ` style="background-image:url('${esc(bgUrl)}')"` : '';
   // Element attributes (Bricks `_attributes`) — href, aria-*, data-*, role…
@@ -231,14 +141,8 @@ function renderBricksNode(node: CanvasNode): string {
   const idAttr = typeof s._cssId === 'string' && s._cssId ? esc(s._cssId) : `brxe-${esc(node.id)}`;
   // The id goes on the wrapper when there is one, so a #id rule still lands on
   // the element the reference gives it to.
-  const attrs = widget
-    ? ` class="${esc(classes.join(' '))}"${style}${extra}`
-    : ` id="${idAttr}" class="${esc(classes.join(' '))}"${style}${extra}`;
-  const spacerFill = widgetType === 'spacer' && !rawKids.trim() ? SPACER_INNER : '';
-  const wrap = (inner: string): string =>
-    widget
-      ? `<div id="${idAttr}" class="${esc(expanded)}">${shape?.open ?? '<div class="elementor-widget-container">'}${inner}${shape?.close ?? '</div>'}</div>`
-      : inner;
+  const attrs = ` id="${idAttr}" class="${esc(classes.join(' '))}"${style}${extra}`;
+  const wrap = (inner: string): string => inner;
   // Bricks svg element: signed svg code on WP, raw svg markup here.
   if (name === 'svg' && typeof s.code === 'string' && s.code.trim().startsWith('<svg')) {
     return wrap(`<div${attrs}>${s.code}</div>`);
@@ -265,7 +169,9 @@ function renderBricksNode(node: CanvasNode): string {
       const label = typeof p.label === 'string' ? p.label : '';
       // The reference puts the label in its own span, which is what carries the
       // button's type scale and letter-spacing.
-      const body = widget === 'ideapark-button' ? `<span class="c-ip-button__text">${label}</span>` : label;
+      // The theme styles the label span, and that class is the THEME's, not
+      // the old builder's — it stays.
+      const body = `<span class="c-ip-button__text">${label}</span>`;
       return wrap(`<a${attrs.replace('class="', 'class="brxe-button ').replace('brxe-button brxe-', 'brxe-')} href="${esc(href)}" role="button">${body}</a>`);
     }
     case 'image': {
@@ -273,6 +179,6 @@ function renderBricksNode(node: CanvasNode): string {
       return wrap(`<img${attrs} src="${esc(src)}" alt="${esc(typeof p.alt === 'string' ? p.alt : '')}" />`);
     }
     default:
-      return wrap(`<div${attrs}>${kids}${spacerFill}</div>`);
+      return wrap(`<div${attrs}>${kids}</div>`);
   }
 }

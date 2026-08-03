@@ -96,18 +96,6 @@ export const PORTED_DOC_CSS = `
 
 :where(#brx-content .brxe-container,#brx-content .brxe-block,#brx-content .brxe-section){
   width:100%;max-width:100%}
-/* Elementor's base rule is "display: var(--display)", and --display is set
-   ONLY by a page's own generated stylesheet. A ported page that has the
-   container class but not that stylesheet resolves the var to nothing, which
-   computes as "unset" — and an unset div is INLINE. That collapsed 226
-   containers on the About page.
-   Zero specificity via :where() so the generated rules, which are plain class
-   selectors, still win wherever they exist. Block is what these containers
-   were before they carried the class, so pages without a stylesheet render
-   exactly as they did.
-   Not scoped to #brx-content: the ported header and footer carry these
-   containers too, and they render outside it. */
-:where(.e-con){--display:block}
 :where(#brx-content) img{max-width:100%;height:auto}
 /* Nodes the conversion invented — no element of this id exists on the
    reference. display:contents keeps them and their children in the DOM while
@@ -201,19 +189,6 @@ export interface SitePage {
    * inert on any page that has none.
    */
   pageCss?: string;
-  /**
-   * Elementor page scope, from `content.meta.elementorScope` (e.g.
-   * `elementor-165012`).
-   *
-   * Elementor scopes a page's entire generated stylesheet to a wrapper class
-   * named after the WP post id — every rule reads
-   * `.elementor-165012 .elementor-element.elementor-element-<id>`. Without the
-   * wrapper in the markup those rules match nothing, however correct the
-   * element ids are. That was the home page: 203 rules present, zero applied.
-   *
-   * Only set on pages imported from Elementor; everything else is unaffected.
-   */
-  pageScope?: string;
 }
 
 // The one place the storefront column width is decided. It used to be a
@@ -249,11 +224,7 @@ export function sitePage(p: SitePage): string {
   const footer = p.chromeFooter
     ? `<div id="brx-footer">${p.chromeFooter}</div>`
     : `<footer class="site"><div class="wrap"><span>© ${new Date().getFullYear()} ${esc(p.siteName)}</span>${p.showPlatformCredit === false ? '' : '<span>Powered by Therum OS</span>'}</div></footer>`;
-  // An Elementor-imported page is wrapped in the scope its stylesheet is
-  // written against; everything else renders exactly as before.
-  const scoped = /^elementor-\d+$/.test(p.pageScope ?? '')
-    ? `<div class="elementor ${p.pageScope}">${p.body}</div>`
-    : p.body;
+  const scoped = p.body;
   const main = hasChrome ? `<main id="brx-content">${scoped}</main>` : `<main><div class="wrap">
 ${p.body}
 </div></main>`;
