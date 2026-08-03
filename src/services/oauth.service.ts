@@ -55,7 +55,13 @@ const OAUTH_PROVIDERS: Record<string, OAuthProviderConfig> = {
   figma: { authorizeUrl: 'https://www.figma.com/oauth', tokenUrl: 'https://api.figma.com/v1/oauth/token', scope: 'file_read', tokenField: 'access_token' },
 };
 
-const GOOGLE_FAMILY = new Set(['google-drive', 'gmail', 'google-calendar', 'google-sheets']);
+// 'google-signin' is in the family too. It is where an operator most naturally
+// configures their Google Cloud app — it is the one with a visible button —
+// and Google apps are not service-scoped, so the same client id/secret
+// authorizes Drive, Gmail, Calendar and Sheets with nothing but a different
+// scope. Leaving it out meant setting up Sign in with Google and then being
+// asked for the SAME credentials again for every other Google service.
+const GOOGLE_FAMILY = new Set(['google-signin', 'google-drive', 'gmail', 'google-calendar', 'google-sheets']);
 
 // A Google Cloud OAuth app configured under any one Google service is valid
 // for the whole family (Google apps aren't service-scoped; scopes are asked

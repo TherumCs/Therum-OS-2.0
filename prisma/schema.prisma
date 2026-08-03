@@ -86,25 +86,27 @@ model Product {
    * published. `status` is the lifecycle (draft -> active -> archived);
    * visibility is the audience. A product can be perfectly Active AND private,
    * so folding these into one dropdown loses a real combination.
-   *
-   *   public     — anyone.
-   *   private    — UNLISTED: absent from listings, but the direct link works
-   *                for anyone holding it. The link is the credential.
-   *   restricted — must match a milieu in `audiences` OR a customer in
-   *                `access`; the two COMBINE. Everyone else gets a 404 and no
-   *                hint the product exists.
-   *
+   * public     — anyone.
+   * private    — UNLISTED: absent from listings, but the direct link works
+   * for anyone holding it. The link is the credential.
+   * restricted — must match a milieu in `audiences` OR a customer in
+   * `access`; the two COMBINE. Everyone else gets a 404 and no
+   * hint the product exists.
    * ENFORCED AT THE CART AND CHECKOUT, not only in listings. Hiding a product
    * from /shop while the API still accepts its variant id is not private.
    */
-  visibility  String        @default("public")
+  visibility String   @default("public")
   // Null vendorId = a merged product the engine owns (multi-vendor).
-  vendorId    String?       @map("vendor_id")
+  vendorId   String?  @map("vendor_id")
   // External id from the source platform — idempotency key for imports.
-  sourceId    String?       @map("source_id")
-  meta        Json          @default("{}")
-  createdAt   DateTime      @default(now()) @map("created_at")
-  updatedAt   DateTime      @updatedAt @map("updated_at")
+  sourceId   String?  @map("source_id")
+  // Which fulfilment provider prints this — 'printful', 'printify', 'tapstitch'.
+  // Distinct from vendorId, which is a MARKETPLACE seller and a real foreign
+  // key. Order routing reads this to decide which factory gets the line.
+  fulfillmentProvider String? @map("fulfillment_provider")
+  meta       Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
   vendor            Vendor?            @relation(fields: [vendorId], references: [id], onDelete: SetNull)
   variants          ProductVariant[]
@@ -123,8 +125,8 @@ model Product {
 // ─── Catalog taxonomy (Woo parity: hierarchical categories, flat tags) ──
 
 model ProductCategory {
-  id   String @id @default(cuid())
-  name String
+  id       String  @id @default(cuid())
+  name     String
   // NOT globally unique — unique WITHIN ITS PARENT.
   //
   // A global unique slug is the WooCommerce problem: you can have one
@@ -164,59 +166,58 @@ model ProductTag {
 // ─── ProductVariant: the sellable unit ──────────────────────────────────
 
 model ProductVariant {
-  id             String   @id @default(cuid())
-  productId      String   @map("product_id")
+  id             String  @id @default(cuid())
+  productId      String  @map("product_id")
   sku            String?
   // Money in minor units (cents).
-  price          Int      @default(0)
+  price          Int     @default(0)
   cost           Int?
   color          String?
   size           String?
   // For merged products, which vendor this specific variant came from.
-  sourceVendorId String?  @map("source_vendor_id")
-  sourceId       String?  @map("source_id")
-  inventory      Int      @default(0)
+  sourceVendorId String? @map("source_vendor_id")
+  sourceId       String? @map("source_id")
+  inventory      Int     @default(0)
   // Reserved (held) inventory; available = inventory - reserved.
-  reserved       Int      @default(0)
+  reserved       Int     @default(0)
 
   /**
    * How this variant's availability is decided.
-   *
-   *   tracked       — `inventory` is the truth; selling decrements it.
-   *   in_stock      — always sellable, no counting.
-   *   out_of_stock  — never sellable, whatever `inventory` says.
-   *   backorder     — sellable, and the buyer is told it ships later.
-   *
+   * tracked       — `inventory` is the truth; selling decrements it.
+   * in_stock      — always sellable, no counting.
+   * out_of_stock  — never sellable, whatever `inventory` says.
+   * backorder     — sellable, and the buyer is told it ships later.
    * Print-on-demand is the reason this exists. A POD line has no stock to run
    * out of, and the previous workaround was to import it with an inventory of
    * 999999 — which showed up in the admin as a real number a merchant could
    * edit and mean nothing by, and would have silently become 999998 on the
    * first sale.
    */
-  stockStatus    String   @default("tracked") @map("stock_status")
+  stockStatus String @default("tracked") @map("stock_status")
 
   /**
    * The variant's OWN image. A colourway is a different photograph, and
    * without this the gallery cannot change when the shopper picks one —
    * which is what WooCommerce does and what its absence here looked like.
    */
-  image          String?
-  /** Extra shots for this specific variant: [{url, alt}]. */
-  images         Json     @default("[]")
+  image  String?
+  /**
+   * Extra shots for this specific variant: [{url, alt}].
+   */
+  images Json    @default("[]")
 
   /**
    * The actual colours of this variant, as hex: ["#c70b3c", "#f9e9d1"].
-   *
    * Taken from the provider, never inferred from the name. Printful publishes
    * `color_code` and `color_code2` per catalog variant, and a name like
    * "Red/Natural" is two colours — guessing a single hex from that word would
    * be wrong in both directions. One entry renders a solid swatch, two render
    * a split.
    */
-  colorCodes     Json     @default("[]") @map("color_codes")
-  meta           Json     @default("{}")
-  createdAt      DateTime @default(now()) @map("created_at")
-  updatedAt      DateTime @updatedAt @map("updated_at")
+  colorCodes Json     @default("[]") @map("color_codes")
+  meta       Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
 
   product      Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
   sourceVendor Vendor?     @relation("VariantSourceVendor", fields: [sourceVendorId], references: [id], onDelete: SetNull)
@@ -237,16 +238,17 @@ model Customer {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  addresses   Address[]
-  orders      Order[]
-  memberships MilieuMembership[]
-  reviews     ProductReview[]
-  identities  CustomerIdentity[]
-  sessions    CustomerSession[]
-  offers      CustomerOffer[]
+  addresses     Address[]
+  orders        Order[]
+  memberships   MilieuMembership[]
+  reviews       ProductReview[]
+  identities    CustomerIdentity[]
+  sessions      CustomerSession[]
+  offers        CustomerOffer[]
+  productAccess ProductAccess[]
+  bankLinks     BankLink[]
 
   @@map("customers")
-  productAccess ProductAccess[]
 }
 
 // A coupon pushed to ONE named customer, so it shows up in their account
@@ -358,6 +360,7 @@ model Order {
   items             OrderItem[]
   payment           Payment?
   refunds           Refund[]
+  routes            FulfillmentRoute[]
   couponRedemptions CouponRedemption[]
   shipments         OrderShipment[]
 
@@ -419,7 +422,7 @@ model Coupon {
 
   redemptions CouponRedemption[]
   offers      CustomerOffer[]
-  milieu      Milieu?           @relation(fields: [milieuId], references: [id], onDelete: SetNull)
+  milieu      Milieu?            @relation(fields: [milieuId], references: [id], onDelete: SetNull)
 
   @@index([status])
   @@index([milieuId])
@@ -588,12 +591,19 @@ model AdminUser {
   // hardcoded 'admin' role exactly, so no existing account's access changes
   // by this column merely existing). Only a non-null roleId narrows access,
   // via the Role's own bundles — see role.service.ts's resolveAccess().
+  // The Google account allowed to sign in AS this admin.
+  //
+  // An explicit link, never an inference. Matching on "any verified Google
+  // email" would mean anyone with a Google account could sign in and approve a
+  // partner connection — the credential-vending hole again, wearing a nicer
+  // button. Null means Google sign-in is not available for this account.
+  googleEmail        String?  @unique @map("google_email")
   roleId             String?  @map("role_id")
 
   apiTokens ApiToken[]
   role      Role?      @relation(fields: [roleId], references: [id], onDelete: Restrict)
-  @@index([roleId])
 
+  @@index([roleId])
   @@map("admin_users")
 }
 
@@ -613,38 +623,37 @@ model AdminUser {
 // The secret is hashed at rest like a password: it is shown once at creation
 // and never again, because a store credential is a full API login.
 model StoreCredential {
-  id           String    @id @default(cuid())
+  id          String    @id @default(cuid())
   /**
    * A NUMERIC id, because WooCommerce's is one.
-   *
    * The auth handshake hands `key_id` back to the partner, and WooCommerce's
    * is a database auto-increment. Partners parse it as an integer; a cuid
    * string fails that parse and the connection is rejected AFTER the keys were
    * accepted — which reads as "connection failed" with nothing wrong on either
    * side's logs.
    */
-  keyId        Int       @unique @default(autoincrement()) @map("key_id")
-  label        String
-  consumerKey  String    @unique @map("consumer_key")
-  secretHash   String    @map("secret_hash")
+  keyId       Int       @unique @default(autoincrement()) @map("key_id")
+  label       String
+  consumerKey String    @unique @map("consumer_key")
+  secretHash  String    @map("secret_hash")
   // 'read' cannot mutate anything; POD platforms that only pull products need
   // nothing more, and handing out write access by default is how a compromised
   // partner becomes a compromised store.
-  scope        String    @default("read_write")
-  lastUsedAt   DateTime? @map("last_used_at")
-  lastUsedIp   String?   @map("last_used_ip")
-  revokedAt    DateTime? @map("revoked_at")
-  createdAt    DateTime  @default(now()) @map("created_at")
+  scope       String    @default("read_write")
+  lastUsedAt  DateTime? @map("last_used_at")
+  lastUsedIp  String?   @map("last_used_ip")
+  revokedAt   DateTime? @map("revoked_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
 
   @@index([revokedAt])
   @@map("store_credentials")
 }
 
 model AuthEvent {
-  id       String @id @default(cuid())
-  type     String // admin: login_success | login_failure | login_locked | setup | logout | 2fa_enabled | 2fa_disabled | 2fa_challenge_failed
+  id        String   @id @default(cuid())
+  type      String // admin: login_success | login_failure | login_locked | setup | logout | 2fa_enabled | 2fa_disabled | 2fa_challenge_failed
   // customer: customer_* (see AuthEventType)
-  username String // not a FK — must still record events for usernames that don't exist (failed logins)
+  username  String // not a FK — must still record events for usernames that don't exist (failed logins)
   // Which login surface this happened on. Storefront customers and admin
   // operators are different populations with different threat models, and a
   // single mixed list makes a burst of customer failures look like an attack on
@@ -682,8 +691,8 @@ model ApiToken {
   revokedAt  DateTime? @map("revoked_at")
 
   user AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
-  @@index([userId])
 
+  @@index([userId])
   @@map("api_tokens")
 }
 
@@ -817,7 +826,6 @@ model Connection {
   status              String    @default("connected") // connected | error
   /**
    * WHICH connect route this credential came from.
-   *
    * A provider can offer several — Printful takes a key pair this store issues
    * AND a private token of its own — and the stored string means different
    * things in each case. Without this the tester has to guess, and testing a
@@ -850,6 +858,123 @@ model ConnectionAuditLog {
 // something. `verified` is real for github/stripe/slack once a webhook
 // secret is configured (see WebhookSecret + src/lib/webhookSignatures.ts)
 // — null means no signature scheme wired for that provider yet, not "failed".
+// A webhook a PARTNER registered on this store — outbound, us -> them.
+//
+// Distinct from WebhookLog/WebhookSecret above, which are INBOUND (a provider
+// calling us, verified with a secret we configured). Nothing here existed, so
+// a connected partner could read the catalogue and never learn an order had
+// happened: Printful's plugin registers exactly this and then waits for us to
+// call it. Fulfilment cannot work without it.
+//
+// Shaped to WooCommerce's /wc/v3/webhooks because that is the API partners
+// already speak — topic is "resource.event" (order.created, order.updated).
+model StoreWebhook {
+  id              String   @id @default(cuid())
+  name            String
+  // "order.created", "order.updated", "product.updated", ...
+  topic           String
+  deliveryUrl     String   @map("delivery_url")
+  // The partner supplies this (or we mint one) and signs nothing without it —
+  // it is how THEY verify the call came from this store. Encrypted at rest for
+  // the same reason store credentials are.
+  secretEncrypted String   @map("secret_encrypted")
+  status          String   @default("active") // active | paused | disabled
+  // Which partner key registered it, so revoking a connection can take its
+  // webhooks with it rather than leaving orphans posting to a dead endpoint.
+  credentialId    String?  @map("credential_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  deliveries WebhookDelivery[]
+
+  @@index([topic, status])
+  @@index([credentialId])
+  @@map("store_webhooks")
+}
+
+// One attempt to deliver one event. Kept because "the partner says they never
+// got the order" is otherwise unanswerable.
+model WebhookDelivery {
+  id           String       @id @default(cuid())
+  webhookId    String       @map("webhook_id")
+  webhook      StoreWebhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  topic        String
+  resourceId   String       @map("resource_id")
+  // null until a response arrives; a timeout leaves it null with an error set.
+  responseCode Int?         @map("response_code")
+  error        String?
+  attempt      Int          @default(1)
+  durationMs   Int?         @map("duration_ms")
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  @@index([webhookId, createdAt])
+  @@index([resourceId])
+  @@map("webhook_deliveries")
+}
+
+// One attempt to send one order's lines to one fulfilment provider.
+//
+// The push-side twin of WebhookDelivery. Both answer the same question from
+// opposite directions: "did the factory ever hear about this order?" Without a
+// record, a paid order that never reached Printful is indistinguishable from
+// one that did — and the customer finds out first.
+model FulfillmentRoute {
+  id         String   @id @default(cuid())
+  orderId    String   @map("order_id")
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider   String
+  lines      Int
+  ok         Boolean
+  // The provider's own order id, so a human can find it on their side.
+  reference  String?
+  error      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([orderId])
+  @@index([provider, ok])
+  @@map("fulfillment_routes")
+}
+
+// A bank connection a SHOPPER authorised through Plaid.
+//
+// This is consumer financial data, which is a different class of thing from
+// everything else this store holds. Three rules follow from that and are
+// enforced here rather than trusted to callers:
+//
+//   1. The access token is encrypted at rest like any other secret, and is
+//      NEVER sent to a browser — only the store's server ever holds it.
+//   2. Only display-safe fields are stored in the clear: which institution,
+//      the last four digits, the account nickname. Enough to show someone
+//      which account they linked, and nothing that can move money.
+//   3. Unlinking DELETES the row. A "disconnected" flag would leave a live
+//      access token in the database belonging to someone who asked to revoke
+//      it, which is the wrong answer to that request.
+model BankLink {
+  id             String   @id @default(cuid())
+  customerId     String   @map("customer_id")
+  customer       Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Plaid's identifier for the linked login. Unique so a re-link replaces
+  // rather than duplicates.
+  itemId         String   @unique @map("item_id")
+  accessTokenEncrypted String @map("access_token_encrypted")
+
+  institutionName String? @map("institution_name")
+  institutionId   String? @map("institution_id")
+
+  // Display only. Never enough to originate a transaction.
+  accountMask    String?  @map("account_mask")
+  accountName    String?  @map("account_name")
+  accountType    String?  @map("account_type")
+
+  status         String   @default("active") // active | needs_reauth | revoked
+  linkedAt       DateTime @default(now()) @map("linked_at")
+  lastSyncedAt   DateTime? @map("last_synced_at")
+
+  @@index([customerId])
+  @@map("bank_links")
+}
+
 model WebhookLog {
   id             String   @id @default(cuid())
   provider       String
@@ -930,12 +1055,12 @@ model Milieu {
   createdAt           DateTime  @default(now()) @map("created_at")
   updatedAt           DateTime  @updatedAt @map("updated_at")
 
-  memberships MilieuMembership[]
+  memberships      MilieuMembership[]
   // Coupons restricted to this group — see Coupon.milieuId.
-  coupons     Coupon[]
+  coupons          Coupon[]
+  productAudiences ProductAudience[]
 
   @@map("milieus")
-  productAudiences ProductAudience[]
 }
 
 // ── Cluster (merged products) ───────────────────────────────────────
@@ -1004,30 +1129,30 @@ model MilieuMembership {
 // order-level tracking field is exactly what makes that unrepresentable there.
 // Money in minor units, like everywhere else in this schema.
 model OrderShipment {
-  id               String    @id @default(cuid())
-  orderId          String    @map("order_id")
+  id                String    @id @default(cuid())
+  orderId           String    @map("order_id")
   // Null = the store itself fulfils. Set = which vendor/POD partner owns it.
-  vendorId         String?   @map("vendor_id")
-  status           String    @default("pending")
+  vendorId          String?   @map("vendor_id")
+  status            String    @default("pending")
   // Provider identifiers, filled once a real quote/label exists.
-  shippingProvider String?   @map("shipping_provider")
-  shippingMethod   String?   @map("shipping_method")
-  podProvider      String?   @map("pod_provider")
-  quoteRef         String?   @map("quote_ref")
-  quotedAt         DateTime? @map("quoted_at")
-  shippingTotal    Int       @default(0) @map("shipping_total")
-  taxTotal         Int       @default(0) @map("tax_total")
-  trackingCarrier  String?   @map("tracking_carrier")
-  trackingNumber   String?   @map("tracking_number")
-  shipAddress      Json      @default("{}") @map("ship_address")
-  shippedAt        DateTime? @map("shipped_at")
+  shippingProvider  String?   @map("shipping_provider")
+  shippingMethod    String?   @map("shipping_method")
+  podProvider       String?   @map("pod_provider")
+  quoteRef          String?   @map("quote_ref")
+  quotedAt          DateTime? @map("quoted_at")
+  shippingTotal     Int       @default(0) @map("shipping_total")
+  taxTotal          Int       @default(0) @map("tax_total")
+  trackingCarrier   String?   @map("tracking_carrier")
+  trackingNumber    String?   @map("tracking_number")
+  shipAddress       Json      @default("{}") @map("ship_address")
+  shippedAt         DateTime? @map("shipped_at")
   // What the carrier said when the label was bought. Null until a provider
   // that returns one fills it in — the tracking page shows the real date or
   // says it does not have one, rather than inventing a delivery window.
   estimatedDelivery DateTime? @map("estimated_delivery")
-  deliveredAt      DateTime? @map("delivered_at")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  deliveredAt       DateTime? @map("delivered_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
 
   order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
@@ -1142,19 +1267,17 @@ model CustomerSession {
 // either a misconfiguration or somebody probing what the panel will do. Output
 // is captured scrubbed and truncated at the service layer, never raw.
 model HostActionLog {
-  id       String  @id @default(cuid())
-  actionId String  @map("action_id")
-  actorId  String? @map("actor_id")
+  id         String    @id @default(cuid())
+  actionId   String    @map("action_id")
+  actorId    String?   @map("actor_id")
   /**
    * running | ok | failed | interrupted.
-   *
    * The row is written BEFORE the action runs, because several of these
    * actions kill the process that would otherwise write it afterwards —
    * `pm2 reload therum-cms-api` restarts the very server handling the request,
    * and a provider-level restart takes the whole box. Recording only on
    * completion meant the most disruptive actions were the ones that left no
    * trace at all.
-   *
    * 'interrupted' is set at boot for any row still 'running': the truthful
    * answer after a reboot is "this started and we never saw it finish", not a
    * guess in either direction.
@@ -1181,7 +1304,9 @@ model HostActionLog {
 model EmailSignup {
   id        String   @id @default(cuid())
   email     String   @unique
-  /** Where it came from, so a second capture surface stays distinguishable. */
+  /**
+   * Where it came from, so a second capture surface stays distinguishable.
+   */
   source    String   @default("coming-soon")
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -1189,7 +1314,9 @@ model EmailSignup {
   @@map("email_signups")
 }
 
-/** Which milieus can see a `visibility = "milieu"` product. */
+/**
+ * Which milieus can see a `visibility = "milieu"` product.
+ */
 model ProductAudience {
   productId String @map("product_id")
   milieuId  String @map("milieu_id")
@@ -1202,7 +1329,9 @@ model ProductAudience {
   @@map("product_audiences")
 }
 
-/** Which individual customers can see a `visibility = "account"` product. */
+/**
+ * Which individual customers can see a `visibility = "account"` product.
+ */
 model ProductAccess {
   productId  String   @map("product_id")
   customerId String   @map("customer_id")

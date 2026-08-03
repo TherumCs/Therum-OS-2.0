@@ -32,3 +32,29 @@ export const PAGE_CSP =
   "connect-src 'self'; " +
   "frame-ancestors 'self'; " +
   "base-uri 'self'";
+
+/**
+ * The account page only — the one page that offers social sign-in.
+ *
+ * Google Identity Services will not work from a first-party-only policy: it
+ * loads its own script, opens its consent UI in an iframe, and calls home. So
+ * this widens script/frame/connect/style for exactly ONE host, on exactly the
+ * page that needs it.
+ *
+ * Deliberately NOT folded into PAGE_CSP. Every other page — shop, product,
+ * checkout, coming-soon — keeps `script-src 'self'`, so the weakening is
+ * bounded to the page a shopper signs in on rather than applied to the whole
+ * storefront for one button.
+ */
+const GSI = 'https://accounts.google.com';
+
+export const ACCOUNT_PAGE_CSP =
+  "default-src 'self'; " +
+  `script-src 'self' 'unsafe-inline' ${GSI}/gsi/client ${GSI}; ` +
+  `style-src 'self' 'unsafe-inline' ${GSI}/gsi/style ${GSI}; ` +
+  'img-src \'self\' data: https:; ' +
+  "media-src 'self' https:; " +
+  `connect-src 'self' ${GSI}/gsi/; ` +
+  `frame-src ${GSI}/gsi/; ` +
+  "frame-ancestors 'self'; " +
+  "base-uri 'self'";

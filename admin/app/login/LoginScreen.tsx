@@ -42,6 +42,21 @@ function safeRedirectTarget(from: string): string {
  * redirect was added to fix. Anything matching this leaves via a full-page
  * navigation instead.
  */
+/**
+ * What the Google callback's ?error= means, in words.
+ *
+ * The callback cannot render — it is a redirect — so it hands the reason back
+ * as a code. An unrecognised code shows nothing rather than leaking a raw
+ * string into the page.
+ */
+const GOOGLE_ERRORS: Record<string, string> = {
+  google_not_configured: 'Google sign-in is not set up for this store yet.',
+  google_cancelled: 'Google sign-in was cancelled.',
+  google_failed: 'Google did not confirm that sign-in. Try again.',
+  google_state_expired: 'That sign-in link expired. Try again.',
+  google_not_linked: 'That Google account is not linked to an admin on this store. Sign in with your password, or ask for it to be linked.',
+};
+
 function isApprovalPath(target: string): boolean {
   return /^\/wc-auth\/v1\/authorize(?:[/?]|$)/.test(target);
 }
@@ -134,7 +149,20 @@ export function LoginScreen({
 }) {
   const router = useRouter();
   const goAfterLogin = makeGoAfterLogin(from, router);
-  const [error, setError] = useState<string | null>(null);
+
+  /**
+   * Where Google should send us back to.
+   *
+   * A REAL browser path, so it carries the '/tos-admin' basePath — the API's
+   * redirect is a full-page navigation, not a router.push, and '/' would land
+   * on the storefront instead of the admin. A pending partner approval lives
+   * at the site root and wins, for the same reason goAfterLogin honours it.
+   */
+  const nextPath = isApprovalPath(from) ? from : '/tos-admin';
+
+  const [error, setError] = useState<string | null>(GOOGLE_ERRORS[typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search).get('error') ?? ''
+    : ''] ?? null);
   const [busy, setBusy] = useState(false);
   // Set once the password step succeeds on a 2FA-enabled account — the
   // challengeToken proves "password was correct" without granting a real
@@ -294,14 +322,46 @@ export function LoginScreen({
             </button>
           </form>
         ) : (
-          <form onSubmit={(e) => void handleLogin(e)}>
-            <Field label="Username" name="username" autoFocus />
-            <Field label="Password" name="password" type="password" />
-            {error && <ErrorNotice message={error} />}
-            <button type="submit" disabled={busy} style={{ width: '100%' }}>
-              {busy ? 'Signing in…' : 'Sign in'}
-            </button>
-          </form>
+          <>
+            {/*
+              A plain link, not a fetch. The Google flow is a full-page
+              redirect out and back, and the callback sets the session cookie
+              server-side — there is nothing for JavaScript to do, and an
+              anchor keeps working if the bundle has not hydrated yet.
+              `next` is validated server-side as a same-origin path.
+            */}
+            <a
+              href={`/auth/google/start?next=${encodeURIComponent(nextPath)}`}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                width: '100%', boxSizing: 'border-box', padding: '11px 16px',
+                border: '1px solid var(--th-line, #d8dade)', borderRadius: 10,
+                background: '#fff', color: '#3c4043', fontWeight: 600, fontSize: 14,
+                textDecoration: 'none', marginBottom: 'var(--th-space-10)',
+              }}
+            >
+              <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">
+                <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z" />
+                <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z" />
+                <path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33z" />
+                <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.9 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z" />
+              </svg>
+              Sign in with Google
+            </a>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--th-muted, #9ca3af)', fontSize: 12, marginBottom: 'var(--th-space-10)' }}>
+              <span style={{ flex: 1, height: 1, background: 'var(--th-line, #e5e7eb)' }} />
+              or
+              <span style={{ flex: 1, height: 1, background: 'var(--th-line, #e5e7eb)' }} />
+            </div>
+            <form onSubmit={(e) => void handleLogin(e)}>
+              <Field label="Username" name="username" autoFocus />
+              <Field label="Password" name="password" type="password" />
+              {error && <ErrorNotice message={error} />}
+              <button type="submit" disabled={busy} style={{ width: '100%' }}>
+                {busy ? 'Signing in…' : 'Sign in'}
+              </button>
+            </form>
+          </>
         )}
       </div>
 

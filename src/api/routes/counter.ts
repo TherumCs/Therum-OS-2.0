@@ -12,8 +12,9 @@ import { wooImporter } from '../../counter/wooImporter.js';
 import { db } from '../../lib/db.js';
 import { walletPayments, assertWalletProvider } from '../../counter/walletPayments.js';
 import { customerTokenFrom, requireCustomer } from '../../counter/customerSession.js';
+import { plaidApp, createLinkToken, exchangePublicToken, saveLink, linksFor, unlink } from '../../counter/plaid.js';
 import { customerAccountService } from '../../services/customerAccount.service.js';
-import { UnauthorizedError, ValidationError } from '../../lib/errors.js';
+import { UnauthorizedError, ValidationError, NotFoundError } from '../../lib/errors.js';
 import { checkRateLimit } from '../../lib/rateLimit.js';
 import { TooManyRequestsError } from '../../lib/errors.js';
 import * as catalogImport from '../../counter/catalogImport.js';
@@ -196,6 +197,47 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
   app.get('/shop/account/recommendations', async (req, reply) => {
     const customer = await requireCustomer(req);
     reply.send(await customerAccountService.recommendations(customer.id));
+  });
+
+  /**
+   * Bank linking (Plaid).
+   *
+   * Every route here requires the SHOPPER's own session and scopes to their own
+   * customer id — there is no route that takes a customer id from the request,
+   * because that is how one shopper ends up reading another's bank accounts.
+   *
+   * The access token never appears in any response on this file.
+   */
+  app.get('/shop/account/banks', async (req, reply) => {
+    const customer = await requireCustomer(req);
+    reply.send({ links: await linksFor(customer.id), ready: (await plaidApp()) !== null });
+  });
+
+  app.post('/shop/account/banks/link-token', async (req, reply) => {
+    const customer = await requireCustomer(req);
+    const app_ = await plaidApp();
+    if (!app_) throw new ValidationError('Bank linking is not set up for this store yet.', 'plaid');
+    reply.send({ linkToken: await createLinkToken(app_, customer.id) });
+  });
+
+  app.post('/shop/account/banks/exchange', async (req, reply) => {
+    const customer = await requireCustomer(req);
+    const app_ = await plaidApp();
+    if (!app_) throw new ValidationError('Bank linking is not set up for this store yet.', 'plaid');
+    const { publicToken } = z.object({ publicToken: z.string().min(1).max(500) }).parse(req.body);
+    const linked = await exchangePublicToken(app_, publicToken);
+    await saveLink(customer.id, linked);
+    // Deliberately returns the LIST, not the linked item — so no response on
+    // this path can ever be the one that accidentally carries a token.
+    reply.send({ links: await linksFor(customer.id) });
+  });
+
+  app.delete('/shop/account/banks/:id', async (req, reply) => {
+    const customer = await requireCustomer(req);
+    const { id } = req.params as { id: string };
+    const removed = await unlink(customer.id, id);
+    if (!removed) throw new NotFoundError('No such linked account', 'id');
+    reply.send({ links: await linksFor(customer.id) });
   });
 
   app.get('/shop/account/offers', async (req, reply) => {
