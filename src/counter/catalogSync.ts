@@ -180,7 +180,7 @@ const printful: CatalogProvider = {
 
       /**
        * Printful's `thumbnail_url` points at the store it was synced FROM —
-       * here `https://sidemoney.co/wp-content/uploads/…`, the old WordPress
+       * here `https://<your-old-site>/wp-content/uploads/…`, the old WordPress
        * install. That path does not exist on this server, so taking it would
        * import five products whose every image 404s, which looks like a broken
        * import rather than a wrong image source.
@@ -330,7 +330,19 @@ export const catalogSyncService = {
       if (existing) {
         await db.product.update({
           where: { id: existing.id },
-          data: { name: p.name, ...(p.image ? { image: p.image } : {}) },
+          data: {
+            name: p.name,
+            ...(p.image ? { image: p.image } : {}),
+            // WHICH fulfilment provider prints this. Without it an order line
+            // knows a provider's variant id but not whose it is, so nothing can
+            // route the order. Re-set on every sync, so products created before
+            // this existed heal themselves on the next run.
+            //
+            // NOT sourceVendorId — that is a foreign key to the marketplace
+            // `vendors` table, and writing a provider name into it fails with a
+            // constraint violation.
+            fulfillmentProvider: provider.id,
+          },
         });
         for (const v of p.variants) {
           const found = await db.productVariant.findFirst({
@@ -381,6 +393,7 @@ export const catalogSyncService = {
             slug: `${slugify(p.name)}-${p.sourceId}`,
             status: 'active',
             sourceId: p.sourceId,
+            fulfillmentProvider: provider.id,
             ...(p.image ? { image: p.image } : {}),
             variants: { create: p.variants },
           },

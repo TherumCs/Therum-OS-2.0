@@ -103,9 +103,6 @@ function validateCredential(provider: CatalogProvider, credential: string): void
   }
 }
 
-// Providers that can ALSO be connected by authorizing in a browser.
-const OAUTH_CAPABLE = new Set(oauthService.providers());
-
 /** The consumer key/secret pair a POD partner gives you, checked against the
  *  website it gave you with it. */
 /**
@@ -129,6 +126,35 @@ export const TOKEN_TESTERS: Record<string, Tester> = {
     return get('https://api.printify.com/v1/shops.json', { authorization: `Bearer ${token}` });
   },
   gelato: async (c) => get('https://ecommerce.gelatoapis.com/v1/stores', { 'X-API-KEY': c.split('|')[0] ?? c }),
+  // Contrado's own API (api.contrado.app), NOT the Shopify route — their
+  // dropship app installs through Shopify's OAuth servers, which no compat
+  // bridge can satisfy. Auth is X-API-KEY per their OpenAPI spec.
+  //
+  // Tests ORDER CREATION, not a read endpoint.
+  //
+  // This connection exists to send orders. A token scoped "View orders" passes
+  // every read check and still cannot place a single order — reporting that as
+  // OK is how a store discovers on its first sale that nothing was ever
+  // submitted. Probed with a deliberately EMPTY payload: a 400/422 means
+  // authorised and merely invalid, which is the pass; a 403 means the token
+  // lacks the scope, which is the failure worth surfacing. Nothing is created
+  // either way.
+  contrado: async (c) => {
+    const key = c.split('|')[0] ?? c;
+    const res = await fetch('https://api.contrado.app/helix/v1/orders/create', {
+      method: 'POST',
+      headers: { 'X-API-KEY': key, 'content-type': 'application/json' },
+      body: '{}',
+      signal: AbortSignal.timeout(20_000),
+    }).catch(() => null);
+    if (!res) return { ok: false, detail: 'Could not reach Contrado.' };
+    if (res.status === 403) {
+      return { ok: false, detail: 'Token cannot create orders — its scope is read-only ("View orders"). Ask Contrado to enable order creation.' };
+    }
+    if (res.status === 401) return { ok: false, detail: 'Contrado rejected this API key.' };
+    // Anything else means the request got past authorisation.
+    return { ok: true, detail: `${res.status} — authorised to create orders` };
+  },
 };
 
 const wooStyle: Tester = async (c) => {
@@ -304,10 +330,11 @@ const TESTERS: Record<string, Tester> = {
   printful: wooStyle,
   printify: wooStyle,
   gooten: wooStyle,
-  podplus: wooStyle,
+  podpluser: wooStyle,
+  merchize: wooStyle,
+  jetprint: wooStyle,
   podpartner: wooStyle,
   tapstitch: wooStyle,
-  contrado: wooStyle,
   // Endpoints and header names probed live (both answer 401 to a bad key, so a
   // 200 means the credential is real) rather than taken from a summary.
   gelato: wooStyle,
@@ -494,7 +521,12 @@ export const connectionService = {
         // Authorize-by-web is offered ALONGSIDE the key fields wherever the
         // provider really supports it, so the panel can show both routes to
         // the same vault entry rather than forcing a choice at catalog level.
-        oauthCapable: OAUTH_CAPABLE.has(p.id),
+        // Asked at CALL time, not module-init time. This was a
+        // module-level `new Set(oauthService.providers())`, and since
+        // oauth.service imports this file back, whichever module loaded
+        // second read a half-initialised partner — the one real hazard in
+        // the import cycle madge reports here.
+        oauthCapable: oauthService.isOAuthProvider(p.id),
       };
     });
   },

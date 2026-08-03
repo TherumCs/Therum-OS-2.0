@@ -3,7 +3,7 @@
 // runs with --env-file=.env, which the logger's env schema requires).
 import { test, describe } from 'node:test';
 import { readFile } from 'node:fs/promises';
-import { generateKeyPairSync, createSign, randomUUID } from 'node:crypto';
+import { generateKeyPairSync, createSign, randomUUID, createHmac } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { EventBus, event } from '../dist/counter/events.js';
 import { defaultPipeline, contextFor } from '../dist/counter/totalsPipeline.js';
@@ -21,6 +21,15 @@ import { closeQueues } from '../dist/lib/queue.js';
 import { after, before, beforeEach } from 'node:test';
 import { purgeTestCustomers } from './support/testCustomers.mjs';
 
+/** A real, signed admin session token — see the asAdmin fixture for why. */
+function signSession(role) {
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const now = Math.floor(Date.now() / 1000);
+  const data = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: 'test-admin', role, iat: now, exp: now + 3600 })}`;
+  return `${data}.${createHmac('sha256', process.env.JWT_SECRET).update(data).digest('base64url')}`;
+}
+
+
 // closeQueues() AND disconnectDb(). customerAuth's rate limiter opens the lazy
 // Redis client, and queue.ts documents exactly this: any one of these left
 // open holds a live socket that keeps the event loop alive forever, which
@@ -32,7 +41,7 @@ after(async () => {
 });
 
 // Real fulfilment provider ids, for the "not connected" assertion below.
-const FULFILMENT_IDS = ['gooten', 'spod', 'podplus', 'podpartner', 'tapstitch', 'contrado', 'gelato', 'printify', 'printful'];
+const FULFILMENT_IDS = ['gooten', 'spod', 'podpluser', 'podpartner', 'tapstitch', 'contrado', 'gelato', 'printify', 'printful'];
 
 const line = (over = {}) => ({
   itemId: 'i1', productId: 'p1', variantId: null, quantity: 2, unitPrice: 1000, lineTotal: 2000, ...over,
@@ -1273,22 +1282,47 @@ describe('woo auth handshake (one-click partner connect)', () => {
     // supplies. Unguarded it is a credential vending machine, and it WAS
     // unguarded — proven by POSTing to the live site from a terminal with no
     // session at all, twice, and finding the keys sitting in the store after.
-    const anon = await app.inject({
+    const post = (payload) => app.inject({
       method: 'POST',
       url: `/wc-auth/v1/authorize?${query()}`,
       headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      payload: 'approve=1',
+      payload,
     });
-    assert.equal(anon.statusCode, 401, 'an anonymous approval must not mint a key');
+
+    // Approving with NO credentials at all comes back as the screen asking for
+    // them, never as an issued key.
+    const bare = await post('approve=1');
+    assert.match(bare.body, /name="password"/, 'an anonymous approval must ask for a sign-in');
+
+    // A wrong password is the same dead end, and says so without revealing
+    // whether the username exists.
+    const wrong = await post('approve=1&username=nobody-here&password=not-the-password');
+    assert.match(wrong.body, /did not match/, 'a bad password must be rejected on the screen');
+    assert.doesNotMatch(wrong.body, /no such user|unknown username/i, 'must not reveal which half was wrong');
+
+    // A cookie that merely LOOKS like a session must not count as one. The
+    // check used to be a regex for the name alone, so `th_session=garbage`
+    // read as a signed-in admin on the live site and the endpoint went back to
+    // vending read_write keys to any caller.
+    const forged = await app.inject({
+      method: 'GET',
+      url: `/wc-auth/v1/authorize?${query()}`,
+      headers: { cookie: 'th_session=garbage-not-a-jwt' },
+    });
+    assert.match(forged.body, /name="password"/, 'an unverifiable session cookie must not count as signed in');
 
     const minted = await db.storeCredential.findMany({ where: { label: { startsWith: 'TestPartner' } } });
     assert.equal(minted.length, 0, 'nothing was issued to an unauthenticated caller');
 
-    // And the consent screen itself sends you to log in rather than rendering.
-    // NO session header here on purpose — that is the case under test.
+    // The screen RENDERS for a signed-out merchant rather than bouncing to the
+    // admin login — a partner sends people here from their own site, and the
+    // bounce landed them on a login page with nothing to approve. Signing in
+    // happens on this page; the POST above is what enforces it.
     const screen = await app.inject({ method: 'GET', url: `/wc-auth/v1/authorize?${query()}` });
-    assert.equal(screen.statusCode, 302);
-    assert.match(screen.headers.location, /\/tos-admin\/login/);
+    assert.equal(screen.statusCode, 200);
+    assert.match(screen.body, /name="password"/, 'a signed-out merchant gets sign-in fields, not a redirect');
+    assert.match(screen.headers['content-security-policy'], /form-action [^;]*https:\/\/partner\.example/,
+      'the policy must permit the approval to leave for the partner');
   });
 
   test('a real connection is NOT labelled with the string test cleanup deletes', async () => {
@@ -1300,10 +1334,15 @@ describe('woo auth handshake (one-click partner connect)', () => {
       'live connections must not carry the label this suite cleans up');
   });
 
-  // Approving a connection is an admin act, so these carry a session. The
-  // value only has to LOOK like a session cookie — the endpoint checks that an
-  // admin is present, and the real auth still guards everything it does.
-  const asAdmin = { cookie: 'th_session=admin-session-for-tests' };
+  // Approving a connection is an admin act, so these carry a session — a REAL
+  // one, signed with the running secret.
+  //
+  // This used to be the literal string 'admin-session-for-tests', because the
+  // endpoint only checked that a cookie by that NAME existed. So the fixture
+  // passed for the same reason an attacker's forged cookie passed, and the
+  // suite could never have caught it. A test whose credential is fake proves
+  // only that the code accepts fakes.
+  const asAdmin = { cookie: `th_session=${signSession('admin')}` };
 
   const query = (over = {}) =>
     new URLSearchParams({

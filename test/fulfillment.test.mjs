@@ -49,7 +49,7 @@ test('fulfillment providers listed in the catalog with the right category', asyn
   assert.equal(res.statusCode, 200);
   const rows = res.json();
   const pods = rows.filter((r) => r.category === 'fulfillment').map((r) => r.id);
-  for (const id of ['printful', 'printify', 'gelato', 'gooten', 'spod', 'podplus', 'podpartner', 'tapstitch', 'contrado']) {
+  for (const id of ['printful', 'printify', 'gelato', 'gooten', 'spod', 'podpluser', 'podpartner', 'tapstitch', 'contrado']) {
     assert.ok(pods.includes(id), `${id} in fulfillment`);
   }
   assert.equal(rows.find((r) => r.id === 'printful').testable, true, 'printful has a live tester');

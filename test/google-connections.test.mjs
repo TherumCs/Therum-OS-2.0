@@ -34,11 +34,11 @@ after(async () => {
   await disconnectDb();
 });
 
-test('catalog: 81 providers; all four Google services present and oauth-typed', () => {
+test('catalog: 85 providers; all four Google services present and oauth-typed', () => {
   // 80 since 2026-08-01: Hostinger, the first 'hosting' entry — the provider
   // that owns the MACHINE rather than another integration for the store.
   // 81 with Flodesk (messaging).
-  assert.equal(nexusCatalog.length, 81);
+  assert.equal(nexusCatalog.length, 85); // +plaid, +merchize, +jetprint, +podpluser, -podplus (not a real provider) — 2026-08-02
   for (const id of FAMILY) {
     const p = nexusCatalog.find((x) => x.id === id);
     assert.ok(p, `${id} in catalog`);
