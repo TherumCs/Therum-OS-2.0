@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { resolveMx } from 'node:dns/promises';
 import { settingsService } from './settings.service.js';
 import { connectionService } from './connection.service.js';
 import { viaGmail, gmailStatus } from './gmailSend.js';
@@ -74,7 +75,12 @@ export async function mailTransport(): Promise<{ ready: boolean; via: string }> 
     if (has) return { ready: true, via: `${id} (Nexus)` };
   }
   const n = await settingsService.getNotifications();
-  if (n.smtpHost) return { ready: true, via: `SMTP · ${n.smtpHost}` };
+  if (n.smtpHost && n.smtpPassword) return { ready: true, via: `SMTP · ${n.smtpHost}` };
+  // Direct-to-MX needs no credential, so a store with a From address on its own
+  // domain can already send — reporting "nothing connected" there is what made
+  // the contact form tell people their message had not been delivered.
+  const from = n.smtpFrom || n.adminEmail || '';
+  if (from.includes('@')) return { ready: true, via: `direct to MX (as ${from})` };
   return { ready: false, via: 'nothing connected' };
 }
 
@@ -99,7 +105,59 @@ export async function sendEmailTo(to: string, subject: string, body: string): Pr
     }
   }
 
-  if (!n.smtpHost) return;
+  // No relay credential? Deliver straight to the recipient's MX.
+  //
+  // Delivering TO a domain's mail exchanger has never required authentication —
+  // that is how every mail server on the internet reaches every other one. It
+  // was proven for this box before being relied on: aspmx.l.google.com:25
+  // accepted MAIL FROM and RCPT TO for the store's own domain unauthenticated.
+  //
+  // This is deliberately the LAST resort, after every authenticated relay, and
+  // it is honest about its limits. Mail to the store's own domain arrives.
+  // Mail to a shopper elsewhere is sent from an IP that is not in the domain's
+  // SPF record, so it will often be filtered — receipts want a real relay.
+  // Returning false rather than pretending keeps sendEmailTo's contract, and
+  // the contact route reports what actually happened.
+  if (!n.smtpHost || !n.smtpPassword) {
+    // The recipient's own mail exchangers, best priority first. nodemailer's
+    // `direct: true` transport did this until it was REMOVED in nodemailer 7
+    // (we run 9) — passing it now is silently ignored and the transport falls
+    // back to localhost:587, which is the ECONNREFUSED ::1:587 this produced.
+    const domain = to.split('@')[1];
+    if (!domain) return;
+    const hosts = (await resolveMx(domain).catch(() => []))
+      .sort((a, b) => a.priority - b.priority)
+      .map((r) => r.exchange);
+    if (!hosts.length) return;
+
+    const helo = (n.smtpFrom || n.adminEmail || '').split('@')[1] || 'localhost';
+    for (const host of hosts) {
+      const mx = nodemailer.createTransport({
+        host,
+        port: 25,
+        secure: false,
+        // Opportunistic TLS: an MX that offers STARTTLS gets it, one that does
+        // not still receives the mail. Certificates are not verified because
+        // MX hostnames routinely do not match their certs, and refusing on
+        // that grounds would simply stop mail from being delivered at all.
+        tls: { rejectUnauthorized: false },
+        name: helo,
+        connectionTimeout: 10_000,
+        greetingTimeout: 10_000,
+        socketTimeout: 20_000,
+      });
+      try {
+        await mx.sendMail({ from: n.smtpFrom || n.adminEmail, to, subject, text: body });
+        return;
+      } catch {
+        // Try the next exchanger — a single MX being down is routine.
+      } finally {
+        mx.close();
+      }
+    }
+    return;
+  }
+
   const transport = nodemailer.createTransport({
     host: n.smtpHost,
     port: n.smtpPort,
