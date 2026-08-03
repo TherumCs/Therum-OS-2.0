@@ -55,6 +55,24 @@ export function chunks(css) {
 const selectorOf = (chunk) => chunk.slice(0, chunk.indexOf('{'));
 
 /**
+ * Would this selector stop the browser parsing?
+ *
+ * ONE malformed selector discards every rule after it in the stylesheet — a
+ * stray `)` left by dropping part of a grouped selector cost 518 rules,
+ * including every per-element rule, and the page looked simply unstyled with
+ * no error anywhere. Cheap to check, silent and total when missed.
+ */
+export function malformed(sel) {
+  if (/:(?:where|is|not|has)\(\s*\)/.test(sel)) return true;
+  let bal = 0;
+  for (const ch of sel) {
+    if (ch === '(') bal++;
+    else if (ch === ')') { bal--; if (bal < 0) return true; }
+  }
+  return bal !== 0;
+}
+
+/**
  * Inside an @media block, drop only the legacy rules and keep the rest. An
  * @media that mixes theme rules with builder rules is common, and dropping the
  * whole block would take real responsive rules with it.
@@ -63,7 +81,7 @@ function filterMedia(chunk) {
   const open = chunk.indexOf('{');
   const head = chunk.slice(0, open + 1);
   const inner = chunk.slice(open + 1, chunk.lastIndexOf('}'));
-  const kept = chunks(inner).filter((r) => !LEGACY.test(selectorOf(r)));
+  const kept = chunks(inner).filter((r) => !LEGACY.test(selectorOf(r)) && !malformed(selectorOf(r)));
   return kept.length ? `${head}${kept.join('')}}` : null;
 }
 
@@ -86,7 +104,7 @@ export function build() {
         continue;
       }
       // @font-face, @keyframes, :root and plain rules.
-      if (LEGACY.test(sel)) { dropped++; continue; }
+      if (LEGACY.test(sel) || malformed(sel)) { dropped++; continue; }
       if (seen.has(chunk)) continue;
       seen.add(chunk); kept.push(chunk);
     }

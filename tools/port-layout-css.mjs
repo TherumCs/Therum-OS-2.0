@@ -66,6 +66,20 @@ export function portSelector(sel) {
     .replace(/\.elementor-widget\b/g, '');
 
   out = out.replace(/\s{2,}/g, ' ').replace(/\s*,\s*/g, ',').trim();
+  // Emptying a part of a grouped selector leaves wreckage behind:
+  // `.e-con-full, .elementor-widget)` became `:where()){...}` — an empty
+  // :where() and a stray paren. ONE malformed selector stops the browser
+  // parsing the rest of the stylesheet, and every per-element rule after it
+  // was silently discarded: 3012 rules parsed out of 3530, and not one .el-
+  // rule survived. So a ported selector is validated before it is emitted.
+  if (/:(?:where|is|not|has)\(\s*\)/.test(out)) return null;   // emptied pseudo
+  let bal = 0;
+  for (const ch of out) {
+    if (ch === '(') bal++;
+    else if (ch === ')') { bal--; if (bal < 0) return null; }    // stray close
+  }
+  if (bal !== 0) return null;                                     // unbalanced
+  if (/^[,>+~]|[,>+~]$|,,/.test(out)) return null;                // dangling combinator
   // Anything still naming the old builder could not be ported honestly.
   if (!out || LEGACY.test(out)) return null;
   // A selector that reduced to nothing meaningful would apply site-wide.
@@ -90,7 +104,19 @@ function portChunk(chunk) {
 
   const sels = head.split(',').map(portSelector).filter(Boolean);
   if (!sels.length) return null;
-  return `${[...new Set(sels)].join(',')}${chunk.slice(open)}`;
+  // A rule that names NO element id is one of the builder's BASE rules — its
+  // job is to supply defaults (--flex-direction:column, display:block) that a
+  // per-element rule then overrides. Ported literally, `.e-con` becomes
+  // `:is(.brxe-container,...)` at specificity 0,1,0 and `.e-con.e-flex`
+  // becomes 0,2,0 — both of which OUTRANK the per-element `.el-<id>` rule at
+  // 0,1,0. The defaults then win and every element inherits column/block: the
+  // footer row computed --flex-direction:column while its own rule said row.
+  //
+  // Base rules are therefore emitted at ZERO specificity, which is what a
+  // default should have. Per-element rules keep theirs.
+  const isBase = !/elementor-element-/.test(head);
+  const finalSels = [...new Set(sels)].map((x) => (isBase ? `:where(${x})` : x));
+  return `${finalSels.join(',')}${chunk.slice(open)}`;
 }
 
 export function build() {
@@ -112,6 +138,19 @@ export function build() {
   // The defaults go FIRST and at zero specificity, so a ported rule that sets
   // the var always wins and a container without one behaves like the block it
   // was before the contract existed.
+  // The var-to-property CONTRACT, read out of the reference. Elementor sets
+  // only custom properties per element (--display, --flex-direction,
+  // --min-height...) and a separate base rule turns them into real
+  // declarations. Only `display: var(--display)` survived the first port, so
+  // every OTHER ported property was set and read by nothing — the footer
+  // columns stacked at 1360px against a reference 256px because
+  // `flex-direction: var(--flex-direction)` was missing.
+  //
+  // 73 declarations were found in the reference; these are the layout ones.
+  // Component-specific properties (accordion, icon-list) stay with the
+  // components that own them, which the theme files already carry.
+  const CONTRACT = ':is(.brxe-container,.brxe-block,.brxe-section,.brxe-div){align-content:var(--align-content);align-items:var(--align-items);border-block-end-width:var(--border-block-end-width);border-block-start-width:var(--border-block-start-width);border-color:var(--border-color);border-inline-end-width:var(--border-inline-end-width);border-inline-start-width:var(--border-inline-start-width);border-radius:var(--border-radius);border-style:var(--border-style);display:var(--display);flex:var(--flex-grow);flex-direction:var(--flex-direction);flex-wrap:var(--flex-wrap);gap:var(--row-gap);height:var(--height);justify-content:var(--justify-content);margin-block-start:var(--margin-block-start);margin-inline-end:var(--margin-inline-end);margin-inline-start:var(--margin-inline-start);min-height:var(--min-height);overflow:var(--overflow);padding-block-end:var(--padding-block-end);padding-block-start:var(--padding-block-start);padding-inline-end:var(--padding-inline-end);padding-inline-start:var(--padding-inline-start);position:var(--position);text-align:var(--text-align);width:var(--width);z-index:var(--z-index)}';
+
   const DEFAULTS = [
     ':where(.brxe-container,.brxe-block,.brxe-section,.brxe-div){' +
       '--display:block;--flex-direction:column;--justify-content:flex-start;' +
@@ -130,6 +169,7 @@ export function build() {
     '   verbatim so the relative units the theme is built on survive.',
     '   See PORTING.md and tools/port-layout-css.mjs. */',
     ...DEFAULTS,
+    CONTRACT,
     ...out,
   ].join('\n');
   const bad = chunks(css).filter((c) => LEGACY.test(c.slice(0, c.indexOf('{'))));
