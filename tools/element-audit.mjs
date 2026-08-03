@@ -54,8 +54,12 @@ async function connect(port) {
 // vs clientWidth is captured too — that is what catches text piled on itself.
 const PROBE = `(() => {
   const out = {};
-  document.querySelectorAll('[class*="elementor-element-"]').forEach((el) => {
-    const id = ((el.className || '').toString().match(/elementor-element-([0-9a-f]+)/) || [])[1];
+  // The reference names elements with the old builder's class; ours carries
+  // the Bricks class el-<id>. Same id, two vocabularies — match on both or
+  // every element on our side reads as absent.
+  document.querySelectorAll('[class*="elementor-element-"],[class*="el-"]').forEach((el) => {
+    const cn = (el.className || '').toString();
+    const id = (cn.match(/elementor-element-([0-9a-f]{6,})/) || cn.match(/(?:^|\\s)el-([0-9a-f]{6,})(?:\\s|$)/) || [])[1];
     if (!id || out[id]) return;
     const r = el.getBoundingClientRect();
     const cs = getComputedStyle(el);

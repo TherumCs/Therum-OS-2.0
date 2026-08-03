@@ -114,7 +114,9 @@ const MEASURE = `(() => {
       const r = el.getBoundingClientRect();
       // Elementor's own element id is the only stable identity across the two
       // sites — class names and wrappers differ, the id does not.
-      const id = ((el.className || '').toString().match(/elementor-element-([0-9a-f]+)/) || [])[1] || null;
+      // Reference uses the old builder's class, ours uses Bricks el-<id>.
+      const cn = (el.className || '').toString();
+      const id = (cn.match(/elementor-element-([0-9a-f]{6,})/) || cn.match(/(?:^|\\s)el-([0-9a-f]{6,})(?:\\s|$)/) || [])[1] || null;
       return { id, i, h: Math.round(r.height), w: Math.round(r.width) };
     })
     .filter((s) => s.h > 4); // ignore screen-reader and zero-height nodes
@@ -123,7 +125,7 @@ const MEASURE = `(() => {
     height: de.scrollHeight,
     scrollWidth: de.scrollWidth,
     sections,
-    collapsed: [...document.querySelectorAll('.e-con, .brxe-container')]
+    collapsed: [...document.querySelectorAll('.e-con, .brxe-container, .brxe-block')]
       .filter((e) => e.getBoundingClientRect().height < 2).length,
   });
 })()`;

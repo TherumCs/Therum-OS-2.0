@@ -30,6 +30,7 @@ function pickEnum<T extends string>(value: unknown, allowed: readonly T[]): T | 
 import { checkoutFlowMarkup, quickBuySheetMarkup, CHECKOUT_FLOW_RUNTIME } from '../../site/checkoutFlow.js';
 import { shopToolbar, SHOP_TOOLBAR_RUNTIME } from '../../site/shopToolbar.js';
 import { accountMarkup, ACCOUNT_RUNTIME } from '../../site/accountPage.js';
+import { templateHtml, type TemplateSlot } from '../../counter/storefrontTemplates.js';
 import { wishlistMarkup } from '../../site/wishlist.js';
 import { orderTrackingMarkup, ORDER_TRACKING_CSS, ORDER_TRACKING_RUNTIME } from '../../site/orderTracking.js';
 import { availableOf, stockLabel } from '../../counter/availability.js';
@@ -1037,19 +1038,26 @@ document.getElementById('add').addEventListener('click',(e)=>{if(sel)addToCart(s
   // and swaps between them in place. Keeping /checkout as a real URL means the
   // step is linkable and the back button behaves — a mode held only in memory
   // strands anyone who reloads mid-payment.
+  // Counter templates: a published template for a slot replaces the built-in
+  // screen, and anything else — no template, a draft, an empty render — leaves
+  // the built-in screen exactly as it was. Templates are additive by design;
+  // see src/counter/storefrontTemplates.ts.
+  const slotBody = async (slot: TemplateSlot, builtIn: string): Promise<string> =>
+    (await templateHtml(slot).catch(() => null)) ?? builtIn;
+
   // Cart and checkout are per-shopper and carry nothing a search engine should
   // hold, so they are noindex rather than canonicalised.
-  const flowPage = async (title: string, section: string): Promise<string> =>
-    page(title, `${await heading(section)}${checkoutFlowMarkup()}`, CHECKOUT_FLOW_RUNTIME, PRIVATE_PAGE);
+  const flowPage = async (title: string, section: string, slot: TemplateSlot): Promise<string> =>
+    page(title, `${await heading(section)}${await slotBody(slot, checkoutFlowMarkup())}`, CHECKOUT_FLOW_RUNTIME, PRIVATE_PAGE);
 
   app.get('/cart', async (_req, reply) => {
     if (!(await commerceOn())) return html(reply, closedPage());
-    html(reply, await flowPage('Cart — Therum Store', 'Cart'));
+    html(reply, await flowPage('Cart — Therum Store', 'Cart', 'cart'));
   });
 
   app.get('/checkout', async (_req, reply) => {
     if (!(await commerceOn())) return html(reply, closedPage());
-    html(reply, await flowPage('Checkout — Therum Store', 'Checkout'));
+    html(reply, await flowPage('Checkout — Therum Store', 'Checkout', 'checkout'));
   });
 
   // ── The other two header icons ────────────────────────────────────────
@@ -1067,7 +1075,7 @@ document.getElementById('add').addEventListener('click',(e)=>{if(sel)addToCart(s
     // one implementation.
     html(
       reply,
-      await page('Account — Therum Store', `${await heading('Account')}${accountMarkup(wishlistMarkup(), gApp?.clientId ?? '')}`, ACCOUNT_RUNTIME, PRIVATE_PAGE),
+      await page('Account — Therum Store', `${await heading('Account')}${await slotBody('account', accountMarkup(wishlistMarkup(), gApp?.clientId ?? ''))}`, ACCOUNT_RUNTIME, PRIVATE_PAGE),
       ACCOUNT_PAGE_CSP,
     );
   });

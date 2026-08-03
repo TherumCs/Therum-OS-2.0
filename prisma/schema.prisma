@@ -776,6 +776,11 @@ enum ContentType {
   page
   post
   case_study
+  // Counter's storefront screens, editable the way Woo ships default
+  // templates. A template is content like any other row — same editor, same
+  // rendering — so shop/PDP/cart/checkout/account stop being hardcoded
+  // TypeScript that only a developer can change.
+  template
 }
 
 enum ContentStatus {

@@ -1,5 +1,8 @@
 import type { FastifyInstance } from 'fastify';
 import {
+  TEMPLATE_SLOTS, templateStatus, seedDefaults, builtInMarkupFor,
+} from '../../counter/storefrontTemplates.js';
+import {
   AppearanceInput,
   AdminDockInput,
   LoginBrandingInput,
@@ -112,6 +115,21 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
   });
   app.patch('/settings/counter', { preHandler: [app.authenticate, requireSettingsWrite] }, async (req, reply) => {
     reply.send(await settingsService.setCounter(CounterSettingsInput.parse(req.body)));
+  });
+
+  // Counter's storefront TEMPLATES — which screens a merchant has taken over
+  // from the built-in rendering. Woo ships editable templates for exactly
+  // these screens; until now ours lived in TypeScript and only a developer
+  // could change them.
+  app.get('/settings/counter/templates', { preHandler: app.authenticate }, async (_req, reply) => {
+    reply.send({ slots: TEMPLATE_SLOTS, live: await templateStatus() });
+  });
+
+  // Creates a DRAFT template per slot, carrying that screen's current markup,
+  // for any slot that has none. Drafts on purpose: seeding must not change a
+  // single pixel of a working storefront — a merchant publishes when ready.
+  app.post('/settings/counter/templates/seed', { preHandler: [app.authenticate, requireSettingsWrite] }, async (_req, reply) => {
+    reply.send(await seedDefaults(builtInMarkupFor));
   });
 
   app.get('/settings/editor-defaults', { preHandler: app.authenticate }, async (_req, reply) => {
