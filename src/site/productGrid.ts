@@ -1,4 +1,4 @@
-import { esc, money } from './storefrontHtml.js';
+import { esc, money } from './html.js';
 import { wishlistButton } from './wishlist.js';
 
 // Counter's product card, in the SITE THEME's own markup contract.
@@ -572,8 +572,8 @@ export const CARD_REVEAL_RUNTIME = `
 export const CARD_EVOLVE_RUNTIME = `
 (function(){
   function money(m){ return (m/100).toLocaleString('en-US',{ style:'currency', currency:'USD' }); }
-  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
-    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]; }); }
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
   function uniq(a){ return a.filter(function(v, i){ return v != null && a.indexOf(v) === i; }); }
 
   document.querySelectorAll('[data-evolve]').forEach(function(root){

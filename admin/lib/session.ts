@@ -112,14 +112,29 @@ export async function inspectSession(
 //
 // So an ACTIVE session now renews itself: once a token is past halfway through
 // its life, the next request mints a fresh one. Keep using the admin and you
-// stay signed in; leave it alone for 12 hours and it still expires, which is
-// the part worth keeping.
+// stay signed in; leave it alone for the full window and it still expires,
+// which is the part worth keeping.
 //
 // This mints the SAME token the backend does (src/services/auth.service.ts's
 // signJwt — same header, same claims, same secret), so it is one auth system
 // with two issuers, not a parallel scheme.
 
-export const SESSION_TTL_SECONDS = 60 * 60 * 12;
+/**
+ * 30 days, not 12 hours.
+ *
+ * 12 hours meant a single-operator store logged out overnight, every night.
+ * The cost was not the login — it was that an expired session is INVISIBLE:
+ * the browser drops the cookie itself, so the admin tab still looks signed in,
+ * and the next partner-connect lands on a sign-in screen with no explanation.
+ * That cost eight rounds on one PODpartner connection.
+ *
+ * Renewal already slides (see shouldRenew, halfway through life), so a person
+ * who uses the store keeps a session indefinitely; leave it alone for 30 days
+ * and it still expires, which is the part worth keeping. The blast radius is
+ * bounded by the fact that this store has exactly one operator and the token
+ * grants nothing a stolen password would not.
+ */
+export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 
 const b64urlFromBytes = (bytes: Uint8Array): string => {
   let bin = '';
@@ -156,7 +171,7 @@ export function shouldRenew(token: string): boolean {
 /**
  * The domain the session cookie should be written for.
  *
- * `sidemoney.co` and `www.sidemoney.co` are separate cookie origins, and both
+ * `example.com` and `www.example.com` are separate cookie origins, and both
  * serve this app. Sign in on one and the other sees no session at all — which
  * is invisible until a partner sends the merchant to whichever host they typed
  * into the partner's form, and they land on a login page that will not stick.

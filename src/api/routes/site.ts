@@ -8,7 +8,8 @@ import { dockMarkup, dockScript, dockStyles } from '../../site/adminDock.js';
 import { walletPayments } from '../../counter/walletPayments.js';
 import { sitePage, type NavItem } from '../../site/siteHtml.js';
 import type { HeaderCartConfig } from '../../site/headerCart.js';
-import { esc } from '../../site/storefrontHtml.js';
+import { esc } from '../../site/html.js';
+import { adminSessionFrom } from '../../lib/adminSession.js';
 
 // Base Theme routes — the default public frontend. Published content only
 // (contentService.getBySlug/renderBySlug already 404 anything unpublished).
@@ -65,17 +66,9 @@ async function loadChrome(site: { chromeHeaderSlug: string | null; chromeFooterS
 // not a signed-in admin. Kept out of buildNav so the auth failure paths read
 // in one place.
 async function buildDock(req: FastifyRequest, current: string): Promise<{ markup: string; styles: string; script: string } | null> {
-  const raw = /(?:^|;\s*)th_session=([^;]+)/.exec(req.headers.cookie ?? '')?.[1];
-  if (!raw) return null;
-  let userId: string;
-  try {
-    const claims = (req.server as unknown as { jwt: { verify: (t: string) => { sub?: string } } })
-      .jwt.verify(decodeURIComponent(raw));
-    if (!claims.sub) return null;
-    userId = claims.sub;
-  } catch {
-    return null; // expired or forged — behave exactly as logged out
-  }
+  const session = adminSessionFrom(req);
+  if (!session) return null;
+  const userId = session.sub;
   // The token carries only `sub` (a cuid), so the avatar initial has to come
   // from the account itself — falling back to sub put a "C" on every avatar,
   // the first letter of the id rather than of the name.

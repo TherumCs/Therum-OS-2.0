@@ -6,6 +6,12 @@ import { toMajor, toMinor } from '../../counter/currency.js';
 import { slugify } from '../../lib/slug.js';
 import { settingsService } from '../../services/settings.service.js';
 import { printfulLink } from '../../services/printfulLink.service.js';
+import { authService } from '../../services/auth.service.js';
+import { randomBytes } from 'node:crypto';
+import { googleApp, authorizeUrl, signState, readState, exchangeCode, adminForGoogle } from '../../counter/adminGoogleSignIn.js';
+import { mintSessionToken, SESSION_TTL_SECONDS } from '../../services/auth.service.js';
+import { encryptSecret } from '../../lib/crypto.js';
+import { adminSessionFrom, adminSessionDiagnosis, hasAdminSession, type SessionFailure } from '../../lib/adminSession.js';
 
 // A WooCommerce-shaped read surface, so print-on-demand platforms can connect.
 //
@@ -187,6 +193,8 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
         '/wc/v3': { namespace: 'wc/v3', methods: ['GET'] },
         '/wc/v3/products': { namespace: 'wc/v3', methods: ['GET'] },
         '/wc/v3/orders': { namespace: 'wc/v3', methods: ['GET', 'POST'] },
+        '/wc/v3/webhooks': { namespace: 'wc/v3', methods: ['GET', 'POST'] },
+        '/wc/v3/webhooks/(?P<id>[\\w-]+)': { namespace: 'wc/v3', methods: ['GET', 'PUT', 'DELETE'] },
         '/wc/v3/system_status': { namespace: 'wc/v3', methods: ['GET'] },
         '/wc/v2': { namespace: 'wc/v2', methods: ['GET'] },
         '/wc/v2/printful/store_data': { namespace: 'wc/v2', methods: ['GET'] },
@@ -415,111 +423,393 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     callback_url?: string;
   }
 
+  /** The origin the merchant actually typed, honouring the TLS terminator. */
+  function publicOrigin(req: FastifyRequest): string {
+    const proto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0]?.trim() || 'https';
+    // No tenant domain as a fallback. Host is effectively always present;
+    // when it is not, localhost is honest and a stranger's domain is not.
+    return `${proto}://${req.headers.host ?? 'localhost'}`;
+  }
+
+  function googleRedirectUri(req: FastifyRequest): string {
+    return `${publicOrigin(req)}${AUTH_PREFIX}/google/callback`;
+  }
+
+  /**
+   * Share the cookie across apex and www.
+   *
+   * Mirrors admin/lib/session.ts exactly — a session minted here must be the
+   * same session the admin app reads, or signing in with Google would leave
+   * the admin still logged out. Undefined for localhost and bare IPs, where a
+   * Domain attribute makes the browser drop the cookie silently.
+   */
+  function sessionCookieDomain(host: string | undefined): string | undefined {
+    if (!host) return undefined;
+    const name = host.split(':')[0]!.toLowerCase();
+    if (name === 'localhost' || /^\d+\.\d+\.\d+\.\d+$/.test(name) || !name.includes('.')) return undefined;
+    return name.replace(/^www\./, '');
+  }
+
+  function setSessionCookie(reply: FastifyReply, req: FastifyRequest, token: string): void {
+    const domain = sessionCookieDomain(req.headers.host);
+    reply.header('set-cookie', [
+      `th_session=${token}`,
+      'Path=/',
+      `Max-Age=${SESSION_TTL_SECONDS}`,
+      ...(domain ? [`Domain=${domain}`] : []),
+      'HttpOnly',
+      'Secure',
+      'SameSite=Lax',
+    ].join('; '));
+  }
+
   function validAuthRequest(q: AuthQuery): string | null {
     if (!q.app_name?.trim()) return 'app_name is required.';
     if (!q.scope || !['read', 'write', 'read_write'].includes(q.scope)) return 'scope must be read, write or read_write.';
     if (!q.user_id?.trim()) return 'user_id is required.';
     if (!q.return_url?.trim()) return 'return_url is required.';
     if (!q.callback_url?.trim()) return 'callback_url is required.';
-    try {
-      const cb = new URL(q.callback_url);
-      const localhost = cb.hostname === 'localhost' || cb.hostname === '127.0.0.1';
-      if (cb.protocol !== 'https:' && !localhost) return 'callback_url must be HTTPS.';
-    } catch {
-      return 'callback_url is not a valid URL.';
+    // BOTH urls get parsed here, not just the callback. return_url used to be
+    // checked for emptiness only, so `return_url=not-a-url` passed validation
+    // and then threw inside `new URL()` further down — a bare 500 with nothing
+    // naming the cause, which is the exact debugging dead end that cost days on
+    // the Printful and PODpartner connections.
+    for (const [name, value] of [['callback_url', q.callback_url!], ['return_url', q.return_url!]] as const) {
+      try {
+        const u = new URL(value);
+        const localhost = u.hostname === 'localhost' || u.hostname === '127.0.0.1';
+        if (u.protocol !== 'https:' && !localhost) return `${name} must be HTTPS.`;
+      } catch {
+        return `${name} is not a valid URL.`;
+      }
     }
     return null;
   }
 
-  /**
-   * Is there a signed-in admin behind this request?
-   *
-   * Without this the endpoint is a credential vending machine: a POST from
-   * anywhere on the internet minted read_write keys and delivered them to a
-   * callback URL the CALLER supplied. Verified by doing exactly that against
-   * the live site — it worked, twice.
+
+/**
+   * The approval screen. One renderer, used by the GET and by the POST when it
+   * has to come back with an error — two copies of this markup would drift, and
+   * the copy people only see on a failed password is the one that rots.
    */
-  const hasAdminSession = (req: FastifyRequest): boolean =>
-    /(?:^|;\s*)th_session=/.test(req.headers.cookie ?? '');
+  function approvalScreen(
+    q: AuthQuery,
+    who: { username: string } | null,
+    why: SessionFailure | null,
+    facts: { host: string; cookieNames: string[]; from: string | null },
+    googleHref: string | null,
+    error?: string,
+  ): string {
+    const app_name = escapeHtml(q.app_name!);
+    const params = new URLSearchParams(q as Record<string, string>).toString();
+    const scope = q.scope === 'read' ? 'Read' : q.scope === 'write' ? 'Write' : 'Read/Write';
+
+    // What read_write actually grants, spelled out. WooCommerce lists this and
+    // it is the only part of the screen that tells a merchant what they are
+    // agreeing to.
+    const grants = q.scope === 'read'
+      ? ['View coupons', 'View customers', 'View orders and sales reports', 'View products']
+      : ['Create webhooks', 'View and manage coupons', 'View and manage customers',
+         'View and manage orders and sales reports', 'View and manage products'];
+
+    /**
+     * Why we cannot see a session, said plainly.
+     *
+     * Showing "sign in" to somebody who IS signed in, six times, with no way to
+     * tell which of four different causes was in play, is what made this take
+     * as long as it did.
+     */
+    const REASON: Record<SessionFailure, string> = {
+      'no-cookie': 'This browser sent no session for <b>this address</b>. If you are signed in to the store on a different address (www vs no www, or an IP), the session does not carry across — sign in below and it will.',
+      'expired': 'Your store session has expired (they last 12 hours). Signing in below renews it.',
+      'bad-signature': 'This browser is holding a session this store cannot verify — usually one left over from before a server change. Signing in below replaces it.',
+      'wrong-role': 'This browser is holding a partial sign-in (the second factor was never completed). Signing in below finishes it.',
+    };
+
+    const errorHtml = error ? `<p class="err">${escapeHtml(error)}</p>` : '';
+    const signedIn = who !== null;
+
+    /**
+     * The two facts that tell apart the only two real causes.
+     *
+     * If ZERO cookies arrived and the click came from another site, the browser
+     * withheld them (SameSite) — the session exists, it just was not sent. If
+     * cookies arrived but none is th_session, there is genuinely no store
+     * session in this browser. Nothing here is secret: it is the caller's own
+     * request, described back to them. Cookie NAMES only, never values.
+     */
+    const facts_line = signedIn ? '' : `<p class="dx">host <b>${escapeHtml(facts.host)}</b>
+      · cookies received: <b>${facts.cookieNames.length ? escapeHtml(facts.cookieNames.join(', ')) : 'none'}</b>
+      · arrived from: <b>${escapeHtml(facts.from ?? 'direct (typed or bookmarked)')}</b></p>`;
+
+    return `<!doctype html>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Connect ${app_name}</title>
+  <style>
+   body{font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f6f7f9;margin:0;
+        display:flex;min-height:100vh;align-items:center;justify-content:center;color:#111}
+   .card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:28px;max-width:460px;width:calc(100% - 32px)}
+   h1{font-size:19px;margin:0 0 10px} p{color:#555;margin:0 0 14px}
+   ul{color:#555;margin:0 0 18px;padding-left:20px} li{margin:3px 0}
+   .who{display:flex;align-items:center;gap:10px;background:#f3f4f6;border-radius:10px;padding:10px 12px;margin:0 0 18px;font-size:14px}
+   .who .av{width:34px;height:34px;border-radius:50%;background:#d8dade;flex:0 0 34px}
+   .who .nm{color:#111;font-weight:600}
+   .row{display:flex;gap:10px}
+   button{font:inherit;border:0;border-radius:10px;padding:12px 16px;cursor:pointer;flex:1}
+   .go{background:#070707;color:#fff;font-weight:600;border-radius:0;text-transform:uppercase;letter-spacing:.06em;font-size:12px;padding:15px 16px}
+   .no{background:#fff;border:1px solid #d8dade;color:#444}
+   .fl{display:block;text-align:left;font-size:12px;font-weight:600;color:#555;margin-bottom:10px}
+   .fl input{width:100%;margin-top:5px;padding:10px 12px;border:1px solid #d8dade;border-radius:8px;font:inherit;box-sizing:border-box}
+   .err{background:#fef2f2;border:1px solid #fecaca;color:#b91c1c;font-size:13px;border-radius:8px;padding:10px 12px;margin:0 0 14px}
+   .why{background:#fffbeb;border:1px solid #fde68a;color:#78350f;font-size:13px;border-radius:8px;padding:10px 12px;margin:0 0 16px}
+   .why b{color:#78350f}
+   .dx{font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#6b7280;background:#f9fafb;
+       border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px;margin:-8px 0 16px;word-break:break-word}
+   .dx b{color:#374151}
+   .goog{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;box-sizing:border-box;
+         padding:12px 16px;border:1px solid #d8dade;border-radius:10px;background:#fff;color:#3c4043;
+         font-weight:600;font-size:14px;text-decoration:none;margin:0 0 14px}
+   .goog:hover{background:#f8f9fa}
+   .or{display:flex;align-items:center;gap:10px;color:#9ca3af;font-size:12px;margin:0 0 14px}
+   .or::before,.or::after{content:"";flex:1;height:1px;background:#e5e7eb}
+  </style>
+  <div class="card">
+    <h1>${app_name} would like to connect to your store</h1>
+    <p>This will give <strong>${app_name}</strong> <strong>${scope}</strong> access, which will allow it to:</p>
+    <ul>${grants.map((g) => `<li>${g}</li>`).join('')}</ul>
+    ${errorHtml}
+    ${signedIn ? `
+    <div class="who"><span class="av"></span>
+      <span>Signed in as <span class="nm">${escapeHtml(who.username)}</span></span>
+    </div>` : `<p class="why">${why ? REASON[why] : ''}</p>${facts_line}`}
+    <form method="POST" action="${AUTH_PREFIX}?${escapeHtml(params)}">
+      ${signedIn || !googleHref ? '' : `
+      <a class="goog" href="${escapeHtml(googleHref)}">
+        <svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true"><path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/><path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/><path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33z"/><path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.9 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/></svg>
+        Sign in with Google
+      </a>
+      <div class="or"><span>or</span></div>`}
+      ${signedIn ? '' : `
+      <label class="fl">Email or username
+        <input name="username" type="text" autocomplete="username" required autofocus>
+      </label>
+      <label class="fl">Password
+        <input name="password" type="password" autocomplete="current-password" required>
+      </label>`}
+      <div class="row">
+        <button class="no" name="approve" value="0" type="submit">Deny</button>
+        <button class="go" name="approve" value="1" type="submit">${signedIn ? 'Approve' : 'Sign in &amp; approve'}</button>
+      </div>
+    </form>
+  </div>`;
+  }
+
+  /**
+   * Send the approval screen: correct policy, correct cache headers, and the
+   * identity it actually resolved.
+   *
+   * TWO headers here are not cosmetic.
+   *
+   * `Cache-Control: private, no-store` — nginx stamps
+   * `public, max-age=0, must-revalidate` on everything it serves, and this page's
+   * entire content depends on a cookie. "public" on a per-session page is wrong
+   * even with must-revalidate, and it is the kind of wrong that produces a
+   * signed-in merchant staring at a sign-in form.
+   *
+   * `Vary: Cookie` — without it, ANY cache between here and the browser is
+   * entitled to serve one visitor's copy of this page to another.
+   *
+   * helmet's default `form-action 'self'` also blocks the redirect this flow
+   * ends in, silently — no error, no navigation, a button that looks dead. The
+   * relaxed policy has to be on EVERY render, including the one that comes back
+   * after a wrong password.
+   */
+  async function sendApprovalScreen(
+    reply: FastifyReply,
+    req: FastifyRequest,
+    q: AuthQuery,
+    error?: string,
+  ): Promise<void> {
+    const allow = new Set<string>();
+    for (const u of [q.return_url, q.callback_url]) {
+      try { if (u) allow.add(new URL(u).origin); } catch { /* validAuthRequest already rejected it */ }
+    }
+    reply.header(
+      'content-security-policy',
+      "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+      "script-src 'none'; base-uri 'self'; frame-ancestors 'none'; " +
+      `form-action 'self'${allow.size ? ' ' + [...allow].join(' ') : ''}`,
+    );
+    reply.header('cache-control', 'private, no-store, max-age=0, must-revalidate');
+    reply.header('vary', 'Cookie');
+
+    // The token carries only `sub` (a cuid) — the name has to come from the
+    // account, or the screen greets you by database id.
+    const session = adminSessionFrom(req);
+    const why = session ? null : adminSessionDiagnosis(req);
+    let who: { username: string } | null = null;
+    if (session) {
+      const account = await db.adminUser.findUnique({
+        where: { id: session.sub }, select: { username: true },
+      });
+      // A VERIFIED session with no matching row still counts as signed in.
+      // Authorization is the signature, not the lookup — falling back to the
+      // password form here would demand a sign-in from someone who already has
+      // one, which is the exact failure this screen exists to stop.
+      who = account ?? { username: 'this store' };
+    }
+    const cookieNames = (req.headers.cookie ?? '')
+      .split(';').map((c) => c.split('=')[0]?.trim()).filter((n): n is string => !!n);
+    let from: string | null = null;
+    try { from = req.headers.referer ? new URL(req.headers.referer).host : null; } catch { from = null; }
+
+    // Only offered when the store actually has a Google app configured — a
+    // button that leads to an error page is worse than no button.
+    const googleHref = who ? null : (await googleApp())
+      ? `${AUTH_PREFIX}/google?${new URLSearchParams(q as Record<string, string>).toString()}`
+      : null;
+
+    reply.type('text/html; charset=utf-8').send(
+      approvalScreen(q, who, why, { host: req.headers.host ?? '?', cookieNames, from }, googleHref, error),
+    );
+  }
 
   app.get(AUTH_PREFIX, async (req, reply) => {
-    if (!hasAdminSession(req)) {
-      // Send them to log in and come back to this exact approval.
-      const back = encodeURIComponent(req.url);
-      reply.redirect(`/tos-admin/login?next=${back}`, 302);
-      return;
-    }
+    /**
+     * NO REDIRECT TO THE ADMIN LOGIN.
+     *
+     * Bouncing to /tos-admin/login and back produced four separate failures in
+     * a row — the param name, the router's basePath, the server redirect's
+     * basePath, and a session cookie that was host-only while partners send
+     * merchants to whichever host they typed. Each fix revealed the next, and
+     * every one of them looked identical from the merchant's side: a login
+     * page with nothing to approve.
+     *
+     * The approval now signs you in ON ITSELF. One page, one POST, no hops
+     * across an app boundary that keeps rewriting the destination.
+     */
     const q = req.query as AuthQuery;
     const problem = validAuthRequest(q);
     if (problem) {
       reply.status(400).type('text/html').send(`<!doctype html><meta charset="utf-8"><p>${escapeHtml(problem)}</p>`);
       return;
     }
-    const app_name = escapeHtml(q.app_name!);
-    const params = new URLSearchParams(q as Record<string, string>).toString();
+    await sendApprovalScreen(reply, req, q);
+  });
 
-    /**
-     * THE APPROVE BUTTON DID NOTHING, and this is why.
-     *
-     * helmet's default policy on this page includes `form-action 'self'`.
-     * Approving POSTs to this same origin — allowed — but the store then
-     * REDIRECTS the browser to the partner's return_url, and Safari enforces
-     * form-action across that redirect. The POST ran, the keys were delivered,
-     * and the browser silently refused to follow the hop: from the merchant's
-     * side the button was simply dead.
-     *
-     * The policy is narrowed to exactly the two hosts this flow needs — this
-     * store, and the partner's own return address, which was validated above.
-     * Not a blanket `form-action *`.
-     */
-    const returnHost = (() => {
-      try { return new URL(q.return_url!).origin; } catch { return null; }
-    })();
-    reply.header(
-      'content-security-policy',
-      "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
-      "script-src 'none'; base-uri 'self'; frame-ancestors 'none'; " +
-      `form-action 'self'${returnHost ? ` ${returnHost}` : ''}`,
-    );
-    reply.type('text/html; charset=utf-8').send(`<!doctype html>
-<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Connect ${app_name}</title>
-<style>
- body{font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f6f7f9;margin:0;
-      display:flex;min-height:100vh;align-items:center;justify-content:center;color:#111}
- .card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:28px;max-width:420px;width:calc(100% - 32px)}
- h1{font-size:18px;margin:0 0 6px} p{color:#555;margin:0 0 16px}
- .scope{font-family:ui-monospace,monospace;font-size:12px;background:#f3f4f6;border-radius:6px;padding:2px 6px}
- button{font:inherit;border:0;border-radius:10px;padding:11px 16px;cursor:pointer;width:100%}
- .go{background:#4f46e5;color:#fff;font-weight:600} .no{background:transparent;color:#666;margin-top:8px}
-</style>
-<div class="card">
-  <h1>Connect ${app_name}</h1>
-  <p><strong>${app_name}</strong> is asking to connect to this store with
-     <span class="scope">${escapeHtml(q.scope!)}</span> access. Approving creates a new store key for it.
-     You can revoke it at any time under Nexus.</p>
-  <form method="POST" action="${AUTH_PREFIX}?${escapeHtml(params)}">
-    <button class="go" name="approve" value="1" type="submit">Approve</button>
-    <button class="no" name="approve" value="0" type="submit">Cancel</button>
-  </form>
-</div>`);
+  /**
+   * Sign in with Google, then land back on the approval screen.
+   *
+   * Exists so the one page that hands out store keys does not have to ask for
+   * a password. Redirect flow, so the screen keeps `script-src 'none'`.
+   */
+  app.get(`${AUTH_PREFIX}/google`, async (req, reply) => {
+    const q = req.query as AuthQuery;
+    const problem = validAuthRequest(q);
+    if (problem) { reply.status(400).send({ message: problem }); return; }
+
+    const app_ = await googleApp();
+    if (!app_) {
+      await sendApprovalScreen(reply, req, q,
+        'Google sign-in is not set up for this store yet — add a Google connection in Nexus first.');
+      return;
+    }
+    // Return to THIS approval, with its partner params intact.
+    const returnTo = `${AUTH_PREFIX}?${new URLSearchParams(q as Record<string, string>).toString()}`;
+    reply.redirect(authorizeUrl(app_, googleRedirectUri(req), signState(returnTo)), 302);
+  });
+
+  app.get(`${AUTH_PREFIX}/google/callback`, async (req, reply) => {
+    const q = req.query as { code?: string; state?: string; error?: string };
+
+    const state = q.state ? readState(q.state) : null;
+    if (!state) {
+      // A missing or forged state is the CSRF case: an attacker making this
+      // browser redeem a code they control. Nothing is minted and there is
+      // nowhere safe to send them, so it ends here.
+      reply.status(400).type('text/html').send('<!doctype html><meta charset="utf-8"><p>This sign-in link has expired. Start the connection again from the partner.</p>');
+      return;
+    }
+    const back = new URL(state.returnTo, publicOrigin(req));
+    const backQ = Object.fromEntries(back.searchParams) as unknown as AuthQuery;
+
+    if (q.error || !q.code) {
+      await sendApprovalScreen(reply, req, backQ, 'Google sign-in was cancelled.');
+      return;
+    }
+
+    const app_ = await googleApp();
+    if (!app_) { await sendApprovalScreen(reply, req, backQ, 'Google sign-in is not set up for this store.'); return; }
+
+    const identity = await exchangeCode(app_, q.code, googleRedirectUri(req));
+    if (!identity) { await sendApprovalScreen(reply, req, backQ, 'Google did not confirm that sign-in. Try again.'); return; }
+
+    const admin = await adminForGoogle(identity);
+    if (!admin) {
+      // Deliberately names the address so the operator can link it, and grants
+      // nothing: a verified Google account is proof of identity, never proof
+      // of authority over this store.
+      await sendApprovalScreen(reply, req, backQ,
+        `${identity.email} is not linked to an admin account on this store. Sign in with your store password once and link it, or use the form below.`);
+      return;
+    }
+
+    setSessionCookie(reply, req, mintSessionToken(admin.id, admin.roleId ? 'custom' : 'admin'));
+    reply.redirect(back.toString(), 302);
   });
 
   app.post(AUTH_PREFIX, async (req, reply) => {
-    // The GET is a screen; THIS is the one that hands out credentials.
-    if (!hasAdminSession(req)) {
-      reply.status(401).send({ message: 'Sign in to this store before approving a connection.' });
-      return;
-    }
     const q = req.query as AuthQuery;
     const problem = validAuthRequest(q);
     if (problem) {
       reply.status(400).send({ message: problem });
       return;
     }
-    const body = (req.body ?? {}) as { approve?: string };
+    const body = (req.body ?? {}) as { approve?: string; username?: string; password?: string };
     const returnUrl = new URL(q.return_url!);
     returnUrl.searchParams.set('user_id', q.user_id!);
+
+    /**
+     * THIS is the request that hands out credentials, so it is the one that
+     * has to be authenticated — either by an existing admin session, or by
+     * credentials submitted on the approval screen itself.
+     *
+     * The password path goes through authService.login, so it inherits that
+     * function's rate limiting and audit logging rather than opening a second,
+     * weaker door. A wrong password re-renders the same screen with a generic
+     * message: telling the caller WHICH half was wrong turns this into an
+     * account-enumeration oracle on a public URL.
+     */
+    if (!hasAdminSession(req)) {
+      if (body.approve !== '1') {
+        // Cancelling needs no credentials — nothing is issued.
+        returnUrl.searchParams.set('success', '0');
+        reply.redirect(returnUrl.toString(), 302);
+        return;
+      }
+      if (!body.username || !body.password) {
+        await sendApprovalScreen(reply, req, q,
+          'Enter your store sign-in and password to approve.');
+        return;
+      }
+      try {
+        const result = await authService.login({ username: body.username, password: body.password }, req.ip);
+        if ('needsTwoFactor' in result && result.needsTwoFactor) {
+          // Two-factor is a multi-step flow that does not belong on a partner
+          // approval screen; those accounts approve from the admin instead.
+          await sendApprovalScreen(reply, req, q,
+          'This account uses two-factor sign-in. Open the store admin, sign in there, then click Connect again.');
+          return;
+        }
+      } catch (err) {
+        const tooMany = (err as { statusCode?: number }).statusCode === 429;
+        await sendApprovalScreen(reply, req, q,
+          tooMany
+          ? 'Too many attempts — wait a few minutes and try again.'
+          : 'That sign-in and password did not match. Try again.');
+        return;
+      }
+    }
 
     if (body.approve !== '1') {
       // Woo's documented rejection signal.
@@ -1009,6 +1299,136 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
       }
     }
     reply.send(out);
+  });
+
+  /**
+   * Outbound webhooks — the half of the bridge that was missing.
+   *
+   * A partner could read the catalogue and never learn an order happened. The
+   * approval screen promises "Create webhooks" and, until now, there was
+   * nothing behind it: Printful's plugin registers one named "Printful
+   * Integration" and then waits for a call that never came.
+   *
+   * Woo's shape exactly (topic = "resource.event"), because partners already
+   * parse it.
+   */
+  const WEBHOOK_TOPICS = new Set([
+    'order.created', 'order.updated', 'order.deleted',
+    'product.created', 'product.updated', 'product.deleted',
+  ]);
+
+  function toWooWebhook(w: { id: string; name: string; topic: string; deliveryUrl: string; status: string; createdAt: Date; updatedAt: Date }) {
+    const [resource, event] = w.topic.split('.');
+    return {
+      id: w.id,
+      name: w.name,
+      status: w.status,
+      topic: w.topic,
+      resource: resource ?? '',
+      event: event ?? '',
+      hooks: [],
+      delivery_url: w.deliveryUrl,
+      date_created: w.createdAt.toISOString(),
+      date_modified: w.updatedAt.toISOString(),
+    };
+  }
+
+  app.get(`${PREFIX}/webhooks`, authed, async (req, reply) => {
+    const { skip, take, perPage } = paging(req);
+    const [rows, total] = await Promise.all([
+      db.storeWebhook.findMany({ skip, take, orderBy: { createdAt: 'desc' } }),
+      db.storeWebhook.count(),
+    ]);
+    setPagingHeaders(reply, total, perPage);
+    reply.send(rows.map(toWooWebhook));
+  });
+
+  app.get(`${PREFIX}/webhooks/:id`, authed, async (req, reply) => {
+    const row = await db.storeWebhook.findUnique({ where: { id: (req.params as { id: string }).id } });
+    if (!row) { wooError(reply, 404, 'woocommerce_rest_webhook_invalid_id', 'Invalid webhook ID.'); return; }
+    reply.send(toWooWebhook(row));
+  });
+
+  app.post(`${PREFIX}/webhooks`, authed, async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
+    const b = (req.body ?? {}) as { name?: string; topic?: string; delivery_url?: string; secret?: string; status?: string };
+    if (!b.topic || !WEBHOOK_TOPICS.has(b.topic)) {
+      wooError(reply, 400, 'woocommerce_rest_invalid_webhook_topic', `Webhook topic must be one of: ${[...WEBHOOK_TOPICS].join(', ')}.`);
+      return;
+    }
+    // HTTPS only, and never a loopback or private address: this store would
+    // otherwise POST order contents to something inside its own network on a
+    // partner's say-so.
+    let url: URL;
+    try { url = new URL(b.delivery_url ?? ''); } catch {
+      wooError(reply, 400, 'woocommerce_rest_invalid_webhook_delivery_url', 'delivery_url is not a valid URL.'); return;
+    }
+    if (url.protocol !== 'https:') {
+      wooError(reply, 400, 'woocommerce_rest_invalid_webhook_delivery_url', 'delivery_url must be HTTPS.'); return;
+    }
+    if (/^(localhost|127\.|10\.|192\.168\.|169\.254\.|\[?::1)/i.test(url.hostname) || /^172\.(1[6-9]|2\d|3[01])\./.test(url.hostname)) {
+      wooError(reply, 400, 'woocommerce_rest_invalid_webhook_delivery_url', 'delivery_url must be a public address.'); return;
+    }
+
+    // Woo lets the partner supply the secret; if they do not, mint one and
+    // return it ONCE in this response, the same way store keys work.
+    const secret = b.secret && b.secret.length >= 8 ? b.secret : randomBytes(24).toString('base64url');
+    const row = await db.storeWebhook.create({
+      data: {
+        name: b.name?.slice(0, 200) || `${b.topic} webhook`,
+        topic: b.topic,
+        deliveryUrl: url.toString(),
+        secretEncrypted: encryptSecret(secret),
+        status: b.status === 'paused' || b.status === 'disabled' ? b.status : 'active',
+        credentialId: req.storeAuth?.id ?? null,
+      },
+    });
+    reply.status(201).send({ ...toWooWebhook(row), secret });
+  });
+
+  app.put(`${PREFIX}/webhooks/:id`, authed, async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
+    const id = (req.params as { id: string }).id;
+    const b = (req.body ?? {}) as { name?: string; status?: string; topic?: string };
+    const existing = await db.storeWebhook.findUnique({ where: { id } });
+    if (!existing) { wooError(reply, 404, 'woocommerce_rest_webhook_invalid_id', 'Invalid webhook ID.'); return; }
+    if (b.topic && !WEBHOOK_TOPICS.has(b.topic)) {
+      wooError(reply, 400, 'woocommerce_rest_invalid_webhook_topic', 'Unsupported webhook topic.'); return;
+    }
+    const row = await db.storeWebhook.update({
+      where: { id },
+      data: {
+        ...(b.name ? { name: b.name.slice(0, 200) } : {}),
+        ...(b.topic ? { topic: b.topic } : {}),
+        ...(b.status && ['active', 'paused', 'disabled'].includes(b.status) ? { status: b.status } : {}),
+      },
+    });
+    reply.send(toWooWebhook(row));
+  });
+
+  app.delete(`${PREFIX}/webhooks/:id`, authed, async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
+    const id = (req.params as { id: string }).id;
+    const existing = await db.storeWebhook.findUnique({ where: { id } });
+    if (!existing) { wooError(reply, 404, 'woocommerce_rest_webhook_invalid_id', 'Invalid webhook ID.'); return; }
+    await db.storeWebhook.delete({ where: { id } });
+    reply.send({ ...toWooWebhook(existing), deleted: true });
+  });
+
+  /** Delivery history — "the partner says they never got the order" is otherwise unanswerable. */
+  app.get(`${PREFIX}/webhooks/:id/deliveries`, authed, async (req, reply) => {
+    const rows = await db.webhookDelivery.findMany({
+      where: { webhookId: (req.params as { id: string }).id },
+      orderBy: { createdAt: 'desc' },
+      take: 50,
+    });
+    reply.send(rows.map((d: { id: string; durationMs: number | null; error: string | null; responseCode: number | null; createdAt: Date }) => ({
+      id: d.id,
+      duration: d.durationMs,
+      summary: d.error ?? `HTTP ${d.responseCode ?? '?'}`,
+      response_code: d.responseCode == null ? '' : String(d.responseCode),
+      date_created: d.createdAt.toISOString(),
+    })));
   });
 
   app.get(`${PREFIX}/orders`, authed, async (req, reply) => {

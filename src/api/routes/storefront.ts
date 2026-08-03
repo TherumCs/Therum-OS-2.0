@@ -1,9 +1,11 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
-import { PAGE_CSP } from '../../site/pageCsp.js';
+import { PAGE_CSP, ACCOUNT_PAGE_CSP } from '../../site/pageCsp.js';
+import { googleApp } from '../../counter/adminGoogleSignIn.js';
 import { timingSafeEqual } from 'node:crypto';
 import { db } from '../../lib/db.js';
 import { capabilityService } from '../../services/capability.service.js';
-import { layout, closedPage, esc, money, CSS, type StoreChrome, type SeoMeta } from '../../site/storefrontHtml.js';
+import { layout, closedPage, CSS, type StoreChrome, type SeoMeta } from '../../site/storefrontHtml.js';
+import { esc, money } from '../../site/html.js';
 import { SITE_WIDTHS } from '../../site/siteHtml.js';
 import { cached } from '../../lib/cache.js';
 import { buildNav } from './site.js';
@@ -48,8 +50,17 @@ import { viewerFor, visibleWhere, canOpenDirectly, GATE_INCLUDE } from '../../co
 // URLs, and hover-preview videos stream from wherever the merchant hosts.
 
 
-const html = (reply: { header: (k: string, v: string) => unknown; type: (t: string) => { send: (b: string) => void } }, body: string): void => {
-  reply.header('content-security-policy', PAGE_CSP);
+// `csp` overrides the default for the rare page that needs more — currently
+// only /account, which offers Google sign-in. Setting the header BEFORE calling
+// html() does not work: this function sets it unconditionally and would
+// overwrite it, which is exactly how the account page shipped with a policy
+// that silently blocked the button it had just rendered.
+const html = (
+  reply: { header: (k: string, v: string) => unknown; type: (t: string) => { send: (b: string) => void } },
+  body: string,
+  csp: string = PAGE_CSP,
+): void => {
+  reply.header('content-security-policy', csp);
   reply.type('text/html; charset=utf-8').send(body);
 };
 
@@ -1043,10 +1054,19 @@ document.getElementById('add').addEventListener('click',(e)=>{if(sel)addToCart(s
   // drawer and the wishlist runtime without any of it being repeated here.
   app.get('/account', async (_req, reply) => {
     if (!(await commerceOn())) return html(reply, closedPage());
+    // The account page is the only page that offers social sign-in, so it is
+    // the only page whose CSP admits accounts.google.com — see pageCsp.ts.
+    // The client id is public by design (it is in every Google sign-in button
+    // on the web); the SECRET stays server-side and is never sent here.
+    const gApp = await googleApp();
     // The wishlist tab embeds the real wishlist markup so wishlist.ts's runtime
     // — already on every store page for the hearts — hydrates it. One list,
     // one implementation.
-    html(reply, await page('Account — Therum Store', `${await heading('Account')}${accountMarkup(wishlistMarkup())}`, ACCOUNT_RUNTIME, PRIVATE_PAGE));
+    html(
+      reply,
+      await page('Account — Therum Store', `${await heading('Account')}${accountMarkup(wishlistMarkup(), gApp?.clientId ?? '')}`, ACCOUNT_RUNTIME, PRIVATE_PAGE),
+      ACCOUNT_PAGE_CSP,
+    );
   });
 
   app.get('/wishlist', async (_req, reply) => {

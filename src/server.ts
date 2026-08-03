@@ -21,6 +21,8 @@ import { extensionRoutes } from './api/routes/extensions.js';
 import { importRoutes } from './api/routes/import.js';
 import { contentRoutes } from './api/routes/content.js';
 import { mediaRoutes } from './api/routes/media.js';
+import { adminGoogleAuthRoutes } from './api/routes/adminGoogleAuth.js';
+import { shopifyOAuthRoutes } from './api/routes/shopifyOAuth.js';
 import { authRoutes } from './api/routes/auth.js';
 import { foundationRoutes } from './api/routes/foundations.js';
 import { capabilityRoutes } from './api/routes/capabilities.js';
@@ -52,6 +54,7 @@ import { siteRoutes } from './api/routes/site.js';
 import { maintenancePage } from './site/maintenanceHtml.js';
 import { PAGE_CSP } from './site/pageCsp.js';
 import { settingsService } from './services/settings.service.js';
+import { hasAdminSession } from './lib/adminSession.js';
 import { taxonomyRoutes } from './api/routes/taxonomy.js';
 import { bricksRoutes } from './api/routes/bricks.js';
 import { counterAdminRoutes, counterPublicRoutes, storeKeyRoutes } from './api/routes/counter.js';
@@ -238,6 +241,14 @@ export async function buildServer() {
   await app.register(contentRoutes, { prefix: '/api' });
   await app.register(mediaRoutes, { prefix: '/api' });
   await app.register(authRoutes, { prefix: '/api' });
+// NO /api prefix: these are browser redirect endpoints the operator and Google
+// both navigate to directly, and the redirect_uri registered with Google is a
+// fixed public path.
+await app.register(adminGoogleAuthRoutes);
+// Shopify's OAuth install flow, served by this store — every URL in that dance
+// lives on the SHOP's domain, so a partner that asks for a store URL can run it
+// here. No prefix: the paths are fixed by Shopify's own convention.
+await app.register(shopifyOAuthRoutes);
   await app.register(foundationRoutes, { prefix: '/api' });
   await app.register(capabilityRoutes, { prefix: '/api' });
   await app.register(editionRoutes, { prefix: '/api' });
@@ -326,15 +337,28 @@ export async function buildServer() {
   // look behind is one you cannot verify the fix through.
   app.addHook('onRequest', async (req, reply) => {
     const path = req.url.split('?')[0] ?? '/';
-    const EXEMPT = ['/tos-admin', '/api', '/builder', '/wp-json', '/wc-auth', '/admin/api', '/uploads', '/favicon'];
+    // '/auth' is here for the same reason '/wc-auth' is: it is a SIGN-IN
+    // surface, and a sign-in you cannot reach during coming-soon is a store
+    // you cannot get into to turn coming-soon off. Google's redirect lands on
+    // /auth/google/callback, so without this the whole flow ends on the
+    // marketing page with a 200 and no explanation.
+    // '/admin' (not '/admin/api') covers the whole Shopify surface: the API
+    // AND '/admin/oauth', its install flow. This list has now silently eaten
+    // two integrations — '/auth' for Google sign-in, then '/admin/oauth' — and
+    // both times the symptom was a 200 with the marketing page, which looks
+    // like the partner is broken rather than like this gate. Prefix a FAMILY
+    // here, not one endpoint.
+    const EXEMPT = ['/tos-admin', '/api', '/auth', '/builder', '/wp-json', '/wc-auth', '/admin', '/uploads', '/favicon'];
     if (EXEMPT.some((prefix) => path.startsWith(prefix))) return;
 
     const maintenance = await settingsService.getMaintenanceCached();
     if (maintenance.mode === 'off') return;
 
-    // An admin session cookie is enough — this is a visibility gate, not an
-    // authorisation boundary, and the real admin auth still runs on /tos-admin.
-    if (/(?:^|;\s*)th_session=/.test(req.headers.cookie ?? '')) return;
+    // A VERIFIED admin session, not merely a cookie by that name. This is only
+    // a visibility gate — the real admin auth still runs on /tos-admin — but
+    // the site is pre-launch, so this page is the one thing holding an
+    // unfinished store back from anyone who guesses the cookie name.
+    if (hasAdminSession(req)) return;
 
     const site = await settingsService.getSite();
     const body = maintenancePage(maintenance, site.siteName || 'Therum OS');

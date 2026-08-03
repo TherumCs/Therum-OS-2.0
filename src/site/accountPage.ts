@@ -111,6 +111,14 @@ export const ACCOUNT_CSS = `
 /* ── Details ───────────────────────────────────────────────────────────── */
 .th-acct__row{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:14px 0;
   border-bottom:solid 1px var(--border-color-light,rgba(0,0,0,.08));font-size:14px}
+.th-acct__social{display:flex;flex-direction:column;gap:8px;margin-bottom:14px}
+.th-acct__social button{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;
+padding:11px 14px;border:1px solid var(--th-line,#d8dade);border-radius:10px;background:#fff;color:#3c4043;
+cursor:pointer;font:inherit;font-size:13px;font-weight:600}
+.th-acct__social button:hover{background:#f8f9fa}
+.th-acct__or{display:flex;align-items:center;gap:10px;color:#9ca3af;font-size:11px;margin-bottom:14px;
+text-transform:uppercase;letter-spacing:.08em}
+.th-acct__or::before,.th-acct__or::after{content:"";flex:1;height:1px;background:var(--th-line,#e5e7eb)}
 .th-acct__row span:first-child{font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-color-light,#888)}
 .th-acct__out{margin-top:26px;display:flex;gap:10px;flex-wrap:wrap}
 .th-acct__out button{flex:1 1 auto;padding:12px 16px;border:solid 1px currentColor;background:none;cursor:pointer;
@@ -121,7 +129,7 @@ export const ACCOUNT_CSS = `
  * @param wishlist the wishlist table markup, so the Wishlist tab reuses the
  * ONE implementation of that list (wishlist.ts) rather than growing a second.
  */
-export function accountMarkup(wishlist: string): string {
+export function accountMarkup(wishlist: string, googleClientId = ''): string {
   return `
 <div class="th-acct" data-account>
   <div data-acct-guest hidden>
@@ -129,6 +137,14 @@ export function accountMarkup(wishlist: string): string {
       <button class="th-acct__tab" type="button" role="tab" data-acct-authtab="signin" aria-selected="true">Sign in</button>
       <button class="th-acct__tab" type="button" role="tab" data-acct-authtab="register" aria-selected="false">Create account</button>
     </div>
+    <!--
+      Social sign-in. Rendered empty and filled by the runtime from
+      /shop/account/oauth/providers, so a button only ever appears for a
+      provider actually connected in Nexus — a button that does nothing is
+      worse than no button.
+    -->
+    <div class="th-acct__social" data-acct-social hidden data-google-client-id="${googleClientId}"></div>
+    <div class="th-acct__or" data-acct-or hidden><span>or</span></div>
     <form data-acct-form="signin">
       <label for="acct-email">Email</label>
       <input id="acct-email" name="email" type="email" autocomplete="email" required>
@@ -196,6 +212,96 @@ export const ACCOUNT_RUNTIME = `
   var msg2 = root.querySelector('[data-acct-msg2]');
   var loaded = {};
 
+  /**
+   * Social sign-in.
+   *
+   * Buttons are built from what the STORE says is connected, never hardcoded:
+   * /shop/account/oauth/providers reports each provider's readiness, so a
+   * button can only appear for one that will actually work. Google's script is
+   * fetched lazily and only if Google is ready — no third-party request on a
+   * page that has nothing to use it for.
+   */
+  var socialBox = root.querySelector('[data-acct-social]');
+  var socialOr = root.querySelector('[data-acct-or]');
+
+  function gsiScript(){
+    return new Promise(function(resolve, reject){
+      if (window.google && window.google.accounts) return resolve();
+      var el = document.createElement('script');
+      el.src = 'https://accounts.google.com/gsi/client';
+      el.async = true;
+      el.onload = resolve;
+      el.onerror = function(){ reject(new Error('Google sign-in could not load.')); };
+      document.head.appendChild(el);
+    });
+  }
+
+  async function socialSignedIn(provider, token){
+    msg.className = 'th-acct__msg';
+    msg.textContent = 'Signing in…';
+    try {
+      var r = await api('/shop/account/oauth/' + provider, {
+        method: 'POST', body: JSON.stringify({ token: token }),
+      });
+      setTok(r.token, r.expiresAt);
+      msg.textContent = '';
+      showUser(Object.assign({ identities: [] }, r.customer));
+      // Same cart-adoption step the password path does — a basket started
+      // before signing in belongs to the same person.
+      var cartToken = localStorage.getItem('therum_cart_token');
+      if (cartToken && r.customer && r.customer.email) {
+        try { await api('/cart/identity', { method: 'POST', body: JSON.stringify({ cartToken: cartToken, email: r.customer.email }) }); }
+        catch (err) {}
+      }
+    } catch (err) {
+      msg.className = 'th-acct__msg th-acct__msg--bad';
+      msg.textContent = err.message;
+    }
+  }
+
+  async function initSocial(){
+    if (!socialBox) return;
+    var ready = [];
+    try {
+      var r = await api('/shop/account/oauth/providers');
+      ready = (r.providers || []).filter(function(p){ return p.ready; });
+    } catch (err) { return; }
+    if (!ready.length) return;
+
+    var hasGoogle = ready.some(function(p){ return p.provider === 'google'; });
+    if (hasGoogle) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.innerHTML = '<svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">'
+        + '<path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/>'
+        + '<path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/>'
+        + '<path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33z"/>'
+        + '<path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.9 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/>'
+        + '</svg><span>Continue with Google</span>';
+      btn.addEventListener('click', async function(){
+        try {
+          await gsiScript();
+          var cid = socialBox.getAttribute('data-google-client-id');
+          if (!cid) throw new Error('Google sign-in is not configured.');
+          window.google.accounts.id.initialize({
+            client_id: cid,
+            callback: function(res){ socialSignedIn('google', res.credential); },
+          });
+          window.google.accounts.id.prompt();
+        } catch (err) {
+          msg.className = 'th-acct__msg th-acct__msg--bad';
+          msg.textContent = err.message;
+        }
+      });
+      socialBox.appendChild(btn);
+    }
+
+    if (socialBox.children.length) {
+      socialBox.hidden = false;
+      if (socialOr) socialOr.hidden = false;
+    }
+  }
+
   function tok(){ return localStorage.getItem(KEY); }
   function setTok(t, expiresAt){
     if (t) {
@@ -216,8 +322,8 @@ export const ACCOUNT_RUNTIME = `
     if (!res.ok) throw Object.assign(new Error((body.error && body.error.message) || 'Something went wrong.'), { status: res.status });
     return body;
   }
-  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
-    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]; }); }
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
   function money(m, cur){ return (m/100).toLocaleString('en-US',{ style:'currency', currency: cur || 'USD' }); }
   function when(d){ return new Date(d).toLocaleDateString('en-US',{ year:'numeric', month:'short', day:'numeric' }); }
   function panel(name){ return root.querySelector('[data-acct-panel="' + name + '"]'); }
@@ -548,5 +654,8 @@ export const ACCOUNT_RUNTIME = `
   });
 
   load();
+  // Independent of load(): a signed-out visitor is exactly who needs these,
+  // and a failure to reach the providers endpoint must not stop the page.
+  void initSocial();
 })();
 `;

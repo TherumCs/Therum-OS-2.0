@@ -6,7 +6,7 @@ import { HEADER_CART_CSS, headerCartRuntime, HEADER_CART_DEFAULTS, type HeaderCa
 // storefront so the whole public surface reads as one site. Server-rendered,
 // zero client JS except the cart badge when commerce is on.
 
-import { esc } from './storefrontHtml.js';
+import { esc } from './html.js';
 
 const CSS = `
 :root{

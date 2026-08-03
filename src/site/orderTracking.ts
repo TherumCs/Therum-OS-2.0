@@ -98,8 +98,8 @@ export const ORDER_TRACKING_RUNTIME = `
   var out = root.querySelector('[data-ot-result]');
   var go = form.querySelector('.ot__go');
 
-  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
-    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]; }); }
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
   function money(m, cur){ return (m/100).toLocaleString('en-US', { style:'currency', currency: cur || 'USD' }); }
   function day(d){ return d ? new Date(d).toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' }) : null; }
 

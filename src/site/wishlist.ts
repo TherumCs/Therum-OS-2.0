@@ -79,8 +79,8 @@ export const WISHLIST_RUNTIME = `
     // Same-tab listeners; the storage event only fires in OTHER tabs.
     window.dispatchEvent(new CustomEvent('therum:wishlist-changed'));
   }
-  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
-    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]; }); }
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
   function money(m){ return (m/100).toLocaleString('en-US',{ style:'currency', currency:'USD' }); }
 
   // ── The heart on product cards ──────────────────────────────────────────

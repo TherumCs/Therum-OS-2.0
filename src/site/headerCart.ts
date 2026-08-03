@@ -231,8 +231,8 @@ export function headerCartRuntime(cfg: HeaderCartConfig = HEADER_CART_DEFAULTS):
     if (!res.ok) throw Object.assign(new Error((body.error && body.error.message) || 'Request failed'), { status: res.status });
     return body;
   }
-  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"]/g, function(c){
-    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]; }); }
+  function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
   function money(m){ return (m/100).toLocaleString('en-US',{ style:'currency', currency:'USD' }); }
 
   // ── Cart surface ────────────────────────────────────────────────────────

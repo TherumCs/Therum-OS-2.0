@@ -1,3 +1,4 @@
+import { esc, money } from './html.js';
 import { BANNER_RUNTIME, BANNER_STYLES } from './bannerRuntime.js';
 import { PRODUCT_GRID_FALLBACK_CSS } from './productGrid.js';
 import { CHECKOUT_FLOW_CSS } from './checkoutFlow.js';
@@ -13,13 +14,6 @@ import { ACCOUNT_CSS } from './accountPage.js';
 // design system the admin chrome uses: #fafafa canvas, white surfaces,
 // near-black ink, blue action buttons (--ac-btn), red reserved for brand.
 
-export function esc(s: string): string {
-  return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] as string);
-}
-
-export function money(minor: number, currency = 'USD'): string {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(minor / 100);
-}
 
 export const CSS = `
 :root{

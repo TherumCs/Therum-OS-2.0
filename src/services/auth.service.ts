@@ -19,9 +19,28 @@ function fromB64url(s: string): Buffer {
 // 'custom' carries no bundle info itself — app.authenticate looks that up
 // live per request via roleService.resolveAccess(), so editing a role's
 // bundles takes effect immediately, not just on the user's next login.
+/**
+ * 30 days, matching admin/lib/session.ts's SESSION_TTL_SECONDS.
+ *
+ * These two issuers MUST agree — they mint the same token with the same secret,
+ * and a mismatch means a session that one half of the system considers live and
+ * the other considers dead.
+ *
+ * It was 12 hours. A single-operator store logged itself out overnight, and an
+ * expired session is invisible: the browser drops the cookie, so the admin tab
+ * still looks signed in and the next partner connection lands on a sign-in
+ * screen instead of Approve/Deny. That is not what WooCommerce does, and the
+ * difference was entirely this number.
+ */
+export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
+
+export function mintSessionToken(sub: string, role: 'admin' | 'custom' = 'admin'): string {
+  return signJwt(sub, role);
+}
+
 function signJwt(sub: string, role: 'admin' | 'custom'): string {
   const now = Math.floor(Date.now() / 1000);
-  const data = `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub, role, iat: now, exp: now + 60 * 60 * 12 })}`;
+  const data = `${b64url({ alg: 'HS256', typ: 'JWT' })}.${b64url({ sub, role, iat: now, exp: now + SESSION_TTL_SECONDS })}`;
   return `${data}.${createHmac('sha256', env.JWT_SECRET).update(data).digest('base64url')}`;
 }
 

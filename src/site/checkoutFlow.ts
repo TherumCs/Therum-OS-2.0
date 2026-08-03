@@ -163,8 +163,8 @@ export const CHECKOUT_FLOW_RUNTIME = `
   var fmt = function(m){ return (m/100).toLocaleString('en-US',{style:'currency',currency:'USD'}); };
   // A coupon code and a milieu name are both operator-authored strings that
   // reach this markup by concatenation — they get escaped like anything else.
-  var esc = function(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){
-    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c]; }); };
+  var esc = function(v){ return String(v == null ? '' : v).replace(/[&<>"']/g, function(c){
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); };
   var el = function(id){ return document.getElementById(id); };
 
   // The mobile bar's button mirrors the in-panel action rather than being a

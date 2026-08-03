@@ -1,5 +1,5 @@
 import type { Maintenance } from '../services/settings.service.js';
-import { esc } from './storefrontHtml.js';
+import { esc } from './html.js';
 
 // The maintenance / coming-soon screen, built into Therum OS.
 //

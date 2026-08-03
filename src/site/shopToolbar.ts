@@ -1,4 +1,4 @@
-import { esc } from './storefrontHtml.js';
+import { esc } from './html.js';
 // The shop toolbar — one flat bar that sits ON the page.
 //
 // Revised to Bam's notes:
