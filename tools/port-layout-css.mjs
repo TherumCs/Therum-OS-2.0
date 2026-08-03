@@ -146,10 +146,15 @@ export function build() {
   // columns stacked at 1360px against a reference 256px because
   // `flex-direction: var(--flex-direction)` was missing.
   //
+  // width/height/flex are deliberately NOT in the contract. Applying them
+  // collapsed every flex child to 0px and took overflows from 9 to 1074:
+  // sizing in our markup comes from the element's own ported rule and from
+  // flex behaviour, not from these vars.
+  //
   // 73 declarations were found in the reference; these are the layout ones.
   // Component-specific properties (accordion, icon-list) stay with the
   // components that own them, which the theme files already carry.
-  const CONTRACT = ':is(.brxe-container,.brxe-block,.brxe-section,.brxe-div){align-content:var(--align-content);align-items:var(--align-items);border-block-end-width:var(--border-block-end-width);border-block-start-width:var(--border-block-start-width);border-color:var(--border-color);border-inline-end-width:var(--border-inline-end-width);border-inline-start-width:var(--border-inline-start-width);border-radius:var(--border-radius);border-style:var(--border-style);display:var(--display);flex:var(--flex-grow);flex-direction:var(--flex-direction);flex-wrap:var(--flex-wrap);gap:var(--row-gap);height:var(--height);justify-content:var(--justify-content);margin-block-start:var(--margin-block-start);margin-inline-end:var(--margin-inline-end);margin-inline-start:var(--margin-inline-start);min-height:var(--min-height);overflow:var(--overflow);padding-block-end:var(--padding-block-end);padding-block-start:var(--padding-block-start);padding-inline-end:var(--padding-inline-end);padding-inline-start:var(--padding-inline-start);position:var(--position);text-align:var(--text-align);width:var(--width);z-index:var(--z-index)}';
+  const CONTRACT = ':is(.brxe-container,.brxe-block,.brxe-section,.brxe-div){align-content:var(--align-content);align-items:var(--align-items);border-block-end-width:var(--border-block-end-width);border-block-start-width:var(--border-block-start-width);border-color:var(--border-color);border-inline-end-width:var(--border-inline-end-width);border-inline-start-width:var(--border-inline-start-width);border-radius:var(--border-radius);border-style:var(--border-style);display:var(--display);flex-direction:var(--flex-direction);flex-wrap:var(--flex-wrap);gap:var(--row-gap);justify-content:var(--justify-content);margin-block-start:var(--margin-block-start);margin-inline-end:var(--margin-inline-end);margin-inline-start:var(--margin-inline-start);min-height:var(--min-height);overflow:var(--overflow);padding-block-end:var(--padding-block-end);padding-block-start:var(--padding-block-start);padding-inline-end:var(--padding-inline-end);padding-inline-start:var(--padding-inline-start);position:var(--position);text-align:var(--text-align);z-index:var(--z-index)}';
 
   const DEFAULTS = [
     ':where(.brxe-container,.brxe-block,.brxe-section,.brxe-div){' +
