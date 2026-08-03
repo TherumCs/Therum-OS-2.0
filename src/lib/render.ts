@@ -168,6 +168,12 @@ const WIDGET_SHAPE: Record<string, { open: string; close: string; innerClass: st
   'text-editor': { open: '<div class="elementor-widget-container">', close: '</div>', innerClass: '' },
 };
 
+// A spacer carries its height on an inner element, and the import dropped the
+// inner markup on some of them — leaving a widget that measured 0 where the
+// reference has 40px. Rebuilt only when the node has no children of its own,
+// so a spacer that DID import intact is left alone.
+const SPACER_INNER = '<div class="elementor-spacer"><div class="elementor-spacer-inner"></div></div>';
+
 // The real widget type, ignoring the width modifiers that share the prefix
 // (`elementor-widget__width-initial`, `elementor-widget-tablet__width-auto`).
 function widgetTypeOf(classes: string): string | null {
@@ -228,6 +234,7 @@ function renderBricksNode(node: CanvasNode): string {
   const attrs = widget
     ? ` class="${esc(classes.join(' '))}"${style}${extra}`
     : ` id="${idAttr}" class="${esc(classes.join(' '))}"${style}${extra}`;
+  const spacerFill = widgetType === 'spacer' && !rawKids.trim() ? SPACER_INNER : '';
   const wrap = (inner: string): string =>
     widget
       ? `<div id="${idAttr}" class="${esc(expanded)}">${shape?.open ?? '<div class="elementor-widget-container">'}${inner}${shape?.close ?? '</div>'}</div>`
@@ -266,6 +273,6 @@ function renderBricksNode(node: CanvasNode): string {
       return wrap(`<img${attrs} src="${esc(src)}" alt="${esc(typeof p.alt === 'string' ? p.alt : '')}" />`);
     }
     default:
-      return wrap(`<div${attrs}>${kids}</div>`);
+      return wrap(`<div${attrs}>${kids}${spacerFill}</div>`);
   }
 }

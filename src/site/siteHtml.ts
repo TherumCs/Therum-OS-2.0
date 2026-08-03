@@ -118,6 +118,33 @@ export const PORTED_DOC_CSS = `
    sheet is linked after this one, so it wins every tie. This has to beat it —
    the node does not exist on the reference at all. */
 .th-no-ref{display:contents!important}
+/* Footer newsletter signup. Our own component, not a ported one: the import
+   dropped the Subscribe widget's contents entirely and left an empty node, and
+   because every footer column stretches to the tallest, that one collapsed
+   element made all four render 225px against the reference's 275px. It lives
+   here rather than in a page's meta.css because the footer is chrome — it is
+   on every page, and page CSS is not injected for it. */
+.tsc-sub{width:100%}
+/* Label kept for screen readers but taken out of the flow: visible it added
+   19px, and this column sets the height of all four (the reference's slot is
+   50px). The input carries a placeholder for sighted users. */
+.tsc-sub__label{position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+.tsc-sub__row{display:flex;gap:8px;align-items:stretch}
+.tsc-sub__input{flex:1 1 auto;min-width:0;padding:10px 12px;font:inherit;font-size:14px;
+  color:inherit;background:transparent;border:1px solid currentColor;border-radius:0}
+.tsc-sub__input::placeholder{color:currentColor;opacity:.45}
+.tsc-sub__input:focus{outline:0;box-shadow:inset 0 0 0 1px currentColor}
+.tsc-sub__go{flex:0 0 auto;padding:10px 16px;font:inherit;font-size:12px;font-weight:600;
+  letter-spacing:.04em;text-transform:uppercase;cursor:pointer;
+  color:#fff;background:#070707;border:1px solid #070707}
+.tsc-sub__go:disabled{opacity:.5;cursor:default}
+.tsc-sub__note:empty{display:none}
+.tsc-sub__note{margin-top:8px;font-size:12px;line-height:1.4;opacity:.7}
+@media(max-width:767px){
+  .tsc-sub__row{flex-wrap:wrap}
+  .tsc-sub__go{width:100%}
+}
 /* Some ported elements carry a width snapshotted from a 375px-wide render —
    the contact page's h1 is a literal 354.984px sitting inside a correct 320px
    container. On anything narrower than that snapshot they push the document
