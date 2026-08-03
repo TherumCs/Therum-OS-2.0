@@ -87,7 +87,7 @@ export interface GridProduct {
    * has to resolve a colour+size choice back to a real variant id, and it can
    * only do that from the variants themselves.
    */
-  variants?: { id: string; color: string | null; size: string | null; price: number; available: number }[];
+  variants?: { id: string; color: string | null; size: string | null; price: number; available: number; image?: string | null }[];
   /**
    * Per-product overrides from `product.meta` — one product can ask for a
    * different media behaviour or information layout without the store-wide
@@ -363,7 +363,7 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS, per
 
   const pickFace = needsChoice ? `
       <div class="card-picker" data-evolve-face="pick" hidden
-           data-variants='${esc(JSON.stringify(p.variants!.map((v) => ({ i: v.id, c: v.color, s: v.size, p: v.price, a: v.available }))))}'>
+           data-variants='${esc(JSON.stringify(p.variants!.map((v) => ({ i: v.id, c: v.color, s: v.size, p: v.price, a: v.available, img: v.image ?? null, cc: (v.color && p.colorCodes?.[v.color]) || [] }))))}'>
         <button class="card-picker__back" type="button" data-evolve-close aria-label="Back">‹</button>
         <div class="card-picker__rows"></div>
         <button class="card-btn card-btn--solid" type="button" data-evolve-confirm disabled>Choose an option</button>
@@ -456,8 +456,15 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS, per
     // from a friend's has been given a discount and a mystery.
     + (memberPct > 0 && p.memberLabel ? `<span class="card-member">${esc(p.memberLabel)}</span>` : '');
 
+  // The swatches are the COLOUR CONTROL, not decoration: clicking one selects
+  // that colourway, swaps the card image, and moves the price. `data-swatch`
+  // marks the row so the evolve runtime binds it; each swatch carries its
+  // colour so a click resolves to a variant. A single colour is not a choice,
+  // so the row is shown but inert.
+  const interactiveSwatch = (c: string, codes: string[]): string =>
+    swatch(c, codes).replace('<span class="card-swatch', `<button type="button" class="card-swatch card-swatch--btn" data-swatch-color="${esc(c)}"`).replace(/<\/span>$/, '</button>');
   const swatches = rows.swatches && p.colors?.length
-    ? `<div class="card-swatches">${p.colors.slice(0, 6).map((c) => swatch(c, p.colorCodes?.[c] ?? [])).join('')}${p.colors.length > 6 ? `<span class="card-swatch card-swatch--more">+${p.colors.length - 6}</span>` : ''}</div>`
+    ? `<div class="card-swatches"${(p.colors.length > 1 && (p.variants?.length ?? 0) > 1) ? ' data-swatch' : ''}>${p.colors.slice(0, 6).map((c) => interactiveSwatch(c, p.colorCodes?.[c] ?? [])).join('')}${p.colors.length > 6 ? `<span class="card-swatch card-swatch--more">+${p.colors.length - 6}</span>` : ''}</div>`
     : '';
 
   // Size chips LINK to the PDP with the size preselected — they are not a
@@ -592,6 +599,39 @@ export const CARD_EVOLVE_RUNTIME = `
     var sizes = uniq(variants.map(function(v){ return v.s; }));
     var chosen = { c: colors.length === 1 ? colors[0] : null, s: sizes.length === 1 ? sizes[0] : null };
 
+    // The card's main photo, so choosing a colour changes the picture.
+    var item = root.closest('.c-product-grid__item');
+    var mainImg = item && (item.querySelector('.c-product-grid__thumb--base') || item.querySelector('.c-product-grid__thumb'));
+    var imgWas = mainImg ? mainImg.getAttribute('src') : null;
+    function swapImage(v){
+      if (!mainImg) return;
+      mainImg.setAttribute('src', (v && v.img) ? v.img : imgWas);
+    }
+
+    // The swatch row IS the colour control. Clicking a swatch selects the
+    // colourway, swaps the image, moves the price, and marks the swatch —
+    // then the picker only ever has size (if any) left to ask.
+    var swRow = item && item.querySelector('[data-swatch]');
+    function markSwatch(){
+      if (!swRow) return;
+      swRow.querySelectorAll('[data-swatch-color]').forEach(function(b){
+        b.classList.toggle('on', b.getAttribute('data-swatch-color') === chosen.c);
+      });
+    }
+    if (swRow) swRow.addEventListener('click', function(e){
+      var b = e.target.closest('[data-swatch-color]');
+      if (!b) return;
+      e.preventDefault(); e.stopPropagation();
+      var c = b.getAttribute('data-swatch-color');
+      chosen.c = (chosen.c === c) ? (colors.length === 1 ? colors[0] : null) : c;
+      markSwatch();
+      var v = match();
+      swapImage(v);
+      if (priceEl && v) priceEl.textContent = money(v.p);
+      // Keep the picker's Buy-now state in step if it is open.
+      if (!pick.hidden) draw();
+    });
+
     // Which variant the current choice resolves to. Null while the shopper
     // still has something to pick, or if the combination does not exist.
     function match(){
@@ -624,7 +664,9 @@ export const CARD_EVOLVE_RUNTIME = `
     }
 
     function draw(){
-      rowsEl.innerHTML = row('c', 'Colour', colors) + row('s', 'Size', sizes);
+      // Colour is chosen on the SWATCHES (the card face), not here — rendering
+      // a colour row too was the redundant second control. Only size remains.
+      rowsEl.innerHTML = row('s', 'Size', sizes);
       var v = match();
       var ready = !!v && v.a > 0
         && (colors.length < 2 || chosen.c !== null)
@@ -640,6 +682,8 @@ export const CARD_EVOLVE_RUNTIME = `
       // picks up to open the cart drawer, and quick checkout must finish in
       // the card. The chosen variant is held here instead.
       chosenVariant = ready ? v : null;
+      swapImage(v);
+      markSwatch();
     }
 
     rowsEl.addEventListener('click', function(e){
@@ -1147,6 +1191,12 @@ export const PRODUCT_GRID_FALLBACK_CSS = `
   border:solid 1px var(--border-color-light,rgba(0,0,0,.18));box-shadow:inset 0 0 0 2px var(--white-color,#fff)}
 .card-swatch--named,.card-swatch--more{width:auto;height:auto;border-radius:999px;padding:3px 7px;font-size:9px;
   font-weight:600;text-transform:uppercase;box-shadow:none;color:var(--text-color-light,#888)}
+/* The swatch is a real control now — button reset, a pointer, and a clear
+   selected ring so the chosen colourway reads at a glance. */
+.card-swatch--btn{padding:0;cursor:pointer;-webkit-appearance:none;appearance:none;transition:transform .12s ease}
+.card-swatch--btn:hover{transform:scale(1.12)}
+.card-swatch--btn.on{box-shadow:inset 0 0 0 2px var(--white-color,#fff),0 0 0 2px var(--text-color,#111);border-color:var(--text-color,#111)}
+.card-swatch--btn:focus-visible{outline:2px solid var(--text-color,#111);outline-offset:2px}
 
 .card-sizes{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 .card-sizes__label{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;

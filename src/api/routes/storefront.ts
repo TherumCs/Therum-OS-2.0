@@ -472,6 +472,9 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
           variants: p.variants.map((v) => ({
             id: v.id, color: v.color, size: v.size, price: v.price,
             available: availableOf(v),
+            // The colourway's own photo, so choosing a swatch on the card can
+            // swap the picture the way the product page does.
+            image: v.image ?? null,
           })),
           rating: ratings.get(p.id) ?? null,
           memberPct,
