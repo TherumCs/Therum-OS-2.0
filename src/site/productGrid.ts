@@ -264,10 +264,21 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS, per
   const video = p.media.find((m) => m.type === 'video') ?? null;
   const href = `/product/${esc(p.slug)}`;
 
-  const media = resolveMedia(cfg, p.mediaOverride ?? null, stills.length, Boolean(video));
-
   const base = stills[0]?.url ?? video?.poster ?? null;
-  const hover = stills[1]?.url ?? null;
+  // The hover image is the SECOND shot. A print-on-demand product keeps its
+  // alternate shots on the colourways, not as a second product still, so when
+  // there is no second product image, borrow a variant's — otherwise a store
+  // full of POD products has no hover reveal anywhere.
+  const variantHover = (p.variants ?? [])
+    .map((v) => v.image)
+    .find((u): u is string => !!u && u !== base) ?? null;
+  const hover = stills[1]?.url ?? variantHover;
+
+  let media = resolveMedia(cfg, p.mediaOverride ?? null, stills.length, Boolean(video));
+  // 'auto' means "be as rich as the media allows". A single product still with
+  // a variant shot behind it should reveal on hover, not sit inert as a
+  // 'still' — an explicit 'still' choice is still respected.
+  if (media === 'still' && hover && (p.mediaOverride ?? cfg.media) === 'auto') media = 'fade';
 
   const img = (url: string, cls: string, alt = '') =>
     `<img class="c-product-grid__thumb c-product-grid__thumb--contain ${cls}" src="${esc(url)}" alt="${esc(alt)}" loading="lazy" decoding="async"${alt ? '' : ' aria-hidden="true"'}>`;

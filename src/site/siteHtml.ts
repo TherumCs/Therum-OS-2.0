@@ -89,11 +89,12 @@ export const PORTED_DOC_CSS = `
 .th-sr-only{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;
   overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
 
-#brx-content .brxe-container,#brx-content .brxe-block,#brx-content .brxe-section{
+:where(#brx-content .brxe-container,#brx-content .brxe-block,#brx-content .brxe-section){
   width:100%;max-width:100%}
-/* The column. Everything in these pages lives inside it. */
-#brx-content > .brxe-container,#brx-content > .brxe-section,
-#brx-content > .brxe-block{
+/* The column, as a DEFAULT — a Bricks section that sets its own width or goes
+   full-bleed (a hero, a banner slider) overrides this rather than being caged
+   at 1400px with 40px gutters. Prose pages, which set no width, keep it. */
+:where(#brx-content) > :where(.brxe-container,.brxe-section,.brxe-block){
   max-width:var(--th-site-max,1400px);margin-left:auto;margin-right:auto;
   padding-left:40px;padding-right:40px}
 /* The ported header hard-codes its own 1170px column. Content wider than the
@@ -102,7 +103,7 @@ export const PORTED_DOC_CSS = `
 .c-header--desktop,.c-header--mobile,.c-header__inner,.c-shop-header__inner{
   max-width:var(--th-site-max,1400px)!important;margin-left:auto;margin-right:auto}
 /* Nested containers must not re-pad — the column already has its gutters. */
-#brx-content .brxe-container .brxe-container{padding-left:0;padding-right:0}
+:where(#brx-content .brxe-container .brxe-container){padding-left:0;padding-right:0}
 #brx-content h1,#brx-content h2,#brx-content h3,#brx-content h4{
   line-height:1.1;margin:0 0 .4em;letter-spacing:-.01em}
 #brx-content h1{font-size:clamp(38px,5vw,64px)}
@@ -117,7 +118,7 @@ export const PORTED_DOC_CSS = `
 #brx-content .brxe-text{max-width:78ch}
 /* The FAQ accordions: the theme ships the toggle, not the spacing. */
 #brx-content .brxe-accordion,#brx-content [class*="accordion"]{width:100%}
-#brx-content img{max-width:100%;height:auto}
+:where(#brx-content) img{max-width:100%;height:auto}
 @media(max-width:767px){
   #brx-content > .brxe-container,#brx-content > .brxe-section,
   #brx-content > .brxe-block{padding-left:20px;padding-right:20px}
