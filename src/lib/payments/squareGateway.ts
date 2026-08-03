@@ -116,11 +116,26 @@ export const squareGateway: PaymentGateway = {
 
   async refund(order: OrderForPayment, amountMinor: number, idempotencyKey: string, credential: string, ctx: { intentId: string }): Promise<string> {
     const cred = parseCredential(credential);
-    // The refund targets the PAYMENT, not the order — resolve it from the
-    // Square order the intent stored.
-    const ord = await squareCall(cred, 'GET', `/v2/orders/${encodeURIComponent(ctx.intentId)}`);
-    const tenders = (ord.order as { tenders?: { payment_id?: string }[] } | undefined)?.tenders ?? [];
-    const paymentId = tenders[0]?.payment_id;
+    /**
+     * Resolve the PAYMENT to refund — and the stored intent id is one of TWO
+     * kinds.
+     *
+     * A hosted payment link records the Square ORDER id, whose tenders name the
+     * payment. A direct card charge (payWithToken) already IS a payment id.
+     * Assuming the order shape made every card-charged order un-refundable
+     * with "Order not found" — which reads as a missing order rather than as
+     * the wrong lookup.
+     */
+    const id = encodeURIComponent(ctx.intentId);
+    let paymentId: string | undefined;
+    try {
+      const pay = await squareCall(cred, 'GET', `/v2/payments/${id}`);
+      paymentId = (pay.payment as { id?: string } | undefined)?.id;
+    } catch {
+      const ord = await squareCall(cred, 'GET', `/v2/orders/${id}`);
+      const tenders = (ord.order as { tenders?: { payment_id?: string }[] } | undefined)?.tenders ?? [];
+      paymentId = tenders[0]?.payment_id;
+    }
     if (!paymentId) throw new Error('Square order has no payment to refund');
     const re = await squareCall(cred, 'POST', '/v2/refunds', {
       idempotency_key: idempotencyKey.slice(0, 45),
@@ -189,9 +204,35 @@ export const squareGateway: PaymentGateway = {
     };
   },
 
+  /**
+   * Status of whatever id we were given — and there are TWO kinds.
+   *
+   * `createIntent` (hosted payment link) records the Square ORDER id, because
+   * that is what payment webhooks reference. `payWithToken` (a direct card
+   * charge) returns a PAYMENT id. They are different namespaces, so looking
+   * one up in the other's endpoint returns "Order not found" — which reads as
+   * a missing order rather than as the wrong lookup, and left every
+   * card-charged order stuck at its pre-payment status.
+   *
+   * Payment is tried first: it is the one a customer's card produces.
+   */
   async intentStatus(intentId: string, credential: string): Promise<string> {
     const cred = parseCredential(credential);
-    const ord = await squareCall(cred, 'GET', `/v2/orders/${encodeURIComponent(intentId)}`);
+    const id = encodeURIComponent(intentId);
+
+    try {
+      const res = await squareCall(cred, 'GET', `/v2/payments/${id}`);
+      const status = String((res.payment as { status?: string } | undefined)?.status ?? '');
+      // APPROVED is authorised but not captured — money has not moved, so it
+      // must not read as succeeded.
+      if (status === 'COMPLETED') return 'succeeded';
+      if (status === 'CANCELED' || status === 'FAILED') return 'failed';
+      if (status) return 'requires_action';
+    } catch {
+      // Not a payment id — fall through to the order lookup below.
+    }
+
+    const ord = await squareCall(cred, 'GET', `/v2/orders/${id}`);
     const state = String((ord.order as { state?: string } | undefined)?.state ?? '');
     if (state === 'COMPLETED') return 'succeeded';
     if (state === 'CANCELED') return 'failed';

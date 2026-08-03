@@ -1,11 +1,85 @@
+import { z } from 'zod';
 import type { FastifyInstance } from 'fastify';
 import { connectionService } from '../../services/connection.service.js';
 import { ConnectInput } from '../../schemas/connection.schema.js';
 import { requireBundle } from '../../middleware/bundle.js';
+import { stripeMethods } from '../../counter/stripeMethods.js';
+import { db } from '../../lib/db.js';
 
 const requireConnectionsWrite = requireBundle('manage-settings');
 
 export async function connectionRoutes(app: FastifyInstance): Promise<void> {
+  /**
+   * Which partners are subscribed to order events, and whether delivery works.
+   *
+   * This exists because the failure it surfaces is SILENT. A partner can hold a
+   * read_write key, sync your whole catalogue, and never register a webhook —
+   * so orders arrive in the store and nothing is ever printed. Nothing in the
+   * admin said so, because "no webhooks" and "webhooks working" looked
+   * identical: both are an empty error log.
+   */
+  app.get('/connections/order-routing', { preHandler: app.authenticate }, async (_req, reply) => {
+    const hooks = await db.storeWebhook.findMany({ orderBy: { createdAt: 'desc' } });
+    const partners = await db.storeCredential.findMany({ select: { id: true, label: true } });
+
+    const rows = await Promise.all(hooks.map(async (h) => {
+      const last = await db.webhookDelivery.findFirst({
+        where: { webhookId: h.id }, orderBy: { createdAt: 'desc' },
+      });
+      const fails = await db.webhookDelivery.count({
+        where: { webhookId: h.id, OR: [{ error: { not: null } }, { responseCode: { gte: 400 } }] },
+      });
+      return {
+        id: h.id,
+        topic: h.topic,
+        deliveryUrl: h.deliveryUrl,
+        status: h.status,
+        partner: partners.find((p) => p.id === h.credentialId)?.label ?? null,
+        lastDeliveryAt: last?.createdAt ?? null,
+        lastResult: last ? (last.error ?? `HTTP ${last.responseCode ?? '?'}`) : null,
+        failures: fails,
+      };
+    }));
+
+    // The headline number: partners holding a key but subscribed to nothing.
+    const subscribedIds = new Set(hooks.map((h) => h.credentialId).filter(Boolean));
+    const unsubscribed = partners.filter((p) => !subscribedIds.has(p.id)).map((p) => p.label);
+
+    reply.send({
+      webhooks: rows,
+      partnersWithoutWebhooks: unsubscribed,
+      ordersWillReachNobody: rows.filter((r) => r.status === 'active').length === 0,
+    });
+  });
+
+  /**
+   * Stripe payment methods, managed from here rather than Stripe's dashboard.
+   *
+   * `drift` is the reason this is worth having: it names every method this
+   * store will OFFER that Stripe will REFUSE, which is otherwise invisible
+   * until a shopper picks one at checkout.
+   */
+  app.get('/connections/stripe/methods', { preHandler: app.authenticate }, async (_req, reply) => {
+    const [listed, drift] = await Promise.all([stripeMethods.list(), stripeMethods.drift()]);
+    reply.send({ ...listed, drift });
+  });
+
+  app.post('/connections/stripe/methods/pin', { preHandler: [app.authenticate, requireConnectionsWrite] }, async (req, reply) => {
+    const { configId } = z.object({ configId: z.string().min(1).max(120) }).parse(req.body);
+    await stripeMethods.pin(configId);
+    reply.send(await stripeMethods.list());
+  });
+
+  app.post('/connections/stripe/methods/:methodId', { preHandler: [app.authenticate, requireConnectionsWrite] }, async (req, reply) => {
+    const { methodId } = req.params as { methodId: string };
+    const { configId, on } = z.object({
+      configId: z.string().min(1).max(120),
+      on: z.boolean(),
+    }).parse(req.body);
+    await stripeMethods.setMethod(configId, methodId, on);
+    reply.send(await stripeMethods.list());
+  });
+
   app.get('/connections', { preHandler: app.authenticate }, async (_req, reply) => {
     reply.send(await connectionService.list());
   });

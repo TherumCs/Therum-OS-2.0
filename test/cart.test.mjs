@@ -217,3 +217,42 @@ test('AUDIT L-3: a corrupted cart value resets to not-found, not 500', async () 
   assert.equal(res.statusCode, 404, 'corrupt cart treated as expired');
   assert.equal(await redis.get(`counter:cart:${tok}`), null, 'corrupt key cleared');
 });
+
+/**
+ * The address entered at /cart/shipping must survive onto the ORDER.
+ *
+ * checkout() read its `shipAddress` ARGUMENT rather than the cart state, so an
+ * address supplied the normal way — one step earlier, to get a shipping quote —
+ * priced the order correctly and was then dropped. The customer was charged the
+ * right amount for delivery to nowhere, and the order then failed fulfilment
+ * routing with "missing address1, city, country_code".
+ *
+ * Nothing threw. It only showed up by placing a real order and looking at it.
+ */
+test('an address set via /cart/shipping lands on the order', async () => {
+  const { cartService } = await import('../dist/services/cart.service.js');
+  const variant = await db.productVariant.findFirst({ where: { product: { status: 'active' } } });
+  assert.ok(variant, 'need at least one active product to test checkout');
+
+  const cart = await cartService.addItem(null, variant.id, 1);
+  const token = cart.token ?? cart.cartToken;
+
+  const address = {
+    name: 'Address Persistence Test', line1: '1 Test Street',
+    city: 'Philadelphia', region: 'PA', postalCode: '19104', country: 'US',
+  };
+  await cartService.setShipping(token, address);
+
+  // NOTE: no address passed here — that is the whole point.
+  const co = await cartService.checkout(token, 'address-persistence@example.test');
+
+  const order = await db.order.findUnique({ where: { id: co.orderId }, select: { shipAddress: true } });
+  const saved = order.shipAddress ?? {};
+  assert.equal(saved.line1, '1 Test Street', 'the cart address was dropped — the order has nowhere to ship');
+  assert.equal(saved.city, 'Philadelphia');
+  assert.equal(saved.country, 'US');
+
+  await db.payment.deleteMany({ where: { orderId: co.orderId } });
+  await db.orderItem.deleteMany({ where: { orderId: co.orderId } });
+  await db.order.delete({ where: { id: co.orderId } });
+});

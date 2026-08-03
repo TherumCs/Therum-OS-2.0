@@ -13,6 +13,15 @@ export interface PaymentMethod {
   providers: string[];
   needsRedirect: boolean;
   sub?: string; // panel row subtitle (ported from the 1.x checkout copy)
+  /**
+   * Keep this method out of the strip entirely, connected or not.
+   *
+   * Different from "no provider connected", which still renders disabled as
+   * "setup required" — that is a promise the store intends to keep. `hidden`
+   * is for methods deliberately not on the roadmap right now, so the checkout
+   * does not advertise something nobody is going to switch on.
+   */
+  hidden?: boolean;
 }
 
 export const METHOD_GROUPS: { id: PaymentMethod['group']; label: string; ico: string; preview: string }[] = [
@@ -47,12 +56,12 @@ export const METHODS: PaymentMethod[] = [
   { id: 'bank_ach', group: 'bank', label: 'Bank (Plaid)', providers: ['plaid', 'stripe'], needsRedirect: true, sub: 'Pay directly from your bank account. Saves ~2% in card fees.' },
 
   // ── Crypto ── (each coin its own toggle — AnyPay rail underneath)
-  { id: 'crypto_btc', group: 'crypto', label: 'BTC', providers: ['crypto'], needsRedirect: true },
-  { id: 'crypto_eth', group: 'crypto', label: 'ETH', providers: ['crypto'], needsRedirect: true },
-  { id: 'crypto_usdc', group: 'crypto', label: 'USDC', providers: ['crypto'], needsRedirect: true },
-  { id: 'crypto_usdt', group: 'crypto', label: 'USDT', providers: ['crypto'], needsRedirect: true },
-  { id: 'crypto_sol', group: 'crypto', label: 'SOL', providers: ['crypto'], needsRedirect: true },
-  { id: 'crypto_xrp', group: 'crypto', label: 'XRP', providers: ['crypto'], needsRedirect: true },
+  { id: 'crypto_btc', group: 'crypto', label: 'BTC', providers: ['crypto'], needsRedirect: true, hidden: true },
+  { id: 'crypto_eth', group: 'crypto', label: 'ETH', providers: ['crypto'], needsRedirect: true, hidden: true },
+  { id: 'crypto_usdc', group: 'crypto', label: 'USDC', providers: ['crypto'], needsRedirect: true, hidden: true },
+  { id: 'crypto_usdt', group: 'crypto', label: 'USDT', providers: ['crypto'], needsRedirect: true, hidden: true },
+  { id: 'crypto_sol', group: 'crypto', label: 'SOL', providers: ['crypto'], needsRedirect: true, hidden: true },
+  { id: 'crypto_xrp', group: 'crypto', label: 'XRP', providers: ['crypto'], needsRedirect: true, hidden: true },
 
   // ── P2P ── (Cash App via Stripe primary → instant payout to Square Debit;
   // Venmo rides PayPal Smart Buttons; NO CHECKS EVER.)

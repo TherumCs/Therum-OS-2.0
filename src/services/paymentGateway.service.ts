@@ -11,6 +11,8 @@ import { METHODS, METHOD_GROUPS } from '../lib/payments/methodRegistry.js';
 import { mockGateway } from '../lib/payments/mockGateway.js';
 import { stripeGateway } from '../lib/payments/stripeGateway.js';
 import { squareGateway } from '../lib/payments/squareGateway.js';
+import { paypalGateway } from '../lib/payments/paypalGateway.js';
+import { sezzleGateway } from '../lib/payments/sezzleGateway.js';
 
 // Counter C1 — the gateway orchestration layer. Gateways implement the 1.x
 // PSPGateway contract (lib/payments/gateway.ts); this service owns:
@@ -28,6 +30,8 @@ const GATEWAYS: Record<string, PaymentGateway> = {
   mock: mockGateway,
   stripe: stripeGateway,
   square: squareGateway,
+  paypal: paypalGateway,
+  sezzle: sezzleGateway,
 };
 
 function timingSafeEqualStr(a: string, b: string): boolean {
@@ -82,8 +86,11 @@ export const paymentGatewayService = {
       if ((await connectionService.credentialFor(id)) !== null) connected.add(id);
     }
     return {
-      groups: METHOD_GROUPS,
-      methods: METHODS.map((m) => {
+      // Hidden methods are dropped here, not filtered in the browser — a
+      // checkout that ships them and hides them with CSS still tells anyone
+      // reading the response what the store does not offer.
+      groups: METHOD_GROUPS.filter((g) => METHODS.some((m) => m.group === g.id && !m.hidden)),
+      methods: METHODS.filter((m) => !m.hidden).map((m) => {
         const provider = m.providers.find((p) => connected.has(p)) ?? null;
         return { id: m.id, group: m.group, label: m.label, sub: m.sub ?? null, needsRedirect: m.needsRedirect, provider, available: provider !== null };
       }),

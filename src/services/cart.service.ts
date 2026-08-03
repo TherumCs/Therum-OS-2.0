@@ -480,7 +480,17 @@ export const cartService = {
       // never be quoted (shipmentService throws on exactly that), so this is
       // required here even though the schema allows it to be omitted for
       // admin-created and imported orders.
-      ...(shipAddress ? { shipAddress } : {}),
+      // state.shipAddress, NOT the argument.
+      //
+      // The address usually arrives via /cart/shipping one step earlier — that
+      // is how the shopper gets a shipping quote before paying — and by here it
+      // lives on the cart state. Reading only the argument meant that address
+      // priced the order correctly and was then dropped: the customer was
+      // charged the right amount for delivery to nowhere, and every such order
+      // failed `shippable()` at routing with "missing address1, city,
+      // country_code". The line above has already folded any argument into
+      // state, so state is the complete answer.
+      ...(state.shipAddress ? { shipAddress: state.shipAddress } : {}),
       // The quoted shipping and tax, carried onto the order. Without these the
       // order charged the bare item subtotal while checkout displayed the full
       // amount — the cart said $83.45 and the order was created for $54.00.

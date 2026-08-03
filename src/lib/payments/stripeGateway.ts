@@ -78,12 +78,22 @@ export const stripeGateway: PaymentGateway = {
   },
 
   async createIntent(order: OrderForPayment, credential: string): Promise<PaymentIntentResult> {
+    // Pin the method configuration when one is set. Without it Stripe picks
+    // among the account's configurations itself — and this account has five,
+    // four flagged default, because every Connect platform that ever onboarded
+    // the merchant left one behind. The failure that causes is the worst kind:
+    // the checkout offers Klarna, the shopper picks it, and Stripe refuses at
+    // the moment of payment.
+    const { settingsService } = await import('../../services/settings.service.js');
+    const configId = (await settingsService.getPayments()).stripePaymentMethodConfiguration;
+
     const pi = await stripePost('/payment_intents', credential, {
       amount: String(order.total),
       currency: order.currency.toLowerCase(),
       'metadata[order_id]': order.id,
       'metadata[order_number]': order.number,
       'automatic_payment_methods[enabled]': 'true',
+      ...(configId ? { payment_method_configuration: configId } : {}),
     });
     return {
       providerId: 'stripe',

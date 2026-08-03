@@ -315,6 +315,8 @@ export interface CounterSettings {
 export interface Payments {
   stripePublishableKey: string;
   squareApplicationId: string;
+  /** Which Stripe method configuration to pin — see the schema for why. */
+  stripePaymentMethodConfiguration: string;
   environment: 'live' | 'sandbox';
   appleDomainAssociation: string;
 }
@@ -392,6 +394,7 @@ const PAYMENTS_KEY = 'payments';
 const PAYMENTS_DEFAULTS: Payments = {
   stripePublishableKey: '',
   squareApplicationId: '',
+  stripePaymentMethodConfiguration: '',
   environment: 'live',
   appleDomainAssociation: '',
 };
@@ -454,20 +457,24 @@ const COUNTER_DEFAULTS: CounterSettings = {
   memberPriceLabel: 'Your price',
   // Real routing, from the mailbox list Bam supplied.
   //
-  // General / My order / Returns map to purpose-built inboxes. Modelling,
-  // Press, Partnerships and Careers have NO matching address on that list, so
-  // they land on info@ — the general-inquiries box — rather than being pointed
-  // at a named person's inbox (bam@, bryant@, mira@) on my own judgement, or
-  // at an alias that does not exist yet. Give each one its own address and
-  // this is a settings change.
+  // The TOPICS ship as product defaults; the ADDRESSES do not.
+  //
+  // Every email is intentionally empty. A default address belonging to whoever
+  // the software was first built for would silently route a new store's
+  // customer mail to a stranger — and it would look like it was working. An
+  // empty address is visibly unconfigured, which is the correct state for a
+  // fresh install.
+  //
+  // Local part conventions are suggested in the label copy (info@, orders@,
+  // support@) so an operator knows what each topic expects.
   contactTopics: [
-    { id: 'general', label: 'General', email: 'info@sidemoney.co', fields: [], blurb: 'Anything that does not fit the others.' },
-    { id: 'order', label: 'My order', email: 'orders@sidemoney.co', fields: ['order'], blurb: 'Where it is, changing it, something wrong with it.' },
-    { id: 'returns', label: 'Returns', email: 'support@sidemoney.co', fields: ['order'], blurb: 'Sending something back or exchanging it.' },
-    { id: 'modelling', label: 'Modelling', email: 'info@sidemoney.co', fields: ['instagram', 'portfolio'], blurb: 'Casting and test shoots.' },
-    { id: 'press', label: 'Press', email: 'info@sidemoney.co', fields: ['company'], blurb: 'Interviews, samples, features.' },
-    { id: 'partnerships', label: 'Partnerships', email: 'info@sidemoney.co', fields: ['company', 'budget'], blurb: 'Collaborations, wholesale, brand work.' },
-    { id: 'careers', label: 'Careers', email: 'info@sidemoney.co', fields: ['portfolio', 'instagram'], blurb: 'Applying for something on the careers page.' },
+    { id: 'general', label: 'General', email: '', fields: [], blurb: 'Anything that does not fit the others.' },
+    { id: 'order', label: 'My order', email: '', fields: ['order'], blurb: 'Where it is, changing it, something wrong with it.' },
+    { id: 'returns', label: 'Returns', email: '', fields: ['order'], blurb: 'Sending something back or exchanging it.' },
+    { id: 'modelling', label: 'Modelling', email: '', fields: ['instagram', 'portfolio'], blurb: 'Casting and test shoots.' },
+    { id: 'press', label: 'Press', email: '', fields: ['company'], blurb: 'Interviews, samples, features.' },
+    { id: 'partnerships', label: 'Partnerships', email: '', fields: ['company', 'budget'], blurb: 'Collaborations, wholesale, brand work.' },
+    { id: 'careers', label: 'Careers', email: '', fields: ['portfolio', 'instagram'], blurb: 'Applying for something on the careers page.' },
   ],
   toolbarEnabled: true,
   toolbarStyle: 'bar',

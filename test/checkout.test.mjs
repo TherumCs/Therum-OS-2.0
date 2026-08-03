@@ -291,7 +291,11 @@ test('C4.1 method strip: registry grouped, availability resolved from connection
   const res = await app.inject({ method: 'GET', url: '/api/checkout/methods' });
   assert.equal(res.statusCode, 200);
   const { groups, methods } = res.json();
-  assert.deepEqual(groups.map((g) => g.id), ['card', 'wallets', 'bnpl', 'bank', 'crypto', 'p2p'], '1.x strip group order');
+  // 'crypto' is absent BY DESIGN: all six coins carry `hidden: true` (parked,
+  // not abandoned), and a group with no visible method must not render an
+  // empty tab. The 1.x order is otherwise preserved.
+  assert.deepEqual(groups.map((g) => g.id), ['card', 'wallets', 'bnpl', 'bank', 'p2p'], '1.x strip group order, minus fully-hidden groups');
+  assert.ok(!methods.some((m) => m.group === 'crypto'), 'a hidden method must not reach the response at all');
 
   const card = methods.find((m) => m.id === 'card');
   assert.equal(card.available, true, 'card fulfilled by a connected provider');

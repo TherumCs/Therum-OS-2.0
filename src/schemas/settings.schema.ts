@@ -569,6 +569,17 @@ export type CounterSettingsInput = z.infer<typeof CounterSettingsInput>;
 export const PaymentsSettingsInput = z.object({
   stripePublishableKey: z.string().max(200).optional(),
   squareApplicationId: z.string().max(200).optional(),
+  /**
+   * WHICH Stripe payment-method configuration to use.
+   *
+   * An account can hold several, and a Connect platform (WooPayments was one)
+   * adds its own — this account has FIVE, four of them flagged `is_default`.
+   * With `automatic_payment_methods` and no explicit choice, Stripe resolves
+   * that ambiguity itself, so the store can offer Klarna while Stripe declines
+   * it at the moment of payment. Pinning one makes the offered list and the
+   * accepted list the same list.
+   */
+  stripePaymentMethodConfiguration: z.string().max(120).optional(),
   environment: z.enum(['live', 'sandbox']).optional(),
   /** Verbatim contents of Apple's domain-association file. */
   appleDomainAssociation: z.string().max(20000).optional(),
