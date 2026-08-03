@@ -121,10 +121,21 @@ function renderBricksNode(node: CanvasNode): string {
   const expanded = typeof s._cssClasses === 'string' && s._cssClasses
     ? expandElementorIds(s._cssClasses, name)
     : '';
-  if (expanded) classes.push(expanded);
-  // No wrapper layers. The generated stylesheet targets `.el-<id>` directly,
-  // so the element carrying the id is the element that gets styled.
+  const LEAF = new Set(['heading', 'image', 'button', 'text', 'text-basic', 'svg', 'icon']);
+  const portedId = /(?:^|\s)el-([0-9a-f]{6,})(?:\s|$)/.exec(expanded)?.[1] ?? null;
+  const wrapWidget = Boolean(portedId) && LEAF.has(name);
+  if (expanded && !wrapWidget) classes.push(expanded);
   const kids = rawKids;
+  // The reference wraps every WIDGET in a div and styles the wrapper, with the
+  // real element inside it:
+  //
+  //   <div class="...479c7f3" width:12%><img width:100% height:27px></div>
+  //
+  // We flattened that onto the element itself, so `.el-479c7f3 img{...}`
+  // matched nothing and the logo rendered 0px against a reference 78px. The
+  // wrapper is the reference's own structure, so it is ported — carrying only
+  // our `el-<id>` class, no builder vocabulary. Containers are NOT wrapped:
+  // there the styled element really is the element with the children.
   const bgUrl = rec(rec(s._background).image).url;
   const style = typeof bgUrl === 'string' && bgUrl ? ` style="background-image:url('${esc(bgUrl)}')"` : '';
   // Element attributes (Bricks `_attributes`) — href, aria-*, data-*, role…
@@ -142,7 +153,8 @@ function renderBricksNode(node: CanvasNode): string {
   // The id goes on the wrapper when there is one, so a #id rule still lands on
   // the element the reference gives it to.
   const attrs = ` id="${idAttr}" class="${esc(classes.join(' '))}"${style}${extra}`;
-  const wrap = (inner: string): string => inner;
+  const wrap = (inner: string): string =>
+    wrapWidget ? `<div class="${esc(expanded)}">${inner}</div>` : inner;
   // Bricks svg element: signed svg code on WP, raw svg markup here.
   if (name === 'svg' && typeof s.code === 'string' && s.code.trim().startsWith('<svg')) {
     return wrap(`<div${attrs}>${s.code}</div>`);

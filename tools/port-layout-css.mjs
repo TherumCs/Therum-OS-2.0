@@ -103,11 +103,33 @@ export function build() {
     if (!ported || seen.has(ported)) continue;
     seen.add(ported); out.push(ported);
   }
+  // Elementor's contract is `display: var(--display)`, and --display is set
+  // only on elements the reference styled. On every OTHER container the var
+  // resolves to nothing, which computes as `unset` — and an unset div is
+  // INLINE, so the element collapses to 0px. That is exactly what happened:
+  // el-479c7f3 rendered 0px wide, display inline, against a reference 78px.
+  //
+  // The defaults go FIRST and at zero specificity, so a ported rule that sets
+  // the var always wins and a container without one behaves like the block it
+  // was before the contract existed.
+  const DEFAULTS = [
+    ':where(.brxe-container,.brxe-block,.brxe-section,.brxe-div){' +
+      '--display:block;--flex-direction:column;--justify-content:flex-start;' +
+      '--align-items:stretch;--flex-wrap:nowrap;--gap:0px;--row-gap:0px;' +
+      '--column-gap:0px;--min-height:auto;--width:auto;--height:auto;' +
+      '--padding-top:0px;--padding-right:0px;--padding-bottom:0px;' +
+      '--padding-left:0px;--margin-top:0px;--margin-right:0px;' +
+      '--margin-bottom:0px;--margin-left:0px;--overflow:visible;' +
+      '--position:relative;--z-index:auto;--text-align:initial;' +
+      '--border-radius:0;--align-content:normal}',
+  ];
+
   const css = [
     '/* Page layout, ported from localhost:10025.',
     '   Selectors rewritten onto our Bricks classes; declarations copied',
     '   verbatim so the relative units the theme is built on survive.',
     '   See PORTING.md and tools/port-layout-css.mjs. */',
+    ...DEFAULTS,
     ...out,
   ].join('\n');
   const bad = chunks(css).filter((c) => LEGACY.test(c.slice(0, c.indexOf('{'))));
