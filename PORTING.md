@@ -20,6 +20,12 @@ Not redesigned, not approximated, not reinterpreted.
 5. **Fixes must not break layouts, pages or CSS.** `test/rendered-markup.test.mjs`
    is the gate — extend it rather than trusting care.
 
+## Before acting
+
+Quote the instruction the action satisfies, in the user's words. Cannot quote
+it? The action is not authorised. This is step 3 of `_core/loop.md`; it exists
+because rules in a file were read after the decision rather than before it.
+
 ## Rejected approach — do not re-propose
 
 Porting **Elementor**: a 904KB extract of the reference's Elementor stylesheet,
