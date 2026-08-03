@@ -1,7 +1,7 @@
 import { apiGet } from '../../../lib/api';
 import { BASE_PATH } from '../../../lib/session';
 import { money, type Paged, type Product } from '../../../lib/types';
-import { createProduct } from '../../actions';
+import { createProduct, duplicateProduct, trashProduct, restoreProduct, purgeProduct } from '../../actions';
 import { ListControls, ListPager, type SortOption } from '../ListControls';
 import { CatalogTabs } from './CatalogTabs';
 
@@ -24,7 +24,7 @@ async function perPage(): Promise<number> {
   return a?.itemsPerPage ?? PER_PAGE_FALLBACK;
 }
 
-interface SP { status?: string; q?: string; sort?: string; order?: string; cursor?: string; categoryId?: string; tagId?: string; view?: string; add?: string }
+interface SP { status?: string; q?: string; sort?: string; order?: string; cursor?: string; categoryId?: string; tagId?: string; view?: string; add?: string; trashed?: string }
 
 export default async function ProductsPage({ searchParams }: { searchParams: Promise<SP> }) {
   const sp = await searchParams;
@@ -39,6 +39,10 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
   // empty list while its children hold products.
   if (sp.categoryId) qs.set('categoryId', sp.categoryId);
   if (sp.tagId) qs.set('tagId', sp.tagId);
+  // The trash is the same list in a different mode: trashed rows only, with
+  // Restore and Delete-forever instead of Edit and View.
+  const trashView = sp.trashed === '1';
+  if (trashView) qs.set('trashed', '1');
 
   let data: Paged<Product> | null = null;
   let err: string | null = null;
@@ -91,7 +95,12 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
           controls stacked before any product appeared, which is what made this
           page read as jumbled. */}
       <div className="th-pagehead">
-        <h1>Product Catalog</h1>
+        <h1>{trashView ? 'Trash' : 'Product Catalog'}</h1>
+        {trashView ? (
+          <a className="th-btn" href={`${BASE_PATH}/products`}>← Back to products</a>
+        ) : (
+          <a className="th-btn" href={`${BASE_PATH}/products?trashed=1`}>Trash</a>
+        )}
         <a className="th-btn th-btn--primary" href={`${BASE_PATH}/products?${addQs}`}>
           {adding ? 'Cancel' : '+ Add product'}
         </a>
@@ -187,8 +196,35 @@ export default async function ProductsPage({ searchParams }: { searchParams: Pro
                 <td>{p.variants.length}</td>
                 <td>{p.variants.length ? money(Math.min(...p.variants.map((v) => v.price))) : '—'}</td>
                 <td className="th-rowactions">
-                  <a className="th-btn th-btn--xs" href={`${BASE_PATH}/products/${p.id}`}>Edit</a>
-                  <a className="th-btn th-btn--xs" href={`/product/${p.slug}`} target="_blank" rel="noreferrer">View ↗</a>
+                  {trashView ? (
+                    <>
+                      {/* Restore puts it back at the status it had. Delete
+                          forever is the only place a product is truly gone,
+                          and it is reachable ONLY from here — a product must
+                          be trashed first, so this can never be a one-click
+                          mistake on a live product. */}
+                      <form action={restoreProduct.bind(null, p.id)}>
+                        <button type="submit" className="th-btn th-btn--xs">Restore</button>
+                      </form>
+                      <form action={purgeProduct.bind(null, p.id)}>
+                        <button type="submit" className="th-btn th-btn--xs th-btn--danger">Delete forever</button>
+                      </form>
+                    </>
+                  ) : (
+                    <>
+                      <a className="th-btn th-btn--xs" href={`${BASE_PATH}/products/${p.id}`}>Edit</a>
+                      <a className="th-btn th-btn--xs" href={`/product/${p.slug}`} target="_blank" rel="noreferrer">View ↗</a>
+                      {/* Server Actions in a form, not fetch(): plain POSTs
+                          that revalidate the list on the server. "Trash", not
+                          "Delete", because it is recoverable. */}
+                      <form action={duplicateProduct.bind(null, p.id)}>
+                        <button type="submit" className="th-btn th-btn--xs">Duplicate</button>
+                      </form>
+                      <form action={trashProduct.bind(null, p.id)}>
+                        <button type="submit" className="th-btn th-btn--xs th-btn--danger">Trash</button>
+                      </form>
+                    </>
+                  )}
                 </td>
               </tr>
             ))}

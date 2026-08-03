@@ -87,6 +87,38 @@ export const taxonomyService = {
   },
 
   // ── product assignment ──
+  /**
+   * Add or remove ONE product from ONE category, from the category's side.
+   *
+   * Distinct from assign(), which replaces a product's WHOLE category set. The
+   * category manager toggles membership without knowing or touching the
+   * product's other categories — connect/disconnect, not set, so assigning a
+   * product to "Mens" here does not silently strip it from "Basics".
+   *
+   * Works for tags too via `kind`.
+   */
+  async toggleMembership(kind: 'category' | 'tag', termId: string, productId: string, on: boolean) {
+    const p = await db.product.findUnique({ where: { id: productId }, select: { id: true } });
+    if (!p) throw new NotFoundError('Product not found', 'productId');
+    const rel = kind === 'category'
+      ? { categories: on ? { connect: { id: termId } } : { disconnect: { id: termId } } }
+      : { tags: on ? { connect: { id: termId } } : { disconnect: { id: termId } } };
+    await db.product.update({ where: { id: productId }, data: rel });
+    return { productId, termId, kind, on };
+  },
+
+  /** Products in a term, plus a lightweight roster for the picker. */
+  async productsInTerm(kind: 'category' | 'tag', termId: string) {
+    const where = kind === 'category'
+      ? { categories: { some: { id: termId } }, deletedAt: null }
+      : { tags: { some: { id: termId } }, deletedAt: null };
+    return db.product.findMany({
+      where,
+      select: { id: true, name: true, image: true },
+      orderBy: { name: 'asc' },
+    });
+  },
+
   async assign(productId: string, input: { categoryIds?: string[]; tagIds?: string[] }) {
     const p = await db.product.findUnique({ where: { id: productId }, select: { id: true } });
     if (!p) throw new NotFoundError('Product not found', 'id');

@@ -47,6 +47,35 @@ export async function productRoutes(app: FastifyInstance): Promise<void> {
     reply.send({ ok: true });
   });
 
+  const manage = { preHandler: [app.authenticate, requireBundle('storefront-manager')] };
+
+  // DELETE /products/:id is the TRASH (see product.service.remove). These are
+  // the other two thirds of the lifecycle.
+  // Trash. A POST alias for the DELETE below, because the admin's Server
+  // Actions issue plain POSTs — a form cannot send DELETE without JS, and the
+  // trash button must work whether or not the bundle has hydrated.
+  app.post('/products/:id/trash', manage, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    reply.send(await productService.remove(id));
+  });
+
+  app.post('/products/:id/restore', manage, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    reply.send(await productService.restore(id));
+  });
+
+  // Permanent, and only for something already trashed — the service refuses
+  // otherwise, so a stray call cannot destroy a live product in one step.
+  app.post('/products/:id/purge', manage, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    reply.send(await productService.purge(id));
+  });
+
+  app.post('/products/:id/duplicate', manage, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    reply.status(201).send(await productService.duplicate(id));
+  });
+
   app.delete('/products/:id', { preHandler: [app.authenticate, requireBundle('storefront-manager')] }, async (req, reply) => {
     reply.send(await productService.remove(idParam(req)));
   });

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { AssignProducts } from './AssignProducts';
 import { apiGet } from '../../../../lib/api';
 import { createCategory, updateCategory, deleteCategory } from '../../../actions';
 import { CatalogTabs } from '../CatalogTabs';
@@ -114,6 +115,11 @@ export default async function CategoriesPage() {
                   <Link href={`/products?categoryId=${row.id}`}>
                     {row._count?.products ?? 0} product{(row._count?.products ?? 0) === 1 ? '' : 's'}
                   </Link>
+                  {/* Pull products INTO this category from here — the reverse
+                      of tagging a product with a category in the editor. */}
+                  <div style={{ marginTop: 4 }}>
+                    <AssignProducts kind="categories" termId={row.id} termName={row.name} />
+                  </div>
                 </td>
                 <td>
                   <form action={updateCategory} className="th-inline-form">

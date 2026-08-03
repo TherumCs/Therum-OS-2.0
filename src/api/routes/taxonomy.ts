@@ -45,6 +45,21 @@ export async function taxonomyRoutes(app: FastifyInstance): Promise<void> {
     reply.send({ ok: true });
   });
 
+  // Assign a product to a category/tag from the TERM's side — a targeted
+  // connect/disconnect that leaves the product's other terms alone.
+  app.get('/catalog/:kind/:termId/products', async (req, reply) => {
+    const { kind, termId } = req.params as { kind: string; termId: string };
+    if (kind !== 'categories' && kind !== 'tags') { reply.status(400).send({ message: 'kind must be categories or tags' }); return; }
+    reply.send(await taxonomyService.productsInTerm(kind === 'categories' ? 'category' : 'tag', termId));
+  });
+
+  app.post('/catalog/:kind/:termId/products/:productId', { preHandler: [write] }, async (req, reply) => {
+    const { kind, termId, productId } = req.params as { kind: string; termId: string; productId: string };
+    if (kind !== 'categories' && kind !== 'tags') { reply.status(400).send({ message: 'kind must be categories or tags' }); return; }
+    const { on } = z.object({ on: z.boolean() }).parse(req.body);
+    reply.send(await taxonomyService.toggleMembership(kind === 'categories' ? 'category' : 'tag', termId, productId, on));
+  });
+
   app.put('/products/:id/taxonomy', { preHandler: write }, async (req, reply) => {
     const { id } = req.params as { id: string };
     reply.send(await taxonomyService.assign(id, AssignInput.parse(req.body)));

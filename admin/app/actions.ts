@@ -11,7 +11,45 @@ export async function createProduct(formData: FormData): Promise<void> {
   const name = String(formData.get('name') ?? '').trim();
   const price = Math.round(Number(formData.get('price') ?? 0) * 100);
   if (!name) return;
-  await apiSend('POST', '/api/products', { name, status: 'active', variants: [{ price: Number.isFinite(price) ? price : 0 }] });
+  const created = await apiSend<{ id: string }>('POST', '/api/products', {
+    name,
+    status: 'active',
+    variants: [{ price: Number.isFinite(price) ? price : 0 }],
+  });
+  revalidatePath('/products');
+  // Straight into the editor. Creating a product and being left on the list
+  // means every new product needs a second click to become sellable — and the
+  // first thing it needs is a price, which only the editor has.
+  if (created?.id) redirect(`/products/${created.id}`);
+}
+
+/**
+ * Duplicate a product, variants and all.
+ *
+ * The slug gets a suffix because it is unique; everything else is copied as-is
+ * and the copy starts as a DRAFT. A duplicate that goes live the moment it is
+ * made would put an unfinished product in front of shoppers.
+ */
+export async function duplicateProduct(id: string): Promise<void> {
+  const created = await apiSend<{ id: string }>('POST', `/api/products/${id}/duplicate`, {});
+  revalidatePath('/products');
+  if (created?.id) redirect(`/products/${created.id}`);
+}
+
+/** Move a product to the trash. Recoverable — see restoreProduct. */
+export async function trashProduct(id: string): Promise<void> {
+  await apiSend('POST', `/api/products/${id}/trash`, {});
+  revalidatePath('/products');
+}
+
+export async function restoreProduct(id: string): Promise<void> {
+  await apiSend('POST', `/api/products/${id}/restore`, {});
+  revalidatePath('/products');
+}
+
+/** Delete a product FOREVER. The API refuses unless it is already trashed. */
+export async function purgeProduct(id: string): Promise<void> {
+  await apiSend('POST', `/api/products/${id}/purge`, {});
   revalidatePath('/products');
 }
 

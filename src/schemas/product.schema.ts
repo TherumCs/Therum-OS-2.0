@@ -75,6 +75,9 @@ export const UpdateProductInput = z.object({
 });
 
 export const ListProductsQuery = z.object({
+  // Show the TRASH instead of the live catalogue. Absent/false means the
+  // normal list, which must never include trashed rows.
+  trashed: z.coerce.boolean().optional(),
   status: z.enum(['draft', 'active', 'archived']).optional(),
   // WHO may see it — a separate axis from `status`. See counter/visibility.ts.
   visibility: z.enum(['public', 'private', 'restricted']).optional(),

@@ -83,6 +83,17 @@ export async function contentRoutes(app: FastifyInstance): Promise<void> {
     reply.send(await contentService.renderById(idParam(req), originOf(req)));
   });
 
+  // DELETE /content/:id is the TRASH. These are the other two thirds.
+  app.post('/content/:id/restore', { preHandler: [app.authenticate, requireBundle('content-manager')] }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    reply.send(await contentService.restore(id));
+  });
+
+  app.post('/content/:id/purge', { preHandler: [app.authenticate, requireBundle('content-manager')] }, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    reply.send(await contentService.purge(id));
+  });
+
   app.delete('/content/:id', { preHandler: [app.authenticate, requireBundle('write')] }, async (req, reply) => {
     reply.send(await contentService.remove(idParam(req)));
   });

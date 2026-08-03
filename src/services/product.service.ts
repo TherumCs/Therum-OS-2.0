@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { db } from '../lib/db.js';
 import { hookBus } from '../lib/hooks.js';
-import { NotFoundError, ConflictError } from '../lib/errors.js';
+import { NotFoundError, ConflictError, ValidationError } from '../lib/errors.js';
 import type { CreateProductInput, UpdateProductInput, ListProductsQuery, VariantInput, UpdateVariantInput } from '../schemas/product.schema.js';
 import { orderByOf } from '../schemas/listing.js';
 import { categoryAndDescendantIds } from '../counter/categoryTree.js';
@@ -27,6 +27,10 @@ const productInclude = {
 export const productService = {
   async list(query: ListProductsQuery) {
     const where: Prisma.ProductWhereInput = {};
+    // The trash is a separate view. Anything in it is invisible to every
+    // normal listing — leaving trashed rows in the default list is how a
+    // "deleted" product keeps turning up in the admin and on the storefront.
+    where.deletedAt = query.trashed ? { not: null } : null;
     if (query.status) where.status = query.status;
     if (query.vendorId) where.vendorId = query.vendorId;
     if (query.q) where.name = { contains: query.q, mode: 'insensitive' };
@@ -149,9 +153,88 @@ export const productService = {
     });
   },
 
+  /**
+   * To the trash, not gone.
+   *
+   * `remove` used to delete the row outright, taking its variants, images,
+   * category assignments and order-line references with it. There was no undo
+   * and no warning — one misclick and a product with sales history was gone.
+   */
   async remove(id: string) {
     await this.get(id);
+    await db.product.update({ where: { id }, data: { deletedAt: new Date() } });
+    return { id, trashed: true as const };
+  },
+
+  async restore(id: string) {
+    const found = await db.product.findUnique({ where: { id } });
+    if (!found) throw new NotFoundError('Product not found', 'id');
+    // Status is untouched, so it returns as whatever it was — the whole reason
+    // the trash is a timestamp rather than a status value.
+    await db.product.update({ where: { id }, data: { deletedAt: null } });
+    return { id, restored: true as const };
+  },
+
+  /**
+   * Permanent. Only reachable for something already in the trash, so a stray
+   * DELETE cannot destroy a live product in one step.
+   */
+  async purge(id: string) {
+    const found = await db.product.findUnique({ where: { id } });
+    if (!found) throw new NotFoundError('Product not found', 'id');
+    if (!found.deletedAt) {
+      throw new ValidationError('Move it to the trash first — this deletes it permanently.', 'id');
+    }
     await db.product.delete({ where: { id } });
     return { id, deleted: true as const };
+  },
+
+  /**
+   * Copy a product, variants and all.
+   *
+   * The copy is a DRAFT with a fresh slug. Duplicating straight to `active`
+   * would put an unfinished product in front of shoppers the moment the button
+   * is clicked, and the slug is unique so it cannot be copied verbatim.
+   *
+   * `sourceId` is deliberately NOT copied: it is the id at Printful/Printify,
+   * and two local products claiming the same remote one makes the next sync
+   * overwrite whichever it reaches second.
+   */
+  async duplicate(id: string) {
+    const src = await db.product.findUnique({
+      where: { id },
+      include: { variants: true, categories: { select: { id: true } }, tags: { select: { id: true } } },
+    });
+    if (!src) throw new NotFoundError('Product not found', 'id');
+
+    return db.product.create({
+      data: {
+        name: `${src.name} (copy)`,
+        slug: `${src.slug}-copy-${Date.now().toString(36)}`,
+        description: src.description,
+        status: 'draft',
+        visibility: src.visibility,
+        image: src.image,
+        images: src.images as Prisma.InputJsonValue,
+        meta: src.meta as Prisma.InputJsonValue,
+        categories: { connect: src.categories.map((c) => ({ id: c.id })) },
+        tags: { connect: src.tags.map((t) => ({ id: t.id })) },
+        variants: {
+          create: src.variants.map((v) => ({
+            // SKU is left blank rather than copied: two variants sharing a SKU
+            // breaks every fulfilment match, which is silent until an order.
+            sku: null,
+            price: v.price,
+            color: v.color,
+            size: v.size,
+            image: v.image,
+            images: v.images as Prisma.InputJsonValue,
+            inventory: v.inventory,
+            stockStatus: v.stockStatus,
+          })),
+        },
+      },
+      include: productInclude,
+    });
   },
 };

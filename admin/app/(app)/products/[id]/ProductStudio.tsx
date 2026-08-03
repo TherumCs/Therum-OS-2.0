@@ -306,6 +306,12 @@ export function ProductStudio({
         {!p.image && !gallery.length && <p className="th-hint th-studio__empty">No media yet.</p>}
       </div>
 
+      {/* Only VARIABLE products show a variants list. A product with one
+          variant is a SIMPLE product — that single variant is the product
+          itself, priced and stocked on the product panel — so a lone "Variant"
+          row here would be counting the primary product as its own variant,
+          which is exactly the thing not to do. */}
+      {p.variants.length > 1 && (
       <div className="th-studio__group">
         <div className="th-studio__group-head"><span>Variants ({p.variants.length})</span></div>
         {p.variants.map((v) => (
@@ -326,8 +332,8 @@ export function ProductStudio({
             <span className="th-hint">{money(v.price)}</span>
           </button>
         ))}
-        {!p.variants.length && <p className="th-hint th-studio__empty">No variants — add one on the right.</p>}
       </div>
+      )}
     </div>
   );
 
@@ -531,6 +537,118 @@ export function ProductStudio({
             <span>Description</span>
             <textarea onKeyDown={commitKeys} rows={5} defaultValue={p.description ?? ''} onBlur={(e) => { const description = e.target.value; if (description !== (p.description ?? '')) { setP({ ...p, description }); void patch({ description }); } }} />
           </label>
+
+          {/*
+            PRICE, on the product panel.
+
+            It already existed, but only inside the variant editor — so a new
+            product showed $0.00 with no visible way to change it unless you
+            knew to select the variant first. Price is the one field a product
+            cannot ship without, so it belongs where the eye lands.
+
+            One variant: edit it here directly, which is the common case.
+            Several: show the range and say where to change them, rather than
+            silently rewriting every variant to one number.
+          */}
+          <label className="th-studio__field">
+            <span>Price{p.variants.length > 1 ? ' (range)' : ''}</span>
+            {p.variants.length === 1 ? (
+              <input
+                type="number"
+                step="0.01"
+                min="0"
+                onKeyDown={commitKeys}
+                defaultValue={(p.variants[0]!.price / 100).toFixed(2)}
+                onBlur={(e) => {
+                  // Minor units. Entering 24.99 and storing 24 would be a
+                  // hundredfold error that looks like a working save.
+                  const price = Math.round(Number(e.target.value) * 100);
+                  const only = p.variants[0]!;
+                  if (!Number.isFinite(price) || price < 0 || price === only.price) return;
+                  setP({ ...p, variants: [{ ...only, price }] });
+                  void call('PATCH', `/api/products/${p.id}/variants/${only.id}`, { price });
+                }}
+              />
+            ) : (
+              <>
+                <input
+                  readOnly
+                  value={
+                    p.variants.length
+                      ? (() => {
+                          const lo = Math.min(...p.variants.map((v) => v.price));
+                          const hi = Math.max(...p.variants.map((v) => v.price));
+                          return lo === hi ? money(lo) : `${money(lo)} – ${money(hi)}`;
+                        })()
+                      : 'No variants yet'
+                  }
+                />
+                <span className="th-hint">
+                  {p.variants.length
+                    ? 'Pick a variant on the left to change its price.'
+                    : 'Add a variant below to set a price.'}
+                </span>
+              </>
+            )}
+          </label>
+
+          {/* SKU and stock for a SIMPLE product — "what we have for the main
+              product". The single base variant holds them; a variable product
+              (2+ variants) sets these per variant on the left, so they only
+              belong on the product panel while there is exactly one. */}
+          {p.variants.length === 1 && (() => {
+            const only = p.variants[0]!;
+            const patchOnly = (data: Record<string, unknown>, local: Record<string, unknown>) => {
+              setP({ ...p, variants: [{ ...only, ...local }] });
+              void call('PATCH', `/api/products/${p.id}/variants/${only.id}`, data);
+            };
+            return (
+              <>
+                <label className="th-studio__field">
+                  <span>SKU</span>
+                  <input
+                    onKeyDown={commitKeys}
+                    defaultValue={only.sku ?? ''}
+                    onBlur={(e) => {
+                      const sku = e.target.value.trim() || null;
+                      if (sku === (only.sku ?? null)) return;
+                      patchOnly({ sku }, { sku });
+                    }}
+                  />
+                </label>
+                <label className="th-studio__field">
+                  <span>Stock</span>
+                  <select
+                    defaultValue={only.stockStatus ?? 'tracked'}
+                    onChange={(e) => {
+                      const stockStatus = e.target.value;
+                      patchOnly({ stockStatus }, { stockStatus });
+                    }}
+                  >
+                    <option value="tracked">Track a quantity</option>
+                    <option value="in_stock">In stock</option>
+                    <option value="out_of_stock">Out of stock</option>
+                    <option value="backorder">On back-order</option>
+                  </select>
+                </label>
+                {(only.stockStatus ?? 'tracked') === 'tracked' && (
+                  <label className="th-studio__field">
+                    <span>Quantity</span>
+                    <input
+                      onKeyDown={commitKeys}
+                      type="number" min="0" step="1"
+                      defaultValue={only.inventory}
+                      onBlur={(e) => {
+                        const inventory = Number.parseInt(e.target.value, 10);
+                        if (!Number.isFinite(inventory) || inventory === only.inventory) return;
+                        patchOnly({ inventory }, { inventory });
+                      }}
+                    />
+                  </label>
+                )}
+              </>
+            );
+          })()}
 
           <div className="th-studio__group-head"><span>Categories</span></div>
           <div className="th-studio__chips">
@@ -818,7 +936,38 @@ export function ProductStudio({
           <span className={'pill pill-' + p.status}>{p.status}</span>
           {busy && <span className="th-studio__save is-busy">Saving…</span>}
           {saved && !busy && <span className="th-studio__save is-ok">✓ Saved</span>}
-          {!busy && !saved && <span className="th-hint">Changes save as you go — Enter to commit, Esc to revert.</span>}
+          {!busy && !saved && <span className="th-hint">Every change saves on its own.</span>}
+        </div>
+        {/*
+          Publish / Unpublish, in the header where it is expected.
+
+          The editor autosaves every field, so there is no "Save" to do — but a
+          product does not go live until it is ACTIVE, and burying that in a
+          status dropdown left no visible way to publish. This is the missing
+          affordance: one button that flips draft <-> active, saying plainly
+          which state the product is in.
+
+          A product with no price should not be publishable — a $0.00 product
+          is almost never intended, and the storefront reads it as "sold out".
+        */}
+        <div className="th-studio__actions">
+          <a className="th-btn" href={`/product/${p.slug}`} target="_blank" rel="noreferrer">Preview ↗</a>
+          {p.status === 'active' ? (
+            <button
+              type="button"
+              className="th-btn"
+              disabled={busy}
+              onClick={() => { setP({ ...p, status: 'draft' }); void patch({ status: 'draft' }); }}
+            >Unpublish</button>
+          ) : (
+            <button
+              type="button"
+              className="th-btn th-btn--primary"
+              disabled={busy || !p.variants.some((v) => v.price > 0)}
+              title={p.variants.some((v) => v.price > 0) ? 'Make this product live' : 'Set a price before publishing'}
+              onClick={() => { setP({ ...p, status: 'active' }); void patch({ status: 'active' }); }}
+            >Publish</button>
+          )}
         </div>
       </header>
       {error && <div className="notice">{error}</div>}

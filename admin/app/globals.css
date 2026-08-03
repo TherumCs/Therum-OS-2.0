@@ -1697,7 +1697,7 @@ input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: 
    Left: what the product IS. Centre: what the customer SEES. Right: whatever
    is selected on the left. A product has three different kinds of thing to
    edit, and one long column forces you past two of them to reach the third. */
-.th-studio__top { margin-bottom: var(--th-space-12); }
+.th-studio__top { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: var(--th-space-12); }
 .th-studio__title { display: flex; align-items: center; gap: var(--th-space-10); margin-top: 4px; }
 .th-studio__title h1 { margin: 0; }
 
@@ -1788,6 +1788,15 @@ input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: 
 }
 .th-pv-chip.on { background: var(--th-accent-btn, #3858e9); border-color: var(--th-accent-btn, #3858e9); color: #fff; }
 .th-btn--xs { padding: 2px 8px; font-size: var(--th-fs-2xs); }
+
+/* Destructive row actions. Muted until hovered — a row of red buttons reads as
+   an error state, and these sit next to Edit and View on every product. */
+.th-btn--danger { color: var(--th-danger-text); }
+.th-btn--danger:hover { background: var(--th-danger-bg, #fef2f2); border-color: var(--th-danger-text); }
+
+/* The row-action cluster holds forms now (Server Actions), and a bare form is
+   a block element — without this the buttons stack instead of sitting inline. */
+.th-rowactions form { display: inline-flex; margin: 0; }
 
 
 /* A tab is a tab. `.th-tab` sits on a <button>/<a>, and the global control
@@ -2099,3 +2108,21 @@ tr:hover .th-rowactions, tr:focus-within .th-rowactions { opacity: 1; }
 .th-look__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
 .th-look__field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--th-muted); }
 .th-look__field select { width: 100%; }
+
+
+/* The category-side product picker (AssignProducts). Compact so it lives
+   inside a table cell without blowing the row height. */
+.th-assign { margin-top: 6px; border: 1px solid var(--th-line); border-radius: 8px; padding: 8px; background: var(--th-surface, #fff); max-width: 340px; }
+.th-assign__head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.th-assign__head strong { flex: 1; font-size: var(--th-fs-sm); }
+.th-assign__search { width: 100%; box-sizing: border-box; margin-bottom: 6px; }
+.th-assign__list { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.th-assign__row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; cursor: pointer; font-size: var(--th-fs-sm); }
+.th-assign__row:hover { background: var(--th-hover, #f3f4f6); }
+.th-assign__row.on { background: var(--th-accent-weak, #eef2ff); }
+.th-assign__row img { border-radius: 4px; object-fit: cover; }
+.th-assign__noimg { width: 26px; height: 26px; border-radius: 4px; background: var(--th-line); display: inline-block; }
+
+
+/* Studio header: title on the left, publish actions on the right. */
+.th-studio__actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }

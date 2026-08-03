@@ -57,6 +57,8 @@ export const UpdateContentInput = z.object({
 });
 
 export const ListContentQuery = z.object({
+  // Show the TRASH instead of live content.
+  trashed: z.coerce.boolean().optional(),
   type: z.enum(['page', 'post', 'case_study']).optional(),
   status: z.enum(['draft', 'published', 'archived']).optional(),
   q: z.string().optional(),

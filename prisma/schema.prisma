@@ -71,7 +71,12 @@ model Vendor {
 
 // ─── Product: core merged-product type ──────────────────────────────────
 
+// deletedAt is the TRASH, and it is a timestamp rather than a status value on
+// purpose: restoring has to put a thing back where it was. A `trashed` status
+// would overwrite draft/active/archived, so everything restored would come
+// back looking the same and an operator would have to guess.
 model Product {
+  deletedAt   DateTime? @map("deleted_at")
   id          String        @id @default(cuid())
   name        String
   slug        String        @unique
@@ -125,6 +130,7 @@ model Product {
 // ─── Catalog taxonomy (Woo parity: hierarchical categories, flat tags) ──
 
 model ProductCategory {
+  deletedAt DateTime? @map("deleted_at")
   id       String  @id @default(cuid())
   name     String
   // NOT globally unique — unique WITHIN ITS PARENT.
@@ -154,6 +160,7 @@ model ProductCategory {
 }
 
 model ProductTag {
+  deletedAt DateTime? @map("deleted_at")
   id   String @id @default(cuid())
   name String
   slug String @unique
@@ -778,6 +785,7 @@ enum ContentStatus {
 }
 
 model Content {
+  deletedAt   DateTime? @map("deleted_at")
   id          String        @id @default(cuid())
   type        ContentType   @default(page)
   title       String

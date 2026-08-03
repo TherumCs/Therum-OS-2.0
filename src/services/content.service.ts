@@ -5,7 +5,7 @@ import { renderCanvas, isCanvasNode } from '../lib/render.js';
 import { slugify } from '../lib/slug.js';
 import { resolveSeo, buildMetaTags, buildJsonLd } from '../lib/seo.js';
 import { settingsService } from './settings.service.js';
-import { NotFoundError, ConflictError } from '../lib/errors.js';
+import { NotFoundError, ConflictError, ValidationError } from '../lib/errors.js';
 import type { CreateContentInput, UpdateContentInput, ListContentQuery } from '../schemas/content.schema.js';
 import { orderByOf } from '../schemas/listing.js';
 
@@ -14,6 +14,9 @@ const asJson = (v: unknown): Prisma.InputJsonValue => (v ?? {}) as Prisma.InputJ
 export const contentService = {
   async list(query: ListContentQuery) {
     const where: Prisma.ContentWhereInput = {};
+    // The trash is its own view — a trashed page must not surface in the
+    // normal list, or "deleted" content keeps reappearing in the admin.
+    where.deletedAt = query.trashed ? { not: null } : null;
     if (query.type) where.type = query.type;
     if (query.status) where.status = query.status;
     if (query.q) where.title = { contains: query.q, mode: 'insensitive' };
@@ -106,9 +109,29 @@ export const contentService = {
     return item;
   },
 
+  async restore(id: string) {
+    const found = await db.content.findUnique({ where: { id } });
+    if (!found) throw new NotFoundError('Content not found', 'id');
+    // Status untouched: a restored page comes back published or draft exactly
+    // as it left, which is the whole reason the trash is a timestamp.
+    await db.content.update({ where: { id }, data: { deletedAt: null } });
+    return { id, restored: true as const };
+  },
+
+  /** Permanent. Refused unless it is already in the trash. */
+  async purge(id: string) {
+    const found = await db.content.findUnique({ where: { id } });
+    if (!found) throw new NotFoundError('Content not found', 'id');
+    if (!found.deletedAt) {
+      throw new ValidationError('Move it to the trash first — this deletes it permanently.', 'id');
+    }
+    await db.content.delete({ where: { id } });
+    return { id, deleted: true as const };
+  },
+
   async remove(id: string) {
     await this.get(id);
-    await db.content.delete({ where: { id } });
+    await db.content.update({ where: { id }, data: { deletedAt: new Date() } });
     return { id, deleted: true as const };
   },
 
