@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { settingsService } from '../../services/settings.service.js';
+import { mailTransport } from '../../services/notification.service.js';
 import { sendEmailTo } from '../../services/notification.service.js';
 import { checkRateLimit } from '../../lib/rateLimit.js';
 import { TooManyRequestsError, ValidationError } from '../../lib/errors.js';
@@ -68,10 +69,13 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
       input.message,
     ].filter(Boolean).join('\n');
 
-    // sendEmailTo is a no-op until SMTP is configured, so the response says
-    // what actually happened rather than claiming delivery either way.
+    // Ask the mail layer whether ANY transport can send, rather than checking
+    // smtpHost. A store sending through Gmail or a Nexus provider has no
+    // smtpHost at all, so the old check called a working setup unconfigured
+    // and told the sender their message had not been delivered.
     const n = await settingsService.getNotifications();
-    const deliverable = Boolean(n.emailEnabled && n.smtpHost);
+    const transport = await mailTransport();
+    const deliverable = Boolean(n.emailEnabled && transport.ready);
     if (deliverable) {
       await sendEmailTo(topic.email, `[${topic.label}] ${input.name}`, body);
     }

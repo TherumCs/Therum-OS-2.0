@@ -1,6 +1,7 @@
 import nodemailer from 'nodemailer';
 import { settingsService } from './settings.service.js';
 import { connectionService } from './connection.service.js';
+import { viaGmail, gmailStatus } from './gmailSend.js';
 
 // Email goes out through whichever provider is CONNECTED IN NEXUS, falling
 // back to raw SMTP settings. That order matters: on the domain every provider
@@ -59,10 +60,12 @@ async function viaPostmark(msg: MailMessage): Promise<boolean> {
   return Boolean(res?.ok);
 }
 
-const NEXUS_SENDERS = [viaResend, viaSendgrid, viaPostmark];
+const NEXUS_SENDERS = [viaGmail, viaResend, viaSendgrid, viaPostmark];
 
 /** Which transport would actually be used, for the settings screen to show. */
 export async function mailTransport(): Promise<{ ready: boolean; via: string }> {
+  const gmail = await gmailStatus();
+  if (gmail.ready) return { ready: true, via: `Gmail · ${gmail.email || 'connected'}` };
   for (const [id, has] of [
     ['Resend', await connectionService.credentialFor('resend')],
     ['SendGrid', await connectionService.credentialFor('sendgrid')],

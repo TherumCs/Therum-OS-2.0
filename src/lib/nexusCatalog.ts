@@ -242,6 +242,12 @@ export const nexusCatalog: CatalogProvider[] = [
   // exchange, and splitting one provider's credentials across two places is
   // how they drift.
   { id: 'google-signin', name: 'Sign in with Google', category: 'identity', authType: 'apikey', issuedBy: 'provider', join: '|', fields: [{ label: 'Client ID' , pattern: '\\.apps\\.googleusercontent\\.com$', example: '1234-abc.apps.googleusercontent.com' }, { label: 'Client Secret', secret: true, optional: true }] , note: 'No connection test: a Client ID and secret are only exercised by a real sign-in redirect, and Google offers no endpoint that validates the pair alone. Proven the first time a shopper signs in.' },
+  // Sending mail as the store owner's own Google account. Separate from
+  // google-signin on purpose: that grant is openid/email/profile, and Google
+  // refuses to let a token minted for those scopes touch Gmail. Connected by
+  // an OAuth redirect (/auth/google/gmail/start), never by typing a
+  // credential, so it is marked oauth rather than apikey.
+  { id: 'google-gmail', name: 'Gmail (send mail)', category: 'messaging', authType: 'oauth', issuedBy: 'provider', fields: [], note: 'Connect via the Gmail button, not this form: it needs a consent redirect to mint a refresh token for the gmail.send scope. Reuses the Sign in with Google client, so connect that first.' },
   { id: 'apple-signin', name: 'Sign in with Apple', category: 'identity', authType: 'apikey', issuedBy: 'provider', join: '|', fields: [{ label: 'Services ID (the client_id)' }, { label: 'Team ID', optional: true }, { label: 'Key ID', optional: true }] , note: 'No connection test: Apple wants a client secret that is a JWT signed with your .p8 key and valid for a limited window, which a stored-credential check cannot construct. Proven on first sign-in.' },
   { id: 'facebook-login', name: 'Facebook Login', category: 'identity', authType: 'apikey', issuedBy: 'provider', join: '|', fields: [{ label: 'App ID' }, { label: 'App Secret', secret: true }] },
 

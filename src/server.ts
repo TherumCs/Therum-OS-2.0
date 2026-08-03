@@ -22,6 +22,7 @@ import { importRoutes } from './api/routes/import.js';
 import { contentRoutes } from './api/routes/content.js';
 import { mediaRoutes } from './api/routes/media.js';
 import { adminGoogleAuthRoutes } from './api/routes/adminGoogleAuth.js';
+import { gmailAuthRoutes } from './api/routes/gmailAuth.js';
 import { shopifyOAuthRoutes } from './api/routes/shopifyOAuth.js';
 import { authRoutes } from './api/routes/auth.js';
 import { foundationRoutes } from './api/routes/foundations.js';
@@ -245,6 +246,9 @@ export async function buildServer() {
 // both navigate to directly, and the redirect_uri registered with Google is a
 // fixed public path.
 await app.register(adminGoogleAuthRoutes);
+// Gmail send authorisation — unprefixed, because the redirect_uri registered
+// with Google is an absolute path on this origin.
+await app.register(gmailAuthRoutes);
 // Shopify's OAuth install flow, served by this store — every URL in that dance
 // lives on the SHOP's domain, so a partner that asks for a store URL can run it
 // here. No prefix: the paths are fixed by Shopify's own convention.
