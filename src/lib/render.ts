@@ -182,7 +182,7 @@ function renderBricksNode(node: CanvasNode): string {
   const p = node.props ?? {};
   const s = rec(p.__bricks);
   const name = typeof p.__name === 'string' && p.__name ? p.__name : node.type;
-  const kids = (node.children ?? []).map(renderCanvas).join('');
+  const rawKids = (node.children ?? []).map(renderCanvas).join('');
   const classes = ['brxe-' + name];
   const expanded = typeof s._cssClasses === 'string' && s._cssClasses
     ? expandElementorIds(s._cssClasses, name)
@@ -190,8 +190,23 @@ function renderBricksNode(node: CanvasNode): string {
   // A widget's Elementor classes belong on the wrapper this renderer adds
   // below, not on the element itself; putting them on the element is what left
   // the theme's inner classes with nowhere to live.
-  const widget = expanded ? widgetTypeOf(expanded) : null;
-  const shape = widget ? WIDGET_SHAPE[widget] : undefined;
+  // ONLY wrap widget types whose real structure was read off the reference.
+  // Injecting a generic `elementor-widget-container` for the rest guessed at a
+  // layer that is not always there: the running-line marquee has none, so the
+  // injected box landed inside the scrolling strip as a 9th flex child sitting
+  // on top of the text — the reference has exactly one child there. A widget
+  // with no verified shape keeps its classes on the element, as before.
+  const widgetType = expanded ? widgetTypeOf(expanded) : null;
+  const shape = widgetType ? WIDGET_SHAPE[widgetType] : undefined;
+  const widget = shape ? widgetType : null;
+  // A BOXED container carries its width on an inner element, not on itself:
+  //   .e-con { --content-width: min(100%, var(--container-max-width,1140px)) }
+  //   .e-con-boxed > .e-con-inner { width: var(--content-width) }
+  // We emitted the container and no inner, so nothing constrained the content
+  // and the About page ran 1360px wide against the reference's 1170px — which
+  // is every one of that page's 391 width findings, one missing element.
+  const boxed = expanded.includes('e-con-boxed');
+  const kids = boxed ? `<div class="e-con-inner">${rawKids}</div>` : rawKids;
   if (expanded && !widget) classes.push(expanded);
   if (shape?.innerClass) classes.push(shape.innerClass);
   const bgUrl = rec(rec(s._background).image).url;

@@ -95,6 +95,17 @@ export function dockStyles(): string {
   .thd-crumb,.thd-logo span,.thd-btn span{display:none}
   #thd-bar{gap:6px;padding:0 10px}
   #thd-bar[data-mobile="none"]{display:none}
+  /* "fab" is one of the two documented mobile styles (fab|none) and had no
+     rule at all, so a dock set to it fell through to the full bar — a floating
+     frosted panel sitting over the page on a phone. Collapsed to a single
+     round button that expands on tap. */
+  #thd-bar[data-mobile="fab"]{width:48px;height:48px;padding:0;gap:0;border-radius:50%;
+    justify-content:center;overflow:hidden}
+  #thd-bar[data-mobile="fab"] > *{display:none}
+  #thd-bar[data-mobile="fab"] > .thd-logo{display:flex}
+  #thd-bar[data-mobile="fab"].thd-fab-open{width:auto;max-width:calc(100vw - 32px);
+    height:var(--thd-h,56px);padding:0 10px;gap:6px;border-radius:14px;overflow:visible}
+  #thd-bar[data-mobile="fab"].thd-fab-open > *{display:flex}
 }`;
 }
 
@@ -156,6 +167,20 @@ var mode=bar.dataset.defaultMode||'scroll', pos=bar.dataset.pos||'bottom';
 var label=document.getElementById('thd-mode-label');
 var panel=document.getElementById('thd-mode-panel');
 var modeBtn=document.getElementById('thd-mode-btn');
+
+// Mobile "fab": the dock is a single round button until tapped. Tapping the
+// logo expands it in place rather than navigating, so the dock is reachable on
+// a phone without covering the page.
+bar.addEventListener('click',function(e){
+  if(bar.dataset.mobile!=='fab'||window.innerWidth>720) return;
+  if(bar.classList.contains('thd-fab-open')) return;
+  e.preventDefault(); e.stopPropagation();
+  bar.classList.add('thd-fab-open');
+},true);
+document.addEventListener('click',function(e){
+  if(bar.dataset.mobile!=='fab') return;
+  if(!bar.contains(e.target)) bar.classList.remove('thd-fab-open');
+});
 
 function save(body){
   fetch('/tos-admin/api/settings/admin-dock',{method:'PATCH',headers:{'content-type':'application/json'},body:JSON.stringify(body)}).catch(function(){});
