@@ -131,6 +131,16 @@ export const PORTED_DOC_CSS = `
 /* The FAQ accordions: the theme ships the toggle, not the spacing. */
 #brx-content .brxe-accordion,#brx-content [class*="accordion"]{width:100%}
 :where(#brx-content) img{max-width:100%;height:auto}
+/* Some ported elements carry a width snapshotted from a 375px-wide render —
+   the contact page's h1 is a literal 354.984px sitting inside a correct 320px
+   container. On anything narrower than that snapshot they push the document
+   past the viewport. Capping to the container fixes it without unpicking the
+   snapshots: max-width beats width whatever the specificity, and :where()
+   keeps this from outranking a width that was chosen on purpose. Scoped below
+   375 so wider layouts, where the snapshots are harmless, are untouched. */
+@media(max-width:374px){
+  :where(#brx-content) :where([class*="el-"]){max-width:100%}
+}
 @media(max-width:767px){
   #brx-content > .brxe-container,#brx-content > .brxe-section,
   #brx-content > .brxe-block{padding-left:20px;padding-right:20px}
@@ -206,6 +216,16 @@ export const SITE_WIDTHS: Record<string, string> = {
   full: '100%',
 };
 
+// The ported theme hangs its left-to-right rules off a body class, and the
+// running-line marquee is one of them:
+//
+//     .h-ltr .c-ip-running-line__content { animation: ... running-line-scroll }
+//
+// Without it the marquee has no animation-name at all, so it sits still and
+// its text is clipped by the strip's overflow:hidden — which is exactly how it
+// read on mobile. The reference carries h-ltr on <body>; this is that class.
+const BODY_CLASS = 'home h-ltr';
+
 export function sitePage(p: SitePage): string {
   const siteMax = SITE_WIDTHS[p.contentWidth ?? 'wide'] ?? SITE_WIDTHS.wide;
   const nav = p.nav.map((n) => `<a href="${esc(n.href)}"${n.current ? ' class="current"' : ''}>${esc(n.label)}</a>`).join('');
@@ -239,7 +259,7 @@ ${p.dock ? `<style>${p.dock.styles}</style>` : ''}
 ${p.chromeCssUrl ? `<link rel="stylesheet" href="${esc(p.chromeCssUrl)}">` : ''}
 ${p.pageCss ? `<style>${p.pageCss}</style>` : ''}
 </head>
-<body class="home">
+<body class="${BODY_CLASS}">
 <div id="th-shell">
 ${header}
 ${main}
