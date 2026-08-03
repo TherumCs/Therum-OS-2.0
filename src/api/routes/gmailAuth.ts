@@ -1,7 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { connectionService } from '../../services/connection.service.js';
 import { adminSessionFrom } from '../../lib/adminSession.js';
-import { GMAIL_SEND_SCOPE, GMAIL_PROVIDER } from '../../services/gmailSend.js';
+import { GMAIL_SEND_SCOPE, GMAIL_STATE_PREFIX } from '../../services/gmailSend.js';
 import { googleApp, signState, readState } from '../../counter/adminGoogleSignIn.js';
 
 // Authorising the store to send mail as the owner's Google account.
@@ -23,7 +23,8 @@ function originOf(req: FastifyRequest): string {
 }
 
 export async function gmailAuthRoutes(app: FastifyInstance): Promise<void> {
-  const redirectPath = '/auth/google/gmail/callback';
+  // The URI registered against the Google client — see GMAIL_STATE_PREFIX.
+  const SIGNIN_CALLBACK = '/auth/google/callback';
 
   app.get('/auth/google/gmail/start', async (req, reply) => {
     if (!adminSessionFrom(req)) return reply.code(401).send({ error: 'Sign in first.' });
@@ -33,73 +34,13 @@ export async function gmailAuthRoutes(app: FastifyInstance): Promise<void> {
     }
     const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
     url.searchParams.set('client_id', creds.clientId);
-    url.searchParams.set('redirect_uri', originOf(req) + redirectPath);
+    url.searchParams.set('redirect_uri', originOf(req) + SIGNIN_CALLBACK);
     url.searchParams.set('response_type', 'code');
     url.searchParams.set('scope', GMAIL_SEND_SCOPE);
     url.searchParams.set('access_type', 'offline');
     url.searchParams.set('prompt', 'consent select_account');
-    url.searchParams.set('state', signState('/tos-admin/settings/connections'));
+    url.searchParams.set('state', signState(GMAIL_STATE_PREFIX + '/tos-admin/settings/connections'));
     reply.redirect(url.toString());
   });
 
-  app.get('/auth/google/gmail/callback', async (req, reply) => {
-    if (!adminSessionFrom(req)) return reply.code(401).send({ error: 'Sign in first.' });
-    const q = req.query as { code?: string; state?: string; error?: string };
-    if (q.error || !q.code) return reply.redirect('/tos-admin/settings/connections?gmail=denied');
-    // The signed state is the CSRF check: without it any page could walk an
-    // admin's browser through this callback with an attacker's code.
-    if (!readState(q.state ?? '')) return reply.redirect('/tos-admin/settings/connections?gmail=badstate');
-
-    const creds = await googleApp();
-    if (!creds) return reply.redirect('/tos-admin/settings/connections?gmail=noclient');
-
-    const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
-      method: 'POST',
-      headers: { 'content-type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        code: q.code,
-        client_id: creds.clientId,
-        client_secret: creds.clientSecret,
-        redirect_uri: originOf(req) + redirectPath,
-        grant_type: 'authorization_code',
-      }),
-      signal: AbortSignal.timeout(10_000),
-    }).catch(() => null);
-    const token = (await tokenRes?.json().catch(() => null)) as
-      { refresh_token?: string; access_token?: string } | null;
-    if (!token?.refresh_token) {
-      // No refresh token means a re-consent that Google treated as already
-      // granted. Storing the access token instead would work for an hour and
-      // then fail silently, which is worse than refusing here.
-      return reply.redirect('/tos-admin/settings/connections?gmail=norefresh');
-    }
-
-    // Which mailbox this actually sends as — Gmail rewrites From to the
-    // authorised account, so recording it keeps the settings screen honest.
-    let email = '';
-    if (token.access_token) {
-      const who = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-        headers: { authorization: `Bearer ${token.access_token}` },
-        signal: AbortSignal.timeout(10_000),
-      }).catch(() => null);
-      const info = (await who?.json().catch(() => null)) as { email?: string } | null;
-      email = info?.email ?? '';
-    }
-
-    // method 'oauth' skips the fields validator, which is written for typed
-    // credentials and would reject this JSON blob.
-    await connectionService.connect(
-      GMAIL_PROVIDER,
-      JSON.stringify({
-        refreshToken: token.refresh_token,
-        clientId: creds.clientId,
-        clientSecret: creds.clientSecret,
-        email,
-      }),
-      adminSessionFrom(req)?.sub ?? 'system',
-      'oauth',
-    );
-
-    reply.redirect('/tos-admin/settings/connections?gmail=connected');
-  });
 }

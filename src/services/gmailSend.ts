@@ -116,3 +116,60 @@ export async function gmailStatus(): Promise<{ ready: boolean; email: string }> 
   const cred = parseGmailCredential(await connectionService.credentialFor(GMAIL_PROVIDER));
   return { ready: Boolean(cred), email: cred?.email ?? '' };
 }
+
+// Gmail consent reuses the sign-in callback URL, because that is the one
+// already registered against the Google client — a second redirect path would
+// mean editing the Google console before mail could work at all, and an
+// unregistered URI is exactly the redirect_uri_mismatch this hit first time.
+// The signed state distinguishes the two flows; the prefix cannot be forged
+// because the state is HMAC-signed.
+export const GMAIL_STATE_PREFIX = '/__gmail__';
+
+/**
+ * Exchange the consent code and store the grant. Returns a reason rather than
+ * throwing so the caller can put it in a redirect the admin actually sees.
+ */
+export async function storeGmailGrant(
+  app: { clientId: string; clientSecret: string },
+  code: string,
+  redirectUri: string,
+): Promise<{ ok: true } | { ok: false; reason: string }> {
+  const res = await fetch('https://oauth2.googleapis.com/token', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      code,
+      client_id: app.clientId,
+      client_secret: app.clientSecret,
+      redirect_uri: redirectUri,
+      grant_type: 'authorization_code',
+    }),
+    signal: AbortSignal.timeout(10_000),
+  }).catch(() => null);
+  const token = (await res?.json().catch(() => null)) as
+    { refresh_token?: string; access_token?: string } | null;
+
+  // No refresh token means Google treated this as an already-granted consent.
+  // Storing the access token instead would send mail for an hour and then stop
+  // silently, which is worse than refusing here.
+  if (!token?.refresh_token) return { ok: false, reason: 'gmail_no_refresh_token' };
+
+  let email = '';
+  if (token.access_token) {
+    const who = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+      headers: { authorization: `Bearer ${token.access_token}` },
+      signal: AbortSignal.timeout(10_000),
+    }).catch(() => null);
+    email = ((await who?.json().catch(() => null)) as { email?: string } | null)?.email ?? '';
+  }
+
+  const { connectionService } = await import('./connection.service.js');
+  await connectionService.connect(
+    GMAIL_PROVIDER,
+    JSON.stringify({ refreshToken: token.refresh_token, clientId: app.clientId, clientSecret: app.clientSecret, email }),
+    'google-oauth',
+    'oauth',
+  );
+  cached = null; // a new grant must not keep serving the old account's token
+  return { ok: true };
+}

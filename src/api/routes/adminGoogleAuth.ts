@@ -4,6 +4,7 @@ import {
 } from '../../counter/adminGoogleSignIn.js';
 import { mintSessionToken, SESSION_TTL_SECONDS } from '../../services/auth.service.js';
 import { authEventService } from '../../services/authEvent.service.js';
+import { storeGmailGrant, GMAIL_STATE_PREFIX } from '../../services/gmailSend.js';
 
 // "Sign in with Google" for the admin, anywhere — not just the partner
 // approval screen it was first built for.
@@ -77,6 +78,23 @@ export async function adminGoogleAuthRoutes(app: FastifyInstance): Promise<void>
   app.get(CALLBACK, async (req, reply) => {
     const q = req.query as { code?: string; state?: string; error?: string };
     const state = q.state ? readState(q.state) : null;
+
+    // Gmail-send consent comes back HERE rather than to its own path. Google
+    // rejects any redirect_uri that is not registered against the client, and
+    // this one already is because sign-in uses it — adding a second path would
+    // mean editing the Google console before mail could work at all. The
+    // signed state carries the marker, so the two flows cannot be confused and
+    // the marker cannot be forged.
+    if (state?.returnTo.startsWith(GMAIL_STATE_PREFIX)) {
+      const back = safeNext(state.returnTo.slice(GMAIL_STATE_PREFIX.length));
+      if (q.error || !q.code) { fail(reply, back, 'gmail_cancelled'); return; }
+      const app2 = await googleApp();
+      if (!app2) { fail(reply, back, 'google_not_configured'); return; }
+      const outcome = await storeGmailGrant(app2, q.code, `${publicOrigin(req)}${CALLBACK}`);
+      if (!outcome.ok) { fail(reply, back, outcome.reason); return; }
+      reply.redirect(`${back}${back.includes('?') ? '&' : '?'}gmail=connected`, 302);
+      return;
+    }
     // No usable state means no trustworthy destination — refuse rather than
     // guess, since guessing is how an open redirect gets built by accident.
     if (!state) { fail(reply, '/tos-admin/login', 'google_state_expired'); return; }
