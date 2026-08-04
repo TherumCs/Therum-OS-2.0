@@ -2,6 +2,7 @@ import { Prisma, type ContentStatus } from '@prisma/client';
 import { db } from '../lib/db.js';
 import { hookBus } from '../lib/hooks.js';
 import { renderCanvas, isCanvasNode } from '../lib/render.js';
+import { cleanShortcodes } from '../site/shortcodes.js';
 import { slugify } from '../lib/slug.js';
 import { resolveSeo, buildMetaTags, buildJsonLd } from '../lib/seo.js';
 import { settingsService } from './settings.service.js';
@@ -168,9 +169,13 @@ export const contentService = {
   // Shared by the public (published-only) and admin (any-status) render
   // paths below — the only real difference between them is which lookup
   // gates on `status === 'published'`.
+  // Every rendered byte of stored content passes through here — page bodies and
+  // the header/footer chrome alike — which is why the shortcode strip lives at
+  // this one point rather than in each caller. WP shortcodes in imported
+  // content are literal text to us; left alone they paint on the page.
   _toHtml(item: { bodyFormat: string; body: unknown }): string {
-    if (item.bodyFormat === 'canvas' && isCanvasNode(item.body)) return renderCanvas(item.body);
-    if (typeof item.body === 'string') return item.body; // html, or markdown left raw until a md renderer is added
+    if (item.bodyFormat === 'canvas' && isCanvasNode(item.body)) return cleanShortcodes(renderCanvas(item.body));
+    if (typeof item.body === 'string') return cleanShortcodes(item.body); // html, or markdown left raw until a md renderer is added
     return '';
   },
 

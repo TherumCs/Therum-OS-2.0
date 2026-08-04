@@ -1,4 +1,5 @@
 import { BANNER_RUNTIME, BANNER_STYLES } from './bannerRuntime.js';
+import { SUBSCRIBE_SCRIPT } from './shortcodes.js';
 import { HEADER_CART_CSS, headerCartRuntime, HEADER_CART_DEFAULTS, type HeaderCartConfig } from './headerCart.js';
 // Base Theme — the default public frontend shell. Deliberately minimal
 // (Bam: "default theme so stuff is just popping up"; the full theme system
@@ -32,8 +33,11 @@ nav.main a:hover{color:var(--tx)}
 nav.main a.current{color:var(--tx);font-weight:600}
 main{padding:48px 0 90px}
 /* Ported layouts manage their own top spacing — the Base Theme's 48px sat
-   under the nav as an unexplained white gap above the hero. */
-main#brx-content{padding-top:0}
+   under the nav as an unexplained white gap above the hero.
+   main.l-inner is the PORTED theme's own main, nested inside ours, so the
+   id-only override missed it: measured 48px on our page against 0px on the
+   reference, which is the white strip under the menu bar. */
+main#brx-content,main.l-inner{padding-top:0;padding-bottom:0}
 .page-title{font-size:32px;font-weight:700;letter-spacing:-0.02em;line-height:1.2;margin-bottom:10px;text-wrap:balance}
 .page-meta{color:var(--tx3);font-size:13px;margin-bottom:32px}
 .tagline{color:var(--tx2);font-size:16px;margin-bottom:36px}
@@ -247,7 +251,7 @@ ${main}
 ${footer}
 </div>
 ${p.dock ? `${p.dock.markup}\n<script>${p.dock.script}</script>` : ''}
-<script>${BANNER_RUNTIME}</script>
+<script>${BANNER_RUNTIME}${SUBSCRIBE_SCRIPT}</script>
 ${hasChrome ? `<script>${headerCartRuntime(p.headerIcons ?? HEADER_CART_DEFAULTS)}</script>` : ''}
 </body>
 </html>`;

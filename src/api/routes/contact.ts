@@ -30,6 +30,12 @@ const ContactInput = z.object({
   website: z.string().max(200).optional(),
 });
 
+const SubscribeInput = z.object({
+  email: z.string().email().max(320),
+  // Same honeypot contract as the contact form above.
+  website: z.string().max(200).optional(),
+});
+
 const EXTRA_LABELS: Record<string, string> = {
   order: 'Order number',
   instagram: 'Instagram',
@@ -81,6 +87,35 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
     }
 
     reply.send({ sent: deliverable, topic: topic.label });
+  });
+
+  // Footer newsletter signup.
+  //
+  // Lives beside /contact because it is the same shape of problem: an
+  // unauthenticated public write that sends mail, so it inherits the same
+  // honeypot, the same per-IP throttle, and the same "never take the recipient
+  // from the request" rule. The address is read from Settings > Notifications.
+  app.post('/subscribe', async (req, reply) => {
+    const input = SubscribeInput.parse(req.body);
+    if (input.website) return reply.send({ ok: true });
+
+    const rl = await checkRateLimit(`subscribe:${req.ip}`, 5, 900);
+    if (!rl.allowed) {
+      throw new TooManyRequestsError('Too many signups from this address — try again shortly.', rl.retryAfterSeconds);
+    }
+
+    const n = await settingsService.getNotifications();
+    const to = n.adminEmail;
+    const transport = await mailTransport();
+    // Say so plainly rather than showing a success message that means nothing.
+    // A signup form that silently drops addresses is worse than one that admits
+    // it is not wired up.
+    if (!to || !n.emailEnabled || !transport.ready) {
+      return reply.send({ ok: false, error: 'Signups are not configured yet.' });
+    }
+
+    await sendEmailTo(to, 'New newsletter signup', `${input.email}\n\nFrom the site footer signup form.`);
+    reply.send({ ok: true });
   });
 
   // The storefront reads this to build the tab bar. Public because the contact

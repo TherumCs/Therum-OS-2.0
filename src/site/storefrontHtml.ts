@@ -1,5 +1,6 @@
 import { esc, money } from './html.js';
 import { BANNER_RUNTIME, BANNER_STYLES } from './bannerRuntime.js';
+import { SUBSCRIBE_SCRIPT } from './shortcodes.js';
 import { PRODUCT_GRID_FALLBACK_CSS } from './productGrid.js';
 import { CHECKOUT_FLOW_CSS } from './checkoutFlow.js';
 import { SHOP_TOOLBAR_CSS } from './shopToolbar.js';
@@ -526,7 +527,7 @@ ${body}
 </div></main>
 ${footer}
 </div>
-<script>${RUNTIME}${BANNER_RUNTIME}${WISHLIST_RUNTIME}${extraScript}</script>
+<script>${RUNTIME}${BANNER_RUNTIME}${WISHLIST_RUNTIME}${SUBSCRIBE_SCRIPT}${extraScript}</script>
 ${headerIcons ? `<script>${headerCartRuntime(headerIcons)}</script>` : ''}
 </body>
 </html>`;
