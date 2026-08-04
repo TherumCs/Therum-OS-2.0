@@ -5,7 +5,7 @@
 // and why the rename is applied to BOTH sides.
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
-import { rename, port, fetchPage } from './port-markup.mjs';
+import { rename, rewriteUrls, port, fetchPage } from './port-markup.mjs';
 
 const REFERENCE = process.env.REFERENCE_ORIGIN ?? 'http://localhost:10025';
 
@@ -109,7 +109,11 @@ export async function build() {
     const sel = chunk.slice(0, chunk.indexOf('{'));
     // A malformed selector stops the browser parsing the rest of the file.
     if (malformed(sel)) continue;
-    const r = rename(chunk);
+    // URLs as well as class names: the stylesheet's background-image rules
+    // point at the reference's origin, and without this every hero rendered
+    // blank while the <img> checks all passed — a background is not an image
+    // element, so nothing flagged it.
+    const r = rewriteUrls(rename(chunk));
     if (seen.has(r)) continue;
     seen.add(r); kept.push(r);
   }
