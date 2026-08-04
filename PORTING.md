@@ -38,3 +38,16 @@ the opposite of the instruction and gave every visual fix a wide blast radius.
 
 Measure, never eyeball. `tools/visual-compare.mjs` and `tools/element-audit.mjs`
 compare against :10025 at 1440 / 768 / 390.
+
+## Header parity (verified 2026-08-04)
+
+Measured against the reference at 1440 / 768 / 390. Everything matches:
+header box, desktop and mobile variants, logo, cart icon, button row, font
+sizes, and Manrope throughout.
+
+One deliberate difference: `.js-cart-info` and `.js-wishlist-info` — the cart
+and wishlist counters. The reference renders them empty at **0px wide**; we
+hide them with `.js-cart-info:empty{display:none}` (headerCart.ts). Both are
+invisible when the cart is empty, so the rendering is identical; only the
+computed `display` differs. The elements are present in our markup and are
+populated by the cart runtime.
