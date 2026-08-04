@@ -31,3 +31,21 @@ test('content with no brackets is returned untouched', () => {
   const html = '<div class="c-post">Nothing to do here</div>';
   assert.equal(cleanShortcodes(html), html);
 });
+
+test('ported upload URLs get a cache-busting version', () => {
+  // immutable + 1 year means a browser that cached a failure never recovers.
+  // Changing the URL is the only lever left.
+  const out = cleanShortcodes('<img src="/wp-content/uploads/2026/03/mens.webp" alt="mens">');
+  assert.match(out, /\/wp-content\/uploads\/2026\/03\/mens\.webp\?v=\d+/);
+});
+
+test('cache-busting also covers CSS url() and leaves other paths alone', () => {
+  assert.match(cleanShortcodes('a{background:url(/wp-content/uploads/x/y.jpg)}'), /y\.jpg\?v=\d+/);
+  const api = '<img src="/api/uploads/abc-def.png">';
+  assert.equal(cleanShortcodes(api), api);
+});
+
+test('a URL that already has a query is not double-stamped', () => {
+  const src = '<img src="/wp-content/uploads/a.png?foo=1">';
+  assert.equal(cleanShortcodes(src), src);
+});

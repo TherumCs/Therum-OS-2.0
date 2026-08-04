@@ -87,14 +87,42 @@ export const SUBSCRIBE_SCRIPT = `
 })();`;
 
 /**
+ * Cache-buster for the ported `/wp-content/uploads/` images.
+ *
+ * Those files are served with `Cache-Control: public, max-age=31536000,
+ * immutable`. `immutable` means the browser will NOT revalidate — not on a
+ * normal reload, not when the file changes on disk. So any browser that once
+ * received a bad response for one of these URLs keeps showing a broken image
+ * forever, with no way for the server to correct it.
+ *
+ * That is exactly what happened: the API was down for ~10 minutes while those
+ * files were being rewritten, and every browser that loaded the page in that
+ * window pinned the failure. Bam's whole homepage rendered as alt text while
+ * the same URLs served perfect bytes to a fresh browser — verified 20 of 20
+ * intact and decoding.
+ *
+ * Changing the URL is the only lever the server has, because `immutable`
+ * removed every other one. Bump VERSION to force every client to refetch.
+ */
+const UPLOAD_VERSION = '2';
+const UPLOAD_URL_RE = /(["'(])(\/wp-content\/uploads\/[^"')\s]+?\.(?:png|jpe?g|gif|webp|avif|svg))(["')])/gi;
+
+export function bustUploadUrls(html: string, version = UPLOAD_VERSION): string {
+  if (!html || html.indexOf('/wp-content/uploads/') === -1) return html;
+  return html.replace(UPLOAD_URL_RE, (m, open, url, close) =>
+    (url.includes('?') ? m : `${open}${url}?v=${version}${close}`));
+}
+
+/**
  * Replace expandable shortcodes, strip the rest.
  *
  * Order matters: `[contact-form-7 …]` would also match PLUGIN_RE, so it has to
  * become the form before the generic strip runs.
  */
 export function cleanShortcodes(html: string): string {
-  if (!html || html.indexOf('[') === -1) return html;
-  return html
+  const busted = bustUploadUrls(html);
+  if (!busted || busted.indexOf('[') === -1) return busted;
+  return busted
     .replace(/\[contact-form-7\b[^\]]*\]/gi, SUBSCRIBE_FORM)
     .replace(BUILDER_RE, '')
     .replace(PLUGIN_RE, '');
