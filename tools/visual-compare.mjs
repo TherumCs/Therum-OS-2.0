@@ -116,7 +116,7 @@ const MEASURE = `(() => {
       // sites — class names and wrappers differ, the id does not.
       // Reference uses the old builder's class, ours uses Bricks el-<id>.
       const cn = (el.className || '').toString();
-      const id = (cn.match(/elementor-element-([0-9a-f]{6,})/) || cn.match(/(?:^|\\s)el-([0-9a-f]{6,})(?:\\s|$)/) || [])[1] || null;
+      const id = (cn.match(/elementor-element-([0-9a-f]{6,})/) || cn.match(/(?:^|\\s)th-el-([0-9a-f]{6,})(?:\\s|$)/) || [])[1] || null;
       return { id, i, h: Math.round(r.height), w: Math.round(r.width) };
     })
     .filter((s) => s.h > 4); // ignore screen-reader and zero-height nodes
@@ -125,7 +125,7 @@ const MEASURE = `(() => {
     height: de.scrollHeight,
     scrollWidth: de.scrollWidth,
     sections,
-    collapsed: [...document.querySelectorAll('.e-con, .brxe-container, .brxe-block')]
+    collapsed: [...document.querySelectorAll('.e-con, .th-con, .brxe-container, .brxe-block')]
       .filter((e) => e.getBoundingClientRect().height < 2).length,
   });
 })()`;

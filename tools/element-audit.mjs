@@ -57,9 +57,9 @@ const PROBE = `(() => {
   // The reference names elements with the old builder's class; ours carries
   // the Bricks class el-<id>. Same id, two vocabularies — match on both or
   // every element on our side reads as absent.
-  document.querySelectorAll('[class*="elementor-element-"],[class*="el-"]').forEach((el) => {
+  document.querySelectorAll('[class*="elementor-element-"],[class*="th-el-"]').forEach((el) => {
     const cn = (el.className || '').toString();
-    const id = (cn.match(/elementor-element-([0-9a-f]{6,})/) || cn.match(/(?:^|\\s)el-([0-9a-f]{6,})(?:\\s|$)/) || [])[1];
+    const id = (cn.match(/elementor-element-([0-9a-f]{6,})/) || cn.match(/(?:^|\\s)th-el-([0-9a-f]{6,})(?:\\s|$)/) || [])[1];
     if (!id || out[id]) return;
     const r = el.getBoundingClientRect();
     const cs = getComputedStyle(el);

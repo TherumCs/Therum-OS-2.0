@@ -146,15 +146,26 @@ export function build() {
   // columns stacked at 1360px against a reference 256px because
   // `flex-direction: var(--flex-direction)` was missing.
   //
-  // width/height/flex are deliberately NOT in the contract. Applying them
-  // collapsed every flex child to 0px and took overflows from 9 to 1074:
-  // sizing in our markup comes from the element's own ported rule and from
-  // flex behaviour, not from these vars.
+  // `flex: var(--flex-grow)` is deliberately NOT in the contract. Where the
+  // reference sets --flex-grow:0 it computes to `flex: 0 1 0%` — a ZERO basis —
+  // and every flex child collapsed to 0px wide, taking overflows from 9 to
+  // 1074. `width: var(--width)` IS included: without it the columns lost their
+  // declared widths and equal-split instead, 288px each where the reference
+  // says 256. Height is left to content.
   //
   // 73 declarations were found in the reference; these are the layout ones.
   // Component-specific properties (accordion, icon-list) stay with the
   // components that own them, which the theme files already carry.
-  const CONTRACT = ':is(.brxe-container,.brxe-block,.brxe-section,.brxe-div){align-content:var(--align-content);align-items:var(--align-items);border-block-end-width:var(--border-block-end-width);border-block-start-width:var(--border-block-start-width);border-color:var(--border-color);border-inline-end-width:var(--border-inline-end-width);border-inline-start-width:var(--border-inline-start-width);border-radius:var(--border-radius);border-style:var(--border-style);display:var(--display);flex-direction:var(--flex-direction);flex-wrap:var(--flex-wrap);gap:var(--row-gap);justify-content:var(--justify-content);margin-block-start:var(--margin-block-start);margin-inline-end:var(--margin-inline-end);margin-inline-start:var(--margin-inline-start);min-height:var(--min-height);overflow:var(--overflow);padding-block-end:var(--padding-block-end);padding-block-start:var(--padding-block-start);padding-inline-end:var(--padding-inline-end);padding-inline-start:var(--padding-inline-start);position:var(--position);text-align:var(--text-align);z-index:var(--z-index)}';
+  // The var-to-var ALIASES. Elementor maps --padding-left -> 
+  // --padding-inline-start, then applies padding-inline-start from that. I
+  // filtered these out because their property name starts with '--', which
+  // broke the chain: the ported --padding-left:70px was set and nothing ever
+  // turned it into padding. The footer row rendered content=1440 against a
+  // reference content=1300, so every 33.33% child came out 288px instead of
+  // 256px. Same CSS, different box, purely because this link was missing.
+  const ALIASES = ':where(.brxe-container,.brxe-block,.brxe-section,.brxe-div){--align-self:var(--container-widget-align-self);--border-block-end-width:var(--border-bottom-width);--border-block-start-width:var(--border-top-width);--border-inline-end-width:var(--border-right-width);--border-inline-start-width:var(--border-left-width);--column-gap:var(--widgets-spacing-column);--gap:var(--widgets-spacing);--margin-block-end:var(--margin-bottom);--margin-block-start:var(--margin-top);--margin-inline-end:var(--margin-right);--margin-inline-start:var(--margin-left);--padding-block-end:var(--padding-bottom);--padding-block-start:var(--padding-top);--padding-bottom:var(--container-default-padding-bottom);--padding-inline-end:var(--padding-right);--padding-inline-start:var(--padding-left);--padding-left:var(--container-default-padding-left);--padding-right:var(--container-default-padding-right);--padding-top:var(--container-default-padding-top);--row-gap:var(--widgets-spacing-row)}';
+
+  const CONTRACT = ':is(.brxe-container,.brxe-block,.brxe-section,.brxe-div){width:var(--width);align-content:var(--align-content);align-items:var(--align-items);border-block-end-width:var(--border-block-end-width);border-block-start-width:var(--border-block-start-width);border-color:var(--border-color);border-inline-end-width:var(--border-inline-end-width);border-inline-start-width:var(--border-inline-start-width);border-radius:var(--border-radius);border-style:var(--border-style);display:var(--display);flex-direction:var(--flex-direction);flex-wrap:var(--flex-wrap);gap:var(--row-gap);justify-content:var(--justify-content);margin-block-start:var(--margin-block-start);margin-inline-end:var(--margin-inline-end);margin-inline-start:var(--margin-inline-start);min-height:var(--min-height);overflow:var(--overflow);padding-block-end:var(--padding-block-end);padding-block-start:var(--padding-block-start);padding-inline-end:var(--padding-inline-end);padding-inline-start:var(--padding-inline-start);position:var(--position);text-align:var(--text-align);z-index:var(--z-index)}';
 
   const DEFAULTS = [
     ':where(.brxe-container,.brxe-block,.brxe-section,.brxe-div){' +
@@ -174,6 +185,7 @@ export function build() {
     '   verbatim so the relative units the theme is built on survive.',
     '   See PORTING.md and tools/port-layout-css.mjs. */',
     ...DEFAULTS,
+    ALIASES,
     CONTRACT,
     ...out,
   ].join('\n');
