@@ -84,9 +84,18 @@ export async function build() {
     let inner = html;
     if (hdr) inner = inner.replace(hdr, '');
     if (ftr) inner = inner.replace(ftr, '');
-    const body = extractRegion(inner, /<div\b[^>]*class="[^"]*\bth-root\b[^"]*"[^>]*>/i)
+    // Take the whole CONTENT REGION, not just the innermost wrapper.
+    //
+    // The theme wraps a page in its own chrome — on FAQ that is
+    // c-post__container > l-section__content > article.c-post > c-post__inner,
+    // and THAT is what narrows 1440 down to 688. Extracting only the inner
+    // wrapper threw the narrowing away and every FAQ column rendered full
+    // width. l-inner is the region between header and footer, so it carries
+    // whatever chrome a given page template uses.
+    const body = extractRegion(inner, /<main\b[^>]*class="[^"]*\bl-inner\b[^"]*"[^>]*>/i)
+      || extractRegion(inner, /<div\b[^>]*class="[^"]*\bl-inner\b[^"]*"[^>]*>/i)
       || extractRegion(inner, /<main\b[^>]*>/i)
-      || extractRegion(inner, /<div\b[^>]*class="[^"]*\bl-inner\b[^"]*"[^>]*>/i);
+      || extractRegion(inner, /<div\b[^>]*class="[^"]*\bth-root\b[^"]*"[^>]*>/i);
     if (!body) { console.log(`  ${slug.padEnd(30)} NO BODY REGION`); continue; }
     bodies[slug] = body;
     const legacy = (body.match(/elementor|\be-con\b|\be-flex\b/gi) || []).length;

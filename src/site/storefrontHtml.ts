@@ -28,7 +28,7 @@ export const CSS = `
   --e:0.15s ease;--radius-sm:6px;--radius-md:10px;--radius-lg:14px;--radius-pill:999px;
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:var(--f);background:var(--bg);color:var(--tx);line-height:1.55;-webkit-font-smoothing:antialiased}
+:where(body){font-family:var(--f);background:var(--bg);color:var(--tx);line-height:1.55;-webkit-font-smoothing:antialiased}
 a{color:inherit;text-decoration:none}
 /* Same knob the rest of the site uses (Settings > Site > Content width).
    This was a literal 1080px, so the shop stayed narrow at every setting and
@@ -494,7 +494,13 @@ export function layout(title: string, body: string, extraScript = '', chrome?: S
   const footer = chrome?.footer
     ? `<div id="brx-footer">${chrome.footer}</div>`
     : `<footer class="site"><div class="wrap">Powered by Counter · Therum OS</div></footer>`;
-  const themeCss = chrome?.cssUrl ? `<link rel="stylesheet" href="${esc(chrome.cssUrl)}">` : '';
+  // The ported theme asks for Manrope by name; the stylesheet alone does not
+  // fetch the face. Content pages link it in siteHtml.ts — without the same
+  // link here, the shared header and footer rendered in -apple-system on shop
+  // and order-tracking while every other page used Manrope.
+  const themeCss = chrome?.cssUrl
+    ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap"><link rel="stylesheet" href="${esc(chrome.cssUrl)}">`
+    : '';
   // Only the ported header carries the cart/search/wishlist hooks; the
   // fallback chrome above has its own plain cart link and needs none of it.
   const headerIcons = chrome?.header ? chrome.headerIcons ?? HEADER_CART_DEFAULTS : null;
