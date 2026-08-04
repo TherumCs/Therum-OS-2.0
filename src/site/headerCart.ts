@@ -147,14 +147,22 @@ body.th-cart-open .widget_shopping_cart_content .c-product-list-widget__buttons 
 .th-search__body{flex:1;overflow:auto;padding:24px 30px 60px}
 .th-search__hint{font-size:13px;letter-spacing:.04em;color:var(--text-color-light,#888)}
 /* Results get their own layout rather than borrowing .c-product-grid — that
-   contract expects the full card structure and collapses without it. */
-.th-search__results{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:4px 30px;max-width:1100px}
-.th-search__hit{display:flex;align-items:center;gap:16px;padding:10px 0;text-decoration:none;color:inherit}
-.th-search__hit img,.th-search__hit .th-search__ph{width:56px;height:56px;flex:0 0 56px;object-fit:cover;background:var(--background-color-dark,#f2f2f2);display:block}
+   contract expects the full card structure and collapses without it.
+
+   TWO PER ROW, asked for directly: "right now lets use a 2x2 grid for search
+   results". Fixed at 2 columns rather than auto-fill, because auto-fill widens
+   to 4 across on a large screen and the 2x2 is the point. Cards, not rows —
+   a 2-up layout with a 56px thumbnail reads as a broken list. */
+.th-search__results{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:30px 30px;max-width:900px}
+.th-search__hit{display:flex;flex-direction:column;align-items:stretch;gap:12px;padding:0;text-decoration:none;color:inherit}
+.th-search__hit img,.th-search__hit .th-search__ph{width:100%;height:auto;aspect-ratio:1/1;flex:0 0 auto;object-fit:cover;background:var(--background-color-dark,#f2f2f2);display:block}
 .th-search__nm{display:block;font-size:14px;font-weight:500;line-height:1.35}
 .th-search__pr{display:block;font-size:12px;color:var(--text-color-light,#888);margin-top:3px}
 .th-search__hit:hover .th-search__nm{color:var(--accent-color,inherit)}
-@media(max-width:767px){.th-search__bar{padding:18px}.th-search__bar input{font-size:20px}.th-search__body{padding:18px}}
+/* Two columns survive to phone width — the shopper is comparing two products,
+   and one-per-row turns four results into a scroll. */
+@media(max-width:767px){.th-search__bar{padding:18px}.th-search__bar input{font-size:20px}.th-search__body{padding:18px}
+  .th-search__results{gap:18px 14px}}
 
 /* Immersive: the page itself empties. The panel is transparent and the body
    class fades the real content out beneath it, so the shopper is not looking

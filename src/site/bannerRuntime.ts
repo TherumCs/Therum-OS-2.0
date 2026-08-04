@@ -96,103 +96,31 @@ export const BANNER_RUNTIME = `
     }
   }
 
+  // The "changing" banner grid — the four category tiles.
+  //
+  // It used to rotate: measure how many fit, hide the rest with an inline
+  // display:none, and cycle them on a timer. Bam wants the row exactly as
+  // authored — "keep this the order and remove the rotation. they dont need to
+  // switch" — so this no longer animates anything.
+  //
+  // It is not deleted, because the markup arrives carrying inline styles from
+  // whatever ran before it (display:none, order:N) and a page that simply
+  // stopped calling this would keep showing three hidden tiles. So the job is
+  // now the opposite: strip that state and leave every tile visible in DOM
+  // order. Measured before this change: 3 of the 4 tiles were display:none at
+  // 390px, which is why the phone showed one category where the reference
+  // shows all of them.
   function initChanging(el){
     if (el.__ipInit) return;
     var items = Array.prototype.slice.call(el.querySelectorAll('.c-ip-banners__item'));
-    if (items.length < 2) return;
+    if (!items.length) return;
     el.__ipInit = true;
-
-    var timeout = parseInt(el.getAttribute('data-animation-timeout') || '3000', 10) || 3000;
-
-    // Slots are MEASURED, not read off the --N class.
-    //
-    // That class describes the DESKTOP layout. Below the theme's breakpoint the
-    // row only fits two, and this list is overflow-x:hidden — so four items
-    // meant two were cut off with no way to reach them (measured: 2199px of
-    // content in a 1100px box). Measuring makes the rotation pool "whatever
-    // does not fit", at whatever width the visitor is actually on.
-    function slotCount(){
-      var listW = el.clientWidth;
-      var itemW = items[0].getBoundingClientRect().width;
-      if (!listW || !itemW) return items.length;
-      return Math.max(1, Math.min(items.length, Math.round(listW / itemW)));
-    }
-
-    var slots = slotCount();
-    var next = slots % items.length;
-
-    function layout(){
-      slots = slotCount();
-      next = slots % items.length;
-      items.forEach(function(it, i){
-        it.style.display = i < slots ? '' : 'none';
-        it.style.opacity = '';
-        it.style.order = String(i);
-      });
-    }
-    layout();
-
-    // A resize changes how many fit, so this has to be recomputed or the block
-    // quietly goes back to clipping.
-    var rt = null;
-    window.addEventListener('resize', function(){ clearTimeout(rt); rt = setTimeout(layout, 150); });
-
-    if (reduced) return;
-
-    // Only run while on screen — a timer swapping images in a block nobody is
-    // looking at is pure battery and layout work.
-    var timer = null;
-    function start(){
-      if (timer) return;
-      timer = setInterval(function(){
-        // EVERYTHING FITS: still animate. The source block does this too — it
-        // cycles the ORDER of the visible banners rather than swapping any in
-        // or out, so a 4-up row of 4 banners still moves. Gating this on
-        // "more items than slots" is what silently stopped the desktop motion.
-        if (slots >= items.length) {
-          var first = items.slice().sort(function(a, b){
-            return (parseInt(a.style.order || '0', 10)) - (parseInt(b.style.order || '0', 10));
-          })[0];
-          if (!first) return;
-          var maxOrder = items.reduce(function(m, it){
-            return Math.max(m, parseInt(it.style.order || '0', 10));
-          }, 0);
-          first.style.transition = 'opacity .45s ease';
-          first.style.opacity = '0';
-          setTimeout(function(){
-            // Send it to the end of the row, then fade it back in there.
-            first.style.order = String(maxOrder + 1);
-            requestAnimationFrame(function(){ first.style.opacity = '1'; });
-          }, 460);
-          return;
-        }
-        var slot = items.findIndex(function(it){ return it.style.display !== 'none'; });
-        if (slot < 0) return;
-        var outgoing = items[slot];
-        var incoming = items[next % items.length];
-        next = (next + 1) % items.length;
-        if (!incoming || incoming === outgoing) return;
-        incoming.style.display = '';
-        incoming.style.opacity = '0';
-        incoming.style.transition = 'opacity .45s ease';
-        outgoing.style.transition = 'opacity .45s ease';
-        outgoing.style.opacity = '0';
-        requestAnimationFrame(function(){ incoming.style.opacity = '1'; });
-        setTimeout(function(){
-          outgoing.style.display = 'none';
-          outgoing.style.opacity = '';
-        }, 460);
-      }, timeout);
-    }
-    function stop(){ if (timer) { clearInterval(timer); timer = null; } }
-
-    if ('IntersectionObserver' in window) {
-      new IntersectionObserver(function(entries){
-        entries[0].isIntersecting ? start() : stop();
-      }, { threshold: 0.2 }).observe(el);
-    } else {
-      start();
-    }
+    items.forEach(function(it){
+      it.style.display = '';
+      it.style.opacity = '';
+      it.style.order = '';
+      it.style.transition = '';
+    });
   }
 
   // ── Running line (the scrolling banner strip) ───────────────────────────
@@ -280,6 +208,11 @@ export const BANNER_STYLES = `
 }
 @media (max-width:767px){
   .c-ip-banners__list.c-ip-banners__list>.c-ip-banners__item{flex:0 0 100%!important;max-width:100%!important}
+  /* Nothing rotates now, so a single row of four 100%-wide tiles would push
+     three of them outside an overflow:hidden box. Wrapping stacks them and
+     every category stays reachable on a phone. The carousel list keeps its
+     horizontal scroller — it is swipeable, so it does not need wrapping. */
+  .c-ip-banners__list--changing.c-ip-banners__list--changing{flex-wrap:wrap}
 }
 .c-ip-banners__item img{width:100%;height:100%;object-fit:cover;display:block}
 .c-ip-banners__list-wrap{position:relative}
