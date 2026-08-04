@@ -2,7 +2,7 @@
 
 import { SettingsForm } from '../SettingsForm';
 import { FormCheckList, FormColor, FormPresetNumber, FormSelect, FormText, FormToggle } from '../FormControls';
-import { ACTION_PREVIEWS, ALIGN_PREVIEWS, MEDIA_PREVIEWS, PRESET_PREVIEWS, GAP_PREVIEWS, HOVER_PREVIEWS, PreviewPicker, RADIUS_PREVIEWS, RATIO_PREVIEWS, REVEAL_PREVIEWS, SEARCH_PREVIEWS, SHADOW_PREVIEWS, SHELL_PREVIEWS, TOOLBAR_PREVIEWS } from '../CardPreviews';
+import { ACTION_PREVIEWS, ALIGN_PREVIEWS, MEDIA_PREVIEWS, PRESET_PREVIEWS, GAP_PREVIEWS, HOVER_PREVIEWS, PreviewPicker, RADIUS_PREVIEWS, RATIO_PREVIEWS, REVEAL_PREVIEWS, SEARCH_LAYOUT_PREVIEWS, SEARCH_PREVIEWS, SHADOW_PREVIEWS, SHELL_PREVIEWS, TOOLBAR_PREVIEWS } from '../CardPreviews';
 
 export interface CounterSettings extends Record<string, unknown> {
   cartStyle: 'mini' | 'sidebar';
@@ -40,6 +40,7 @@ export interface CounterSettings extends Record<string, unknown> {
   toolbarSorts: string[];
   toolbarDefaultSort: string;
   searchStyle: 'takeover' | 'inline' | 'immersive';
+  searchLayout: 'list' | 'grid' | 'slider';
   wishlistEnabled: boolean;
   wishlistOnCards: boolean;
 }
@@ -389,6 +390,17 @@ export function CustomizationClient({ initial }: { initial: CounterSettings }) {
             ['takeover', 'Takeover', 'Fills the screen. Best for a deliberate search.'],
             ['inline', 'Inline', 'Drops under the header. The page stays put.'],
             ['immersive', 'Immersive', 'The page empties and refills with results as you type.'],
+          ]}
+        />
+        <PreviewPicker
+          label="Result layout"
+          desc="How the matches are arranged, whichever search style is on."
+          field="searchLayout"
+          previews={SEARCH_LAYOUT_PREVIEWS}
+          options={[
+            ['list', 'List', 'One per row with a small thumbnail. Most results in view.'],
+            ['grid', 'Grid', 'Two across, large images. Best when the photograph sells it.'],
+            ['slider', 'Slider', 'One swipeable row. Keeps the page short on a phone.'],
           ]}
         />
       </div>

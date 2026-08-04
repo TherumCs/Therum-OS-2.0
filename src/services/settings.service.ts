@@ -309,6 +309,8 @@ export interface CounterSettings {
   toolbarSorts: ('new' | 'oldest' | 'name' | 'name-desc' | 'price-asc' | 'price-desc' | 'best-selling')[];
   toolbarDefaultSort: 'new' | 'oldest' | 'name' | 'name-desc' | 'price-asc' | 'price-desc' | 'best-selling';
   searchStyle: 'takeover' | 'inline' | 'immersive';
+  /** How results are laid out inside whichever search style is on. */
+  searchLayout: 'list' | 'grid' | 'slider';
   wishlistEnabled: boolean;
   wishlistOnCards: boolean;
 }
@@ -490,6 +492,7 @@ const COUNTER_DEFAULTS: CounterSettings = {
   toolbarSorts: ['new', 'name', 'price-asc', 'price-desc'],
   toolbarDefaultSort: 'new',
   searchStyle: 'takeover',
+  searchLayout: 'grid',
   wishlistEnabled: true,
   wishlistOnCards: true,
 };

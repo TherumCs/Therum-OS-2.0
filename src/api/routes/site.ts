@@ -121,6 +121,7 @@ export async function buildNav(current: string, req?: FastifyRequest): Promise<{
     cartSidebarReveal: counterSettings.cartSidebarReveal,
     cartSidebarGround: counterSettings.cartSidebarGround,
     searchStyle: counterSettings.searchStyle,
+    searchLayout: counterSettings.searchLayout,
     wishlistEnabled: counterSettings.wishlistEnabled,
   };
   const [pages, postCount, workCount, commerce] = await Promise.all([

@@ -546,6 +546,50 @@ const PageBody = ({ from }: { from: number }) => (
   </g>
 );
 
+export const SEARCH_LAYOUT_PREVIEWS: Record<string, React.ReactNode> = {
+  list: (
+    <Art>
+      {/* one per row, small thumbnail — the most matches on screen at once */}
+      <rect x="0" y="0" width={W} height={H} fill={PAPER} />
+      <rect x="10" y="12" width="60" height="7" rx="3.5" fill={INK} opacity="0.7" />
+      {[34, 58, 82, 106].map((y) => (
+        <g key={y}>
+          <rect x="10" y={y} width="18" height="18" rx="3" fill={FILL} />
+          <rect x="34" y={y + 4} width="62" height="5" rx="2.5" fill={INK} opacity="0.55" />
+          <rect x="34" y={y + 13} width="34" height="4" rx="2" fill={INK} opacity="0.25" />
+        </g>
+      ))}
+    </Art>
+  ),
+  grid: (
+    <Art>
+      {/* two across, large images — the photograph is the answer */}
+      <rect x="0" y="0" width={W} height={H} fill={PAPER} />
+      <rect x="10" y="12" width="60" height="7" rx="3.5" fill={INK} opacity="0.7" />
+      {[[10, 32], [78, 32], [10, 90], [78, 90]].map(([x, y]) => (
+        <g key={`${x}-${y}`}>
+          <rect x={x} y={y} width="58" height="42" rx="3" fill={FILL} />
+          <rect x={x} y={y + 47} width="40" height="4" rx="2" fill={INK} opacity="0.45" />
+        </g>
+      ))}
+    </Art>
+  ),
+  slider: (
+    <Art>
+      {/* one swipeable row — runs off the edge, so the page stays short */}
+      <rect x="0" y="0" width={W} height={H} fill={PAPER} />
+      <rect x="10" y="12" width="60" height="7" rx="3.5" fill={INK} opacity="0.7" />
+      {[10, 68, 126].map((x) => (
+        <g key={x}>
+          <rect x={x} y="40" width="52" height="52" rx="3" fill={FILL} />
+          <rect x={x} y="98" width="36" height="4" rx="2" fill={INK} opacity="0.45" />
+        </g>
+      ))}
+      <path d={`M${W - 14} 62 l6 6 l-6 6`} stroke={INK} strokeWidth="1.6" opacity="0.45" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+    </Art>
+  ),
+};
+
 export const SEARCH_PREVIEWS: Record<string, React.ReactNode> = {
   takeover: (
     <Art>

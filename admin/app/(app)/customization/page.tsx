@@ -53,6 +53,7 @@ const DEFAULTS: CounterSettings = {
   toolbarSorts: ['new', 'name', 'price-asc', 'price-desc'],
   toolbarDefaultSort: 'new',
   searchStyle: 'takeover',
+  searchLayout: 'grid',
   wishlistEnabled: true,
   wishlistOnCards: true,
 };

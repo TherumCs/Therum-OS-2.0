@@ -153,9 +153,36 @@ body.th-cart-open .widget_shopping_cart_content .c-product-list-widget__buttons 
    results". Fixed at 2 columns rather than auto-fill, because auto-fill widens
    to 4 across on a large screen and the 2x2 is the point. Cards, not rows —
    a 2-up layout with a 56px thumbnail reads as a broken list. */
-.th-search__results{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:30px 30px;max-width:900px}
-.th-search__hit{display:flex;flex-direction:column;align-items:stretch;gap:12px;padding:0;text-decoration:none;color:inherit}
-.th-search__hit img,.th-search__hit .th-search__ph{width:100%;height:auto;aspect-ratio:1/1;flex:0 0 auto;object-fit:cover;background:var(--background-color-dark,#f2f2f2);display:block}
+/* THREE RESULT LAYOUTS (Settings > Customization > Result layout). One class
+   on the container switches between them; the hit markup never changes, so a
+   merchant flipping this cannot break the results. Grid is the default. */
+.th-search__results{display:grid;gap:30px;max-width:900px}
+.th-search__hit{display:flex;text-decoration:none;color:inherit}
+.th-search__hit img,.th-search__hit .th-search__ph{object-fit:cover;background:var(--background-color-dark,#f2f2f2);display:block}
+
+/* GRID — two across, large images. The default: on a store where the
+   photograph is the product, the picture is the answer. */
+.th-search__results--grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+.th-search__results--grid .th-search__hit{flex-direction:column;align-items:stretch;gap:12px}
+.th-search__results--grid .th-search__hit img,.th-search__results--grid .th-search__hit .th-search__ph{
+  width:100%;height:auto;aspect-ratio:1/1;flex:0 0 auto}
+
+/* LIST — one per row, small thumbnail, most matches in view at once. */
+.th-search__results--list{grid-template-columns:minmax(0,1fr);gap:4px;max-width:640px}
+.th-search__results--list .th-search__hit{flex-direction:row;align-items:center;gap:16px;padding:10px 0}
+.th-search__results--list .th-search__hit img,.th-search__results--list .th-search__hit .th-search__ph{
+  width:56px;height:56px;flex:0 0 56px;aspect-ratio:auto}
+
+/* SLIDER — one swipeable row. Native overflow scrolling with snap points
+   rather than a carousel library: it keeps momentum scrolling and the
+   trackpad, which a transform carousel has to reimplement badly. */
+.th-search__results--slider{display:flex;overflow-x:auto;gap:20px;max-width:none;
+  scroll-snap-type:x mandatory;scrollbar-width:none;padding-bottom:6px}
+.th-search__results--slider::-webkit-scrollbar{display:none}
+.th-search__results--slider .th-search__hit{flex:0 0 min(240px,62vw);scroll-snap-align:start;
+  flex-direction:column;align-items:stretch;gap:12px}
+.th-search__results--slider .th-search__hit img,.th-search__results--slider .th-search__hit .th-search__ph{
+  width:100%;height:auto;aspect-ratio:1/1}
 .th-search__nm{display:block;font-size:14px;font-weight:500;line-height:1.35}
 .th-search__pr{display:block;font-size:12px;color:var(--text-color-light,#888);margin-top:3px}
 .th-search__hit:hover .th-search__nm{color:var(--accent-color,inherit)}
@@ -176,8 +203,8 @@ body.th-search-open footer.site{
 .th-search--immersive .th-search__bar{border-bottom:0;padding:34px 30px 12px;max-width:1180px;margin:0 auto;width:100%}
 .th-search--immersive .th-search__bar input{font-size:34px;font-weight:500}
 .th-search--immersive .th-search__body{max-width:1180px;margin:0 auto;width:100%}
-.th-search__results--grid{grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:28px 24px;max-width:none}
-.th-search__results--grid .th-search__hit{flex-direction:column;align-items:stretch;gap:10px}
+/* Immersive gets more room; the column count still comes from the layout. */
+.th-search--immersive .th-search__results{max-width:none}
 .th-search__results--grid .th-search__hit img,.th-search__results--grid .th-search__hit .th-search__ph{
   width:100%;height:auto;aspect-ratio:1;flex:none}
 @media(max-width:767px){
@@ -205,12 +232,14 @@ export interface HeaderCartConfig {
   /** Hex. The colour uncovered behind a shifted page. */
   cartSidebarGround: string;
   searchStyle: 'takeover' | 'inline' | 'immersive';
+  /** Result layout: a dense list, a 2-up grid, or a swipeable row. */
+  searchLayout: 'list' | 'grid' | 'slider';
   wishlistEnabled: boolean;
 }
 
 export const HEADER_CART_DEFAULTS: HeaderCartConfig = {
   cartStyle: 'sidebar', cartSidebarReveal: 'push', cartSidebarGround: '#0a0a0a',
-  searchStyle: 'takeover', wishlistEnabled: true,
+  searchStyle: 'takeover', searchLayout: 'grid', wishlistEnabled: true,
 };
 
 export function headerCartRuntime(cfg: HeaderCartConfig = HEADER_CART_DEFAULTS): string {
@@ -220,6 +249,7 @@ export function headerCartRuntime(cfg: HeaderCartConfig = HEADER_CART_DEFAULTS):
   var PUSH = ${JSON.stringify(cfg.cartSidebarReveal)} === 'push';
   var GROUND = ${JSON.stringify(cfg.cartSidebarGround)};
   var SEARCH_STYLE = ${JSON.stringify(cfg.searchStyle)};
+  var SEARCH_LAYOUT = ${JSON.stringify(cfg.searchLayout ?? 'grid')};
   var INLINE_SEARCH = SEARCH_STYLE === 'inline';
   var IMMERSIVE_SEARCH = SEARCH_STYLE === 'immersive';
   var WISHLIST = ${JSON.stringify(cfg.wishlistEnabled)};
@@ -537,7 +567,7 @@ export function headerCartRuntime(cfg: HeaderCartConfig = HEADER_CART_DEFAULTS):
           var r = await api('/products?q=' + encodeURIComponent(q) + '&status=active&limit=8');
           var items = r.items || [];
           body.innerHTML = items.length
-            ? '<div class="th-search__results">'
+            ? '<div class="th-search__results th-search__results--' + SEARCH_LAYOUT + '">'
               + items.map(function(p){
                   var prices = (p.variants || []).map(function(v){ return v.price; }).filter(function(n){ return typeof n === 'number'; });
                   var from = prices.length ? Math.min.apply(null, prices) : null;
