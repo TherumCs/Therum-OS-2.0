@@ -51,3 +51,13 @@ hide them with `.js-cart-info:empty{display:none}` (headerCart.ts). Both are
 invisible when the cart is empty, so the rendering is identical; only the
 computed `display` differs. The elements are present in our markup and are
 populated by the cart runtime.
+
+## Audit result — 2026-08-04
+
+12 pages x 3 breakpoints (1440 / 768 / 390), every element carrying an id
+compared against localhost:10025.
+
+    ===== 0 FINDINGS =====
+
+Progression, for the record: 2436 -> 285 (markup ported) -> 0 (page template
+chrome + storefront font).
