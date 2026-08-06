@@ -719,6 +719,7 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS, per
       + `<div class="card-pk-line card-pk-line--qty"><span class="card-pk-label">Qty</span><div class="card-pk-qty"><button type="button" class="card-pk-qbtn" data-card-qty="-1" aria-label="One fewer">−</button><span class="card-pk-qn" data-card-qty-n aria-live="polite">1</span><button type="button" class="card-pk-qbtn" data-card-qty="1" aria-label="One more">+</button></div></div>`
       + (hasColourChoice ? `<div class="card-pk-line card-pk-line--color"><span class="card-pk-label">Color</span><div class="card-pk-scroll">${swatches}</div></div>` : '')
       + (hasSizeChoice ? `<div class="card-pk-line card-pk-line--size"><span class="card-pk-label">Size</span><div class="card-pk-opts card-pk-scroll" data-card-sizes>${p.sizes!.slice(0, 14).map((s) => `<button type="button" class="card-pk-opt" data-card-size="${esc(s)}">${esc(s)}</button>`).join('')}</div></div>` : '')
+      + `<div class="card-pk-stock" data-card-stock hidden></div>`
       + `</div>`
     : '';
 
@@ -898,6 +899,20 @@ export const CARD_EVOLVE_RUNTIME = `
     // uses. markCardSizes is a hoisted declaration so the swatch handler above
     // can call it when the colour changes.
     var cardSizeRow = item && item.querySelector('[data-card-sizes]');
+    // "Only N left" under the picker, from the chosen variant's real count.
+    // v.a is availableOf: a true count for tracked lines, a huge sentinel for
+    // unlimited/POD, so only a genuinely low number trips it. Shown only once
+    // the full variant is chosen.
+    var cardStockEl = item && item.querySelector('[data-card-stock]');
+    function showCardStock(){
+      if (!cardStockEl) return;
+      var ready = (colors.length < 2 || chosen.c !== null) && (sizes.length < 2 || chosen.s !== null);
+      var mv = ready ? match() : null;
+      var n = mv ? mv.a : null;
+      if (n != null && n > 0 && n <= 5) { cardStockEl.textContent = 'Only ' + n + ' left'; cardStockEl.hidden = false; }
+      else if (n != null && n <= 0) { cardStockEl.textContent = 'Sold out'; cardStockEl.hidden = false; }
+      else { cardStockEl.hidden = true; cardStockEl.textContent = ''; }
+    }
     function markCardSizes(){
       if (!cardSizeRow) return;
       cardSizeRow.querySelectorAll('[data-card-size]').forEach(function(b){
@@ -905,6 +920,7 @@ export const CARD_EVOLVE_RUNTIME = `
         b.classList.toggle('on', chosen.s === val);
         b.disabled = !reachable('s', val);
       });
+      showCardStock();
     }
     if (cardSizeRow) cardSizeRow.addEventListener('click', function(e){
       var b = e.target.closest('[data-card-size]');
@@ -2330,7 +2346,7 @@ export const CARD_EVOLVE_RUNTIME = `
           // would only reopen this very page — useless — so there we never show
           // it. Send the shopper to the card/other methods below instead.
           if (!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches)) return showQr();
-          say('That wallet isn\'t available on this device — use card or another option below.', true);
+          say('That wallet is not available on this device — use card or another option below.', true);
           openSec('payment');
           return;
         }
@@ -2617,6 +2633,7 @@ export const PRODUCT_GRID_FALLBACK_CSS = `
 .c-product-grid__item:focus-within .card-picker-reveal,
 .c-product-grid__item.is-checking-out .card-picker-reveal{max-height:220px;opacity:1;filter:blur(0);transform:none;margin:6px 0 2px}
 .card-pk-line{display:flex;align-items:center;gap:10px;min-height:26px}
+.card-pk-stock{font:600 11px/1.2 var(--f,inherit);letter-spacing:.02em;color:#c0392b;text-transform:uppercase;min-height:13px}
 .card-pk-label{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--tx3,#9a9a9a);min-width:42px;flex:0 0 auto}
 .card-pk-line .card-swatches{margin:0}
 .card-pk-opts{display:flex;flex-wrap:wrap;gap:6px}

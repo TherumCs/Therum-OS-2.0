@@ -59,6 +59,11 @@ export const MOBILE_MENU_RUNTIME = `
       // giant "support@…" link is not what "the links in the menu bar" means.
       if (/^(tel:|mailto:)/i.test(h)) return;
       if (/^(cart|search|wishlist|account|sign in|log in|my account|0)$/i.test(t)) return;
+      // Cart / wishlist / account anchors carry a COUNT as their text ("2"),
+      // which showed up as a stray number in the menu. Drop them by href, and
+      // drop any anchor whose text is nothing but a number.
+      if (/\\/(cart|wishlist|account|search|log-?in|sign-?in)\\/?(\\?|#|$)/i.test(h)) return;
+      if (/^\\d+$/.test(t)) return;
       if (/^[+()\\d][\\d\\s()+.-]{5,}$/.test(t) || /@/.test(t)) return;
       seen[t] = 1; out.push({ t: t, h: h });
     });
