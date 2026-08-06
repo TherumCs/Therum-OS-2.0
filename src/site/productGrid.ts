@@ -1484,7 +1484,9 @@ export const CARD_EVOLVE_RUNTIME = `
         // than no button. What is left works.
         box.querySelectorAll('[data-wallet-provider="stripe"]').forEach(function(b){
           var k = WALLET_PR_KEY[b.getAttribute('data-wallet')];
-          if (!stripeCan || !k || !stripeCan[k]) b.hidden = true;
+          // Reveal the available ones; the unsupported stay hidden (they were
+          // never shown). No flash-then-disappear.
+          b.hidden = !(stripeCan && k && stripeCan[k]);
         });
         // If nothing express is left visible, drop the row and its divider.
         var anyVisible = Array.prototype.some.call(box.querySelectorAll('[data-wallet]'), function(b){ return !b.hidden; });
@@ -1855,6 +1857,11 @@ export const CARD_EVOLVE_RUNTIME = `
             buttons.push('<button type="button" class="card-pay__wallet" data-wallet="' + w
               + '" data-wallet-kind="' + (p.kind || 'token') + '"'
               + ' data-wallet-provider="' + p.provider + '"'
+              // Stripe wallets start HIDDEN and are revealed only once
+              // canMakePayment() confirms the browser can present them — so an
+              // unsupported wallet never flashes in and then vanishes. PayPal
+              // (redirect) needs no such check and shows immediately.
+              + (p.provider === 'stripe' ? ' hidden' : '')
               + ' title="' + walletLabels[w] + '" aria-label="Pay with ' + walletLabels[w] + '">'
               + (walletIcons[w] || '<span class="card-pay__wallet-txt">' + walletLabels[w] + '</span>')
               + '</button>');

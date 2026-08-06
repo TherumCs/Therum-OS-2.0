@@ -16,6 +16,7 @@ export interface CounterSettings extends Record<string, unknown> {
   cardEvolve: boolean;
   cardAlign: 'start' | 'center' | 'end';
   cardRadius: 'sharp' | 'soft' | 'round' | 'pill' | 'squircle';
+  buttonShape: 'sharp' | 'soft' | 'round' | 'pill';
   cardRatio: 'square' | 'portrait' | 'tall' | 'landscape' | 'natural';
   cardFit: 'cover' | 'contain';
   cardShadow: 'none' | 'soft' | 'strong';
@@ -127,6 +128,19 @@ export function CustomizationClient({ initial }: { initial: CounterSettings }) {
             ['round', 'Round', ''],
             ['pill', 'Pill', 'Heavily rounded.'],
             ['squircle', 'Squircle', 'Continuous corner.'],
+          ]}
+        />
+
+        <PreviewPicker
+          label="Button shape"
+          desc="Corner radius on storefront buttons — Add to cart, checkout, everywhere they appear."
+          field="buttonShape"
+          previews={RADIUS_PREVIEWS}
+          options={[
+            ['sharp', 'Sharp', 'No radius.'],
+            ['soft', 'Soft', 'Barely there.'],
+            ['round', 'Round', 'Rounded corners.'],
+            ['pill', 'Pill', 'Fully rounded.'],
           ]}
         />
 

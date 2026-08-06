@@ -59,7 +59,7 @@ main{padding:40px 0 80px}
 .card .price{margin-top:auto;padding-top:10px;font-weight:700;font-size:15px;font-variant-numeric:tabular-nums}
 /* Measured from the ported theme's .c-button: 12px/600, .06em tracking,
    uppercase, square, 18px 50px, ink fill with a 1px ink border. */
-.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--ac-btn);color:#fff;border:1px solid var(--ac-btn);border-radius:0;padding:18px 40px;font-size:12px;line-height:1;font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-family:var(--f);cursor:pointer;transition:background var(--e),border-color var(--e),color var(--e)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--ac-btn);color:#fff;border:1px solid var(--ac-btn);border-radius:var(--th-btn-r,0);padding:18px 40px;font-size:12px;line-height:1;font-weight:600;letter-spacing:.06em;text-transform:uppercase;font-family:var(--f);cursor:pointer;transition:background var(--e),border-color var(--e),color var(--e)}
 .btn:hover{background:var(--ac-btn-h);border-color:var(--ac-btn-h)}
 .btn:disabled{opacity:0.5;cursor:default}
 .btn.ghost{background:transparent;color:var(--tx);border:1px solid var(--tx)}
@@ -603,7 +603,7 @@ export interface StoreChrome {
  * filters and the product-card behaviour, none of which the site chrome knows
  * about. Only the frame is replaced.
  */
-export function layout(title: string, body: string, extraScript = '', chrome?: StoreChrome, seo?: SeoMeta, siteMax?: string): string {
+export function layout(title: string, body: string, extraScript = '', chrome?: StoreChrome, seo?: SeoMeta, siteMax?: string, btnRadius?: string): string {
   const header = chrome?.header
     ? `<div id="brx-header">${chrome.header}</div>`
     : `<header class="site"><div class="wrap">
@@ -626,10 +626,10 @@ export function layout(title: string, body: string, extraScript = '', chrome?: S
   // Only the ported header carries the cart/search/wishlist hooks; the
   // fallback chrome above has its own plain cart link and needs none of it.
   const headerIcons = chrome?.header ? chrome.headerIcons ?? HEADER_CART_DEFAULTS : null;
-  return layoutInner(title, body, extraScript, header, footer, themeCss, headerIcons, seo, siteMax);
+  return layoutInner(title, body, extraScript, header, footer, themeCss, headerIcons, seo, siteMax, btnRadius);
 }
 
-function layoutInner(title: string, body: string, extraScript: string, header: string, footer: string, themeCss: string, headerIcons: HeaderCartConfig | null = null, seo?: SeoMeta, siteMax?: string): string {
+function layoutInner(title: string, body: string, extraScript: string, header: string, footer: string, themeCss: string, headerIcons: HeaderCartConfig | null = null, seo?: SeoMeta, siteMax?: string, btnRadius?: string): string {
   return `<!doctype html>
 <html lang="en">
 <head>
@@ -638,7 +638,7 @@ function layoutInner(title: string, body: string, extraScript: string, header: s
 <title>${esc(title)}</title>
 ${seoTags(title, seo)}
 ${themeCss}
-<style>:root{--th-site-max:${siteMax ?? '1080px'}}${CSS}${BANNER_STYLES}${PRODUCT_GRID_FALLBACK_CSS}${CHECKOUT_FLOW_CSS}${SHOP_TOOLBAR_CSS}${WISHLIST_CSS}${ACCOUNT_CSS}${headerIcons ? HEADER_CART_CSS : ''}</style>
+<style>:root{--th-site-max:${siteMax ?? '1080px'};--th-btn-r:${btnRadius ?? '0'}}${CSS}${BANNER_STYLES}${PRODUCT_GRID_FALLBACK_CSS}${CHECKOUT_FLOW_CSS}${SHOP_TOOLBAR_CSS}${WISHLIST_CSS}${ACCOUNT_CSS}${headerIcons ? HEADER_CART_CSS : ''}</style>
 </head>
 <body>
 <div id="th-shell">

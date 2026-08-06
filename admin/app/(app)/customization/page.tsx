@@ -29,6 +29,7 @@ const DEFAULTS: CounterSettings = {
   cardEvolve: true,
   cardAlign: 'start',
   cardRadius: 'sharp',
+  buttonShape: 'sharp',
   cardRatio: 'square',
   cardFit: 'cover',
   cardShadow: 'soft',

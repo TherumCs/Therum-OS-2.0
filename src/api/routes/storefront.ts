@@ -120,7 +120,11 @@ async function page(title: string, body: string, extraScript = '', seo?: SeoMeta
   // the shop is not the one page that stays narrow when everything else widens.
   const site = await settingsService.getSite().catch(() => null);
   const siteMax = SITE_WIDTHS[site?.contentWidth ?? 'wide'] ?? SITE_WIDTHS.wide;
-  return layout(title, body, extraScript, await storeChrome(), seo, siteMax);
+  // Button corner radius is a Counter customization, injected once as a CSS var
+  // so every .btn across the store (Add to cart, checkout) honours one setting.
+  const counter = await settingsService.getCounter().catch(() => null);
+  const btnRadius = ({ sharp: '0', soft: '8px', round: '14px', pill: '999px' } as Record<string, string>)[counter?.buttonShape ?? 'sharp'] ?? '0';
+  return layout(title, body, extraScript, await storeChrome(), seo, siteMax, btnRadius);
 }
 
 /**

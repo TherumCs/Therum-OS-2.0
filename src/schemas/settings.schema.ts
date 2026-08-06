@@ -446,6 +446,7 @@ export const CounterSettingsInput = z.object({
    *              shape.
    */
   cardRadius: z.enum(['sharp', 'soft', 'round', 'pill', 'squircle']).optional(),
+  buttonShape: z.enum(['sharp', 'soft', 'round', 'pill']).optional(),
   /** Image proportion. 'natural' lets the photo decide. */
   cardRatio: z.enum(['square', 'portrait', 'tall', 'landscape', 'natural']).optional(),
   /** Whether the image fills its frame or fits inside it. */

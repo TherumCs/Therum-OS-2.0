@@ -276,6 +276,8 @@ export interface CounterSettings {
    *   editorial — oversized wordmark, overlapping hero, price in the button.
    */
   pdpStyle: 'classic' | 'apple' | 'athletic' | 'editorial';
+  /** Corner radius on storefront buttons (Add to cart, checkout, everywhere). */
+  buttonShape: 'sharp' | 'soft' | 'round' | 'pill';
   /** Which side the imagery sits on. Ignored by styles that are centred or full-bleed. */
   pdpImageSide: 'left' | 'right';
   /** Where the thumbnail strip goes. */
@@ -428,6 +430,7 @@ const COUNTER_DEFAULTS: CounterSettings = {
   cardShell: 'bare',
   cardPreset: 'editorial',
   pdpStyle: 'classic',
+  buttonShape: 'sharp',
   pdpImageSide: 'left',
   pdpThumbs: 'bottom',
   // 'auto', so a product carrying a video renders as a motion card and one
