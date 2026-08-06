@@ -784,36 +784,49 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
       return `background:linear-gradient(135deg, ${safe[0]} 0 50%, ${safe[1]} 50% 100%)`;
     };
 
-    const swatches = colors.length > 1
-      ? `<label>Colour</label>
-         <div class="swatches" id="swatches">
-           ${/*
-              "All" shows every shot across every colourway. It is a GALLERY
-              VIEW, not a colour: it deliberately does not change which variant
-              is being bought, so the Add button never ends up with nothing
-              selected. The first colour stays selected underneath.
-            */''}
-           <button type="button" class="swatch swatch--all" data-all="1" title="All colours" aria-label="Show every image">
-             <span class="swatch-all-mark">ALL</span>
+    // A filter-style box: the trigger shows the current colour + an Edit hint;
+    // clicking it opens the swatch panel (like the shop's filter pills), and
+    // choosing a swatch collapses it back to the chosen value.
+    const colorBox = colors.length > 1
+      ? `<div class="pdp-box" data-box="color">
+           <button type="button" class="pdp-box__trigger" data-box-toggle="color" aria-expanded="false">
+             <span class="pdp-box__label">Colour</span>
+             <span class="pdp-box__value" id="color-value">${esc(colors[0] ?? 'Choose')}</span>
+             <span class="pdp-box__edit">Edit</span>
            </button>
-           ${colors.map((c, i) => {
-            const v = firstOf(c)!;
-            const paint = fill(v.colorCodes);
-            const inner = paint
-              ? `<span class="swatch-fill" style="${paint}"></span>`
-              : v.image ? `<img src="${esc(v.image)}" alt="" loading="lazy">` : `<span class="swatch-blank"></span>`;
-            return `<button type="button" class="swatch${i === 0 ? ' sel' : ''}" data-color="${esc(c)}" title="${esc(c)}" aria-label="${esc(c)}"${v.sellable ? '' : ' disabled'}>${inner}</button>`;
-          }).join('')}</div>
-         <div class="swatch-name" id="swatch-name">${esc(colors[0] ?? '')}</div>`
+           <div class="pdp-box__panel" data-box-panel="color" hidden>
+             <div class="swatches" id="swatches">
+               ${/*
+                  "All" shows every shot across every colourway. A GALLERY VIEW,
+                  not a colour: it never changes which variant is being bought.
+                */''}
+               <button type="button" class="swatch swatch--all" data-all="1" title="All colours" aria-label="Show every image"><span class="swatch-all-mark">ALL</span></button>
+               ${colors.map((c, i) => {
+                const v = firstOf(c)!;
+                const paint = fill(v.colorCodes);
+                const inner = paint
+                  ? `<span class="swatch-fill" style="${paint}"></span>`
+                  : v.image ? `<img src="${esc(v.image)}" alt="" loading="lazy">` : `<span class="swatch-blank"></span>`;
+                return `<button type="button" class="swatch${i === 0 ? ' sel' : ''}" data-color="${esc(c)}" title="${esc(c)}" aria-label="${esc(c)}"${v.sellable ? '' : ' disabled'}>${inner}</button>`;
+              }).join('')}
+             </div>
+           </div>
+         </div>`
       : '';
 
-    const sizeRow = sizes.length > 1
-      ? `<label>Size</label>
-         <div class="variant-picker" id="sizes">${sizes.map((z, i) => `
-            <button type="button" data-size="${esc(z)}" class="${i === 0 ? 'sel' : ''}">${esc(z)}</button>`).join('')}</div>`
-      // One size is not a choice — say it once instead of repeating it on
-      // every option.
-      : sizes.length === 1 ? `<div class="single-size">${esc(sizes[0]!)}</div>` : '';
+    const sizeBox = sizes.length > 1
+      ? `<div class="pdp-box" data-box="size">
+           <button type="button" class="pdp-box__trigger" data-box-toggle="size" aria-expanded="false">
+             <span class="pdp-box__label">Size</span>
+             <span class="pdp-box__value" id="size-value">${esc(sizes[0] ?? 'Choose')}</span>
+             <span class="pdp-box__edit">Edit</span>
+           </button>
+           <div class="pdp-box__panel" data-box-panel="size" hidden>
+             <div class="variant-picker" id="sizes">${sizes.map((z, i) => `<button type="button" data-size="${esc(z)}" class="${i === 0 ? 'sel' : ''}">${esc(z)}</button>`).join('')}</div>
+           </div>
+         </div>`
+      // One size is not a choice — state it once as a static box.
+      : sizes.length === 1 ? `<div class="pdp-box pdp-box--static"><span class="pdp-box__label">Size</span><span class="pdp-box__value">${esc(sizes[0]!)}</span></div>` : '';
 
     // Fallback for products whose variants carry neither colour nor size (a
     // plain SKU list) — those still need something to pick from.
@@ -822,7 +835,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
           <button type="button" data-variant="${esc(v.id)}" data-price="${v.price}" ${v.sellable ? '' : 'disabled'} class="${i === 0 && v.sellable ? 'sel' : ''}">${esc(v.label)}</button>`).join('')}</div>`
       : '';
 
-    const picker = `${swatches}${sizeRow}${plainPicker}`;
+    const picker = `${colorBox}${sizeBox}${plainPicker}`;
 
     const firstAvailable = variants.find((v) => v.sellable);
 
@@ -878,33 +891,35 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     const price = money(firstAvailable?.price ?? variants[0]?.price ?? 0);
 
     html(reply, await page(`${p.name} — Therum Store`, `
-      <a class="pdp-back" href="/shop" onclick="if(document.referrer.indexOf(location.host)>-1&&history.length>1){history.back();return false;}">‹ Back</a>
+      <div class="pdp-topbar">
+        <a class="pdp-back" href="/shop" onclick="if(document.referrer.indexOf(location.host)>-1&&history.length>1){history.back();return false;}">‹ Back</a>
+        ${/* Save + Share sit opposite the back button, up top. The wishlist
+              runtime (already on every store page) drives both. */''}
+        <div class="pdp-topbar__actions">
+          <button type="button" class="pdp-act" data-wishlist-toggle="${esc(p.id)}" aria-pressed="false" aria-label="Save to favorites">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.4-4.5-9.7-9.1C1 8.6 2.4 5.5 5.3 5c2-.3 3.6.8 4.7 2.4C11.1 5.8 12.7 4.7 14.7 5c2.9.5 4.3 3.6 3 6.9C19.4 16.5 12 21 12 21z"/></svg>
+            <span>Save</span>
+          </button>
+          <button type="button" class="pdp-act" data-share-url="/product/${esc(p.slug)}" data-share-title="${esc(p.name)}" aria-label="Share">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.4 10.7 15.6 6.5M8.4 13.3l7.2 4.2"/></svg>
+            <span>Share</span>
+          </button>
+        </div>
+      </div>
       <div class="${pdpClasses}">
         ${pdpStyle === 'editorial' ? `<div class="pdp__wordmark">${esc(p.name.split(' ')[0] ?? p.name)}</div>` : ''}
         <div class="pdp__media">${galleryHtml}</div>
         <div class="pdp__info">
-          ${p.vendor ? `<span class="pill">${esc(p.vendor.name)}</span>` : ''}
-          <h1 class="page-title product-title" style="margin-top:10px">${esc(p.name)}</h1>
+          ${taxonomyPills ? `<div class="taxonomy-row pdp-cats">${taxonomyPills}</div>` : ''}
+          <h1 class="page-title product-title">${esc(p.name)}</h1>
           <div class="price-big price" id="price">${price}</div>
           <div class="stock-note" id="stock">${firstAvailable ? esc(firstAvailable.stock) : 'Sold out'}</div>
-          ${taxonomyPills ? `<div class="taxonomy-row pdp-cats">${taxonomyPills}</div>` : ''}
-          ${/* Favorites + Share reuse the store-wide wishlist runtime, which is
-                already on the page — data-wishlist-toggle persists the save and
-                flips aria-pressed; data-share-url opens the native share sheet. */''}
-          <div class="pdp-actions">
-            <button type="button" class="pdp-act" data-wishlist-toggle="${esc(p.id)}" aria-pressed="false" aria-label="Save to favorites">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.4-4.5-9.7-9.1C1 8.6 2.4 5.5 5.3 5c2-.3 3.6.8 4.7 2.4C11.1 5.8 12.7 4.7 14.7 5c2.9.5 4.3 3.6 3 6.9C19.4 16.5 12 21 12 21z"/></svg>
-              <span>Save</span>
-            </button>
-            <button type="button" class="pdp-act" data-share-url="/product/${esc(p.slug)}" data-share-title="${esc(p.name)}" aria-label="Share">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.4 10.7 15.6 6.5M8.4 13.3l7.2 4.2"/></svg>
-              <span>Share</span>
-            </button>
+          ${/* Three boxes: Colour and Size open filter-style panels and collapse
+                to the chosen value; Quantity is an inline stepper. */''}
+          <div class="pdp-picker">
+            ${picker}
+            ${firstAvailable ? `<div class="pdp-box pdp-box--qty" id="qtywrap"><span class="pdp-box__label">Quantity</span><div class="qtybox"><button type="button" class="qbtn" data-q="-1" aria-label="One fewer">−</button><span class="qn" id="qn" aria-live="polite">1</span><button type="button" class="qbtn" data-q="1" aria-label="One more">+</button></div></div>` : ''}
           </div>
-          ${picker}
-          ${firstAvailable ? `<div class="pdp-qty" id="qtywrap"><span class="pdp-qty__label">Quantity</span><div class="qtybox"><button type="button" class="qbtn" data-q="-1" aria-label="One fewer">−</button><span class="qn" id="qn" aria-live="polite">1</span><button type="button" class="qbtn" data-q="1" aria-label="One more">+</button></div></div>` : ''}
-          ${/* Editorial puts the price INSIDE the button, which is the whole
-                point of that layout — the price is not repeated above it. */''}
           <button class="btn" id="add" ${firstAvailable ? '' : 'disabled'}>Add to cart${pdpStyle === 'editorial' ? ` · <span id="btn-price">${price}</span>` : ''}</button>
           ${p.description ? `<div class="product-desc">${esc(p.description).replace(/\n/g, '<br>')}</div>` : ''}
         </div>
@@ -1011,7 +1026,8 @@ function applyVariant(v){
   const bp=document.getElementById('btn-price'); if(bp) bp.textContent=fmt;
   document.getElementById('stock').textContent=v.stock;
   document.getElementById('add').disabled=!v.sellable;
-  const nm=document.getElementById('swatch-name');if(nm&&v.color)nm.textContent=v.color;
+  var cv=document.getElementById('color-value');if(cv&&v.color)cv.textContent=v.color;
+  var szv=document.getElementById('size-value');if(szv&&v.size)szv.textContent=v.size;
   showVariantShots(v);
   clampQty();
 }
@@ -1030,6 +1046,8 @@ if(sw)sw.addEventListener('click',(e)=>{
   sw.querySelectorAll('button').forEach(x=>x.classList.remove('sel'));
   b.classList.add('sel');
   pickColor=b.dataset.color;resolve();
+  var cv=document.getElementById('color-value');if(cv)cv.textContent=pickColor;
+  closeBox('color');
 });
 const sz=document.getElementById('sizes');
 if(sz)sz.addEventListener('click',(e)=>{
@@ -1037,6 +1055,30 @@ if(sz)sz.addEventListener('click',(e)=>{
   sz.querySelectorAll('button').forEach(x=>x.classList.remove('sel'));
   b.classList.add('sel');
   pickSize=b.dataset.size;resolve();
+  var szv=document.getElementById('size-value');if(szv)szv.textContent=pickSize;
+  closeBox('size');
+});
+// The 3-box picker opens filter-style: a trigger toggles its own panel and
+// closes the others (accordion); choosing a value (above) collapses it back.
+function closeBox(name){
+  var t=document.querySelector('[data-box-toggle="'+name+'"]'),p=document.querySelector('[data-box-panel="'+name+'"]');
+  if(t)t.setAttribute('aria-expanded','false'); if(p)p.hidden=true;
+}
+document.querySelectorAll('[data-box-toggle]').forEach(function(t){
+  t.addEventListener('click',function(){
+    var name=t.getAttribute('data-box-toggle');
+    var panel=document.querySelector('[data-box-panel="'+name+'"]');
+    var wasOpen=t.getAttribute('aria-expanded')==='true';
+    document.querySelectorAll('[data-box-toggle]').forEach(function(x){x.setAttribute('aria-expanded','false');});
+    document.querySelectorAll('[data-box-panel]').forEach(function(x){x.hidden=true;});
+    if(!wasOpen&&panel){t.setAttribute('aria-expanded','true');panel.hidden=false;}
+  });
+});
+document.addEventListener('click',function(e){
+  if(e.target.closest&&!e.target.closest('.pdp-box')){
+    document.querySelectorAll('[data-box-toggle]').forEach(function(x){x.setAttribute('aria-expanded','false');});
+    document.querySelectorAll('[data-box-panel]').forEach(function(x){x.hidden=true;});
+  }
 });
 const picker=document.getElementById('picker');
 if(picker)picker.addEventListener('click',(e)=>{

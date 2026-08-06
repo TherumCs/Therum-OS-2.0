@@ -289,12 +289,13 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
    size whether the product has three photographs or thirty.
    Native overflow scrolling rather than a carousel library, so trackpad,
    touch and shift-wheel all work without reimplementation. */
-/* ── PDP: back, favorites/share, quantity ─────────────────────────────── */
-.pdp-back{display:inline-flex;align-items:center;gap:4px;margin:0 0 14px;padding:6px 12px 6px 8px;
+/* ── PDP: topbar (back + save/share), 3-box picker, quantity ──────────── */
+.pdp-topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin:0 0 16px}
+.pdp-back{display:inline-flex;align-items:center;gap:4px;padding:6px 12px 6px 8px;
   font-size:13px;font-weight:600;color:var(--tx2,#666);text-decoration:none;background:none;
   border:1px solid var(--bd,#e5e7eb);border-radius:999px;cursor:pointer;transition:color var(--e),border-color var(--e)}
 .pdp-back:hover{color:var(--tx,#111);border-color:var(--tx,#111)}
-.pdp-actions{display:flex;gap:8px;margin:14px 0 2px}
+.pdp-topbar__actions{display:flex;gap:8px}
 .pdp-act{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--bd,#e5e7eb);
   border-radius:999px;background:var(--sf,#fff);color:var(--tx,#111);font:600 12px var(--f,inherit);cursor:pointer;
   transition:border-color var(--e),background var(--e),color var(--e)}
@@ -302,9 +303,22 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 .pdp-act svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round}
 .pdp-act[aria-pressed="true"]{background:var(--tx,#111);color:var(--sf,#fff);border-color:var(--tx,#111)}
 .pdp-act[aria-pressed="true"] svg{fill:currentColor;stroke:currentColor}
-.pdp-cats{margin:12px 0 2px}
-.pdp-qty{display:flex;align-items:center;gap:14px;margin:16px 0 4px}
-.pdp-qty__label{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--tx2,#666)}
+.pdp-cats{margin:0 0 10px}
+/* Three boxes — Colour / Size open a panel and collapse to the chosen value;
+   Quantity holds an inline, always-adjustable stepper. */
+.pdp-picker{display:flex;flex-direction:column;gap:10px;margin:18px 0}
+.pdp-box{position:relative;border:1px solid var(--bd,#e5e7eb);border-radius:12px;background:var(--sf,#fff)}
+.pdp-box--static,.pdp-box--qty{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px}
+.pdp-box__trigger{display:flex;align-items:center;gap:12px;width:100%;padding:12px 16px;background:none;border:0;
+  cursor:pointer;font:inherit;color:var(--tx,#111);text-align:left;border-radius:12px}
+.pdp-box__label{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--tx2,#888);flex:0 0 auto;min-width:64px}
+.pdp-box__value{flex:1 1 auto;font-size:15px;font-weight:600;color:var(--tx,#111)}
+.pdp-box__edit{flex:0 0 auto;font-size:12px;font-weight:600;color:var(--tx2,#888)}
+.pdp-box__trigger[aria-expanded="true"]{border-bottom-left-radius:0;border-bottom-right-radius:0}
+.pdp-box__trigger:hover .pdp-box__edit,.pdp-box__trigger[aria-expanded="true"] .pdp-box__edit{color:var(--tx,#111)}
+.pdp-box__panel{border-top:1px solid var(--bd,#e5e7eb);padding:14px 16px}
+.pdp-box__panel .swatches,.pdp-box__panel .variant-picker{margin:0}
+.pdp-box--qty .qtybox{margin-left:auto}
 .qtybox{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--bd,#e5e7eb);border-radius:10px;padding:4px}
 .qbtn{width:30px;height:30px;border:0;background:none;font-size:18px;line-height:1;cursor:pointer;color:var(--tx,#111);
   border-radius:7px;display:inline-flex;align-items:center;justify-content:center;transition:background var(--e)}
