@@ -337,6 +337,8 @@ body.th-search-open footer.site{
 export interface HeaderCartConfig {
   cartStyle: 'mini' | 'sidebar';
   cartSidebarReveal: 'overlay' | 'push';
+  /** Mobile only: tap the bag to slide the drawer out, or open the cart page. */
+  cartMobile: 'drawer' | 'page';
   /** Hex. The colour uncovered behind a shifted page. */
   cartSidebarGround: string;
   searchStyle: 'takeover' | 'inline' | 'fullwidth' | 'immersive';
@@ -353,7 +355,7 @@ export interface HeaderCartConfig {
 }
 
 export const HEADER_CART_DEFAULTS: HeaderCartConfig = {
-  cartStyle: 'sidebar', cartSidebarReveal: 'push', cartSidebarGround: '#0a0a0a',
+  cartStyle: 'sidebar', cartSidebarReveal: 'push', cartSidebarGround: '#0a0a0a', cartMobile: 'drawer',
   searchStyle: 'takeover', searchLayout: 'grid', wishlistEnabled: true,
 };
 
@@ -362,6 +364,7 @@ export function headerCartRuntime(cfg: HeaderCartConfig = HEADER_CART_DEFAULTS):
 (function(){
   var SIDEBAR = ${JSON.stringify(cfg.cartStyle)} === 'sidebar';
   var PUSH = ${JSON.stringify(cfg.cartSidebarReveal)} === 'push';
+  var MOBILE_PAGE = ${JSON.stringify(cfg.cartMobile)} === 'page';
   var GROUND = ${JSON.stringify(cfg.cartSidebarGround)};
   var SEARCH_STYLE = ${JSON.stringify(cfg.searchStyle)};
   var SEARCH_LAYOUT = ${JSON.stringify(cfg.searchLayout ?? 'grid')};
@@ -515,6 +518,9 @@ export function headerCartRuntime(cfg: HeaderCartConfig = HEADER_CART_DEFAULTS):
     var t = e.target;
     if (!t || !t.closest) return;
     if (t.closest('.js-cart-sidebar-open, .js-cart > a, .js-cart > div > a')) {
+      // Mobile can be set to open the cart PAGE instead of the slide-out drawer:
+      // let the bag's own /cart link navigate rather than intercepting it.
+      if (MOBILE_PAGE && window.matchMedia && window.matchMedia('(pointer: coarse)').matches) return;
       e.preventDefault();
       isOpen() ? close() : open();
       return;

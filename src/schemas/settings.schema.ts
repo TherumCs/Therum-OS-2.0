@@ -374,6 +374,7 @@ export const CounterSettingsInput = z.object({
    * revealed from under it, and nothing is covered.
    */
   cartSidebarReveal: z.enum(['overlay', 'push']).optional(),
+  cartMobile: z.enum(['drawer', 'page']).optional(),
   // The ground uncovered behind a shifted page. Hex only: it is written
   // straight into a custom property, so anything looser is a style-injection
   // hole in every page of the storefront.

@@ -7,6 +7,7 @@ import { ACTION_PREVIEWS, ALIGN_PREVIEWS, MEDIA_PREVIEWS, PRESET_PREVIEWS, GAP_P
 export interface CounterSettings extends Record<string, unknown> {
   cartStyle: 'mini' | 'sidebar';
   cartSidebarReveal: 'overlay' | 'push';
+  cartMobile: 'drawer' | 'page';
   cartSidebarGround: string;
   cardShell: 'bare' | 'boxed' | 'elevated';
   cardMedia: 'auto' | 'still' | 'fade' | 'gallery' | 'motion';
@@ -88,6 +89,15 @@ export function CustomizationClient({ initial }: { initial: CounterSettings }) {
           options={[
             ['push', 'Shift the page'],
             ['overlay', 'Overlay the page'],
+          ]}
+        />
+        <FormSelect
+          label="Cart on mobile"
+          desc="On phones, tapping the bag can slide the drawer out or open the full cart page. Choose whichever feels right — the page is the most reliable, the drawer keeps them where they were shopping."
+          field="cartMobile"
+          options={[
+            ['drawer', 'Slide-out drawer'],
+            ['page', 'Go to the cart page'],
           ]}
         />
         <FormColor

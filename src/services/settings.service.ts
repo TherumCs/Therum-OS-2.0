@@ -262,6 +262,7 @@ export interface CounterSettings {
   taxRatePct: number;
   cartStyle: 'mini' | 'sidebar';
   cartSidebarReveal: 'overlay' | 'push';
+  cartMobile: 'drawer' | 'page';
   cartSidebarGround: string;
   cardShell: 'bare' | 'boxed' | 'elevated';
   cardMedia: 'auto' | 'still' | 'fade' | 'gallery' | 'motion';
@@ -424,6 +425,7 @@ const COUNTER_DEFAULTS: CounterSettings = {
   // markup was built for, and push is what Bam asked the drawer to do.
   cartStyle: 'sidebar',
   cartSidebarReveal: 'push',
+  cartMobile: 'drawer',
   cartSidebarGround: '#0a0a0a',
   // Bare + editorial: the reference Bam led with, and the one that cannot look
   // wrong on a store whose products have no ratings, sizes or was-prices yet.

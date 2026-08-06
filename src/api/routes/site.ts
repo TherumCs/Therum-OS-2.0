@@ -119,6 +119,7 @@ export async function buildNav(current: string, req?: FastifyRequest): Promise<{
   chrome.headerIcons = {
     cartStyle: counterSettings.cartStyle,
     cartSidebarReveal: counterSettings.cartSidebarReveal,
+    cartMobile: counterSettings.cartMobile,
     cartSidebarGround: counterSettings.cartSidebarGround,
     searchStyle: counterSettings.searchStyle,
     searchLayout: counterSettings.searchLayout,

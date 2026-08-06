@@ -20,6 +20,7 @@ export const dynamic = 'force-dynamic';
 const DEFAULTS: CounterSettings = {
   cartStyle: 'sidebar',
   cartSidebarReveal: 'push',
+  cartMobile: 'drawer',
   cartSidebarGround: '#0a0a0a',
   cardShell: 'bare',
   cardMedia: 'auto',
