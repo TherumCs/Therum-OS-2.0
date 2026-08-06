@@ -784,30 +784,26 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
       return `background:linear-gradient(135deg, ${safe[0]} 0 50%, ${safe[1]} 50% 100%)`;
     };
 
-    // A filter-style box: the trigger shows the current colour + an Edit hint;
-    // clicking it opens the swatch panel (like the shop's filter pills), and
-    // choosing a swatch collapses it back to the chosen value.
+    // A box you tap open (like the shop's filter pills). It starts UNSET —
+    // "Pick colour" — and BECOMES the chosen swatch + name once you choose;
+    // nothing is pre-selected.
     const colorBox = colors.length > 1
-      ? `<div class="pdp-box" data-box="color">
-           <button type="button" class="pdp-box__trigger" data-box-toggle="color" aria-expanded="false">
-             <span class="pdp-box__label">Colour</span>
-             <span class="pdp-box__value" id="color-value">${esc(colors[0] ?? 'Choose')}</span>
-             <span class="pdp-box__edit">Edit</span>
-           </button>
-           <div class="pdp-box__panel" data-box-panel="color" hidden>
+      ? `<div class="pdp-box" data-box="color" data-box-toggle="color" role="button" tabindex="0" aria-expanded="false">
+           <span class="pdp-box__k">Colour</span>
+           <span class="pdp-box__v"><span class="pdp-box__dot" data-color-dot hidden></span><span id="color-value">Pick colour</span></span>
+           <div class="pdp-box__pop" data-box-panel="color" hidden>
              <div class="swatches" id="swatches">
-               ${/*
-                  "All" shows every shot across every colourway. A GALLERY VIEW,
-                  not a colour: it never changes which variant is being bought.
-                */''}
+               ${/* "All" shows every shot across every colourway — a gallery view,
+                    not a colour, so it never changes the variant being bought. */''}
                <button type="button" class="swatch swatch--all" data-all="1" title="All colours" aria-label="Show every image"><span class="swatch-all-mark">ALL</span></button>
-               ${colors.map((c, i) => {
+               ${colors.map((c) => {
                 const v = firstOf(c)!;
                 const paint = fill(v.colorCodes);
                 const inner = paint
                   ? `<span class="swatch-fill" style="${paint}"></span>`
                   : v.image ? `<img src="${esc(v.image)}" alt="" loading="lazy">` : `<span class="swatch-blank"></span>`;
-                return `<button type="button" class="swatch${i === 0 ? ' sel' : ''}" data-color="${esc(c)}" title="${esc(c)}" aria-label="${esc(c)}"${v.sellable ? '' : ' disabled'}>${inner}</button>`;
+                const dot = paint || (v.image ? `background-image:url('${esc(v.image)}');background-size:cover` : 'background:#cfcfcf');
+                return `<button type="button" class="swatch" data-color="${esc(c)}" data-dot="${esc(dot)}" title="${esc(c)}" aria-label="${esc(c)}"${v.sellable ? '' : ' disabled'}>${inner}</button>`;
               }).join('')}
              </div>
            </div>
@@ -815,18 +811,15 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
       : '';
 
     const sizeBox = sizes.length > 1
-      ? `<div class="pdp-box" data-box="size">
-           <button type="button" class="pdp-box__trigger" data-box-toggle="size" aria-expanded="false">
-             <span class="pdp-box__label">Size</span>
-             <span class="pdp-box__value" id="size-value">${esc(sizes[0] ?? 'Choose')}</span>
-             <span class="pdp-box__edit">Edit</span>
-           </button>
-           <div class="pdp-box__panel" data-box-panel="size" hidden>
-             <div class="variant-picker" id="sizes">${sizes.map((z, i) => `<button type="button" data-size="${esc(z)}" class="${i === 0 ? 'sel' : ''}">${esc(z)}</button>`).join('')}</div>
+      ? `<div class="pdp-box" data-box="size" data-box-toggle="size" role="button" tabindex="0" aria-expanded="false">
+           <span class="pdp-box__k">Size</span>
+           <span class="pdp-box__v"><span id="size-value">Pick size</span></span>
+           <div class="pdp-box__pop" data-box-panel="size" hidden>
+             <div class="variant-picker" id="sizes">${sizes.map((z) => `<button type="button" data-size="${esc(z)}">${esc(z)}</button>`).join('')}</div>
            </div>
          </div>`
       // One size is not a choice — state it once as a static box.
-      : sizes.length === 1 ? `<div class="pdp-box pdp-box--static"><span class="pdp-box__label">Size</span><span class="pdp-box__value">${esc(sizes[0]!)}</span></div>` : '';
+      : sizes.length === 1 ? `<div class="pdp-box pdp-box--static"><span class="pdp-box__k">Size</span><span class="pdp-box__v">${esc(sizes[0]!)}</span></div>` : '';
 
     // Fallback for products whose variants carry neither colour nor size (a
     // plain SKU list) — those still need something to pick from.
@@ -838,6 +831,9 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     const picker = `${colorBox}${sizeBox}${plainPicker}`;
 
     const firstAvailable = variants.find((v) => v.sellable);
+    // With colour or size to pick, nothing is pre-selected — Add waits until the
+    // shopper has chosen; a single-variant product has no choice, so it is ready.
+    const hasChoice = colors.length > 1 || sizes.length > 1;
 
     // Gallery: stills + video, one strip. Selecting a video thumb plays it
     // (muted, controls) in the main slot; stills swap the image back in.
@@ -918,9 +914,9 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
                 to the chosen value; Quantity is an inline stepper. */''}
           <div class="pdp-picker">
             ${picker}
-            ${firstAvailable ? `<div class="pdp-box pdp-box--qty" id="qtywrap"><span class="pdp-box__label">Quantity</span><div class="qtybox"><button type="button" class="qbtn" data-q="-1" aria-label="One fewer">−</button><span class="qn" id="qn" aria-live="polite">1</span><button type="button" class="qbtn" data-q="1" aria-label="One more">+</button></div></div>` : ''}
+            ${firstAvailable ? `<div class="pdp-box pdp-box--qty" id="qtywrap"><span class="pdp-box__k">Quantity</span><div class="qtybox"><button type="button" class="qbtn" data-q="-1" aria-label="One fewer">−</button><span class="qn" id="qn" aria-live="polite">1</span><button type="button" class="qbtn" data-q="1" aria-label="One more">+</button></div></div>` : ''}
           </div>
-          <button class="btn" id="add" ${firstAvailable ? '' : 'disabled'}>Add to cart${pdpStyle === 'editorial' ? ` · <span id="btn-price">${price}</span>` : ''}</button>
+          <button class="btn" id="add" ${firstAvailable && !hasChoice ? '' : 'disabled'}>${!firstAvailable ? 'Sold out' : hasChoice ? 'Select colour &amp; size' : 'Add to cart'}${pdpStyle === 'editorial' && !hasChoice ? ` · <span id="btn-price">${price}</span>` : ''}</button>
           ${p.description ? `<div class="product-desc">${esc(p.description).replace(/\n/g, '<br>')}</div>` : ''}
         </div>
       </div>`, `
@@ -990,7 +986,9 @@ stripArrows();
 // of it instead of throwing the other angles away.
 const PRODUCT_SHOTS=${JSON.stringify(gallery.filter((g) => g.type === 'image').map((g) => ({ url: g.url, alt: g.alt })))};
 const VARIANTS=${JSON.stringify(variants)};
-let sel=VARIANTS.find(v=>v.sellable)||VARIANTS[0];
+var HAS_COLOR=${colors.length > 1},HAS_SIZE=${sizes.length > 1};
+// Nothing pre-selected when there's a choice to make.
+let sel=(HAS_COLOR||HAS_SIZE)?null:(VARIANTS.find(v=>v.sellable)||VARIANTS[0]);
 // Quantity — clamped to the selected variant's max (a one-of-one caps at 1,
 // which simply disables +). Re-clamped whenever the chosen variant changes.
 let qty=1;
@@ -1014,8 +1012,17 @@ clampQty();
 // size they already picked.
 let pickColor=sel&&sel.color,pickSize=sel&&sel.size;
 function resolve(){
-  const match=VARIANTS.find(v=>(pickColor==null||v.color===pickColor)&&(pickSize==null||v.size===pickSize));
-  if(match)applyVariant(match);
+  // No pre-selection: resolve to a variant only once every choice the product
+  // actually offers has been made.
+  if((HAS_COLOR&&pickColor==null)||(HAS_SIZE&&pickSize==null)){sel=null;syncBuy();return;}
+  const match=VARIANTS.find(v=>(!HAS_COLOR||v.color===pickColor)&&(!HAS_SIZE||v.size===pickSize));
+  if(match){applyVariant(match);} else {sel=null;syncBuy();}
+}
+function syncBuy(){
+  var add=document.getElementById('add');if(!add)return;
+  var ok=sel&&sel.sellable;
+  add.disabled=!ok;
+  add.textContent=ok?'Add to cart':'Select colour & size';
 }
 function applyVariant(v){
   sel=v;
@@ -1025,11 +1032,11 @@ function applyVariant(v){
   // that updated one and not the other would show two different prices.
   const bp=document.getElementById('btn-price'); if(bp) bp.textContent=fmt;
   document.getElementById('stock').textContent=v.stock;
-  document.getElementById('add').disabled=!v.sellable;
   var cv=document.getElementById('color-value');if(cv&&v.color)cv.textContent=v.color;
   var szv=document.getElementById('size-value');if(szv&&v.size)szv.textContent=v.size;
   showVariantShots(v);
   clampQty();
+  syncBuy();
 }
 const sw=document.getElementById('swatches');
 if(sw)sw.addEventListener('click',(e)=>{
@@ -1045,18 +1052,21 @@ if(sw)sw.addEventListener('click',(e)=>{
   const b=e.target.closest('button[data-color]');if(!b||b.disabled)return;
   sw.querySelectorAll('button').forEach(x=>x.classList.remove('sel'));
   b.classList.add('sel');
-  pickColor=b.dataset.color;resolve();
+  pickColor=b.dataset.color;
   var cv=document.getElementById('color-value');if(cv)cv.textContent=pickColor;
-  closeBox('color');
+  var cd=document.querySelector('[data-color-dot]');if(cd&&b.dataset.dot){cd.style.cssText=b.dataset.dot;cd.hidden=false;}
+  var cbox=document.querySelector('[data-box="color"]');if(cbox)cbox.classList.add('set');
+  resolve();closeBox('color');
 });
 const sz=document.getElementById('sizes');
 if(sz)sz.addEventListener('click',(e)=>{
   const b=e.target.closest('button[data-size]');if(!b||b.disabled)return;
   sz.querySelectorAll('button').forEach(x=>x.classList.remove('sel'));
   b.classList.add('sel');
-  pickSize=b.dataset.size;resolve();
+  pickSize=b.dataset.size;
   var szv=document.getElementById('size-value');if(szv)szv.textContent=pickSize;
-  closeBox('size');
+  var sbox=document.querySelector('[data-box="size"]');if(sbox)sbox.classList.add('set');
+  resolve();closeBox('size');
 });
 // The 3-box picker opens filter-style: a trigger toggles its own panel and
 // closes the others (accordion); choosing a value (above) collapses it back.
@@ -1065,7 +1075,8 @@ function closeBox(name){
   if(t)t.setAttribute('aria-expanded','false'); if(p)p.hidden=true;
 }
 document.querySelectorAll('[data-box-toggle]').forEach(function(t){
-  t.addEventListener('click',function(){
+  t.addEventListener('click',function(e){
+    if(e.target.closest('[data-box-panel]'))return;
     var name=t.getAttribute('data-box-toggle');
     var panel=document.querySelector('[data-box-panel="'+name+'"]');
     var wasOpen=t.getAttribute('aria-expanded')==='true';
