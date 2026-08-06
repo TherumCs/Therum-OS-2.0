@@ -307,9 +307,11 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 /* Three boxes, side by side on desktop and stacked on narrow screens. Colour and
    Size are tap-to-open and BECOME their chosen value (nothing pre-selected);
    Quantity is an inline stepper. */
-.pdp-picker{display:grid;grid-template-columns:1fr 1fr .9fr;gap:12px;margin:18px 0;align-items:start}
-@media(max-width:560px){.pdp-picker{grid-template-columns:1fr}}
-.pdp-box{position:relative;border:1px solid var(--bd,#e5e7eb);border-radius:12px;background:var(--sf,#fff);
+/* Equal-flex, not a fixed 3-column grid: whether there are 3 boxes or 2 (a
+   single-colour product is just Size + Quantity), they share the row evenly. */
+.pdp-picker{display:flex;flex-wrap:wrap;gap:12px;margin:18px 0;align-items:stretch}
+@media(max-width:560px){.pdp-box{flex-basis:100%}}
+.pdp-box{position:relative;flex:1 1 140px;min-width:0;border:1px solid var(--bd,#e5e7eb);border-radius:12px;background:var(--sf,#fff);
   min-height:74px;display:flex;flex-direction:column;justify-content:center;padding:11px 15px;cursor:pointer;
   transition:border-color var(--e),box-shadow var(--e)}
 .pdp-box[data-box]:hover{border-color:var(--tx,#111)}
