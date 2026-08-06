@@ -916,7 +916,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
             ${picker}
             ${firstAvailable ? `<div class="pdp-box pdp-box--qty" id="qtywrap"><span class="pdp-box__k">Quantity</span><div class="qtybox"><button type="button" class="qbtn" data-q="-1" aria-label="One fewer">−</button><span class="qn" id="qn" aria-live="polite">1</span><button type="button" class="qbtn" data-q="1" aria-label="One more">+</button></div></div>` : ''}
           </div>
-          <button class="btn" id="add" ${firstAvailable && !hasChoice ? '' : 'disabled'}>${!firstAvailable ? 'Sold out' : hasChoice ? 'Select colour &amp; size' : 'Add to cart'}${pdpStyle === 'editorial' && !hasChoice ? ` · <span id="btn-price">${price}</span>` : ''}</button>
+          <button class="btn" id="add" ${firstAvailable && !hasChoice ? '' : 'disabled'}>${!firstAvailable ? 'Sold out' : 'Add to cart'}${pdpStyle === 'editorial' && !hasChoice ? ` · <span id="btn-price">${price}</span>` : ''}</button>
           ${p.description ? `<div class="product-desc">${esc(p.description).replace(/\n/g, '<br>')}</div>` : ''}
         </div>
       </div>`, `
@@ -1022,7 +1022,9 @@ function syncBuy(){
   var add=document.getElementById('add');if(!add)return;
   var ok=sel&&sel.sellable;
   add.disabled=!ok;
-  add.textContent=ok?'Add to cart':'Select colour & size';
+  // Stays "Add to cart" whether or not a variant is chosen — the empty boxes
+  // ("Pick colour", "Pick size") carry the prompt, so the button never nags.
+  add.textContent='Add to cart';
 }
 function applyVariant(v){
   sel=v;
