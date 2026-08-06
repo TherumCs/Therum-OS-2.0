@@ -5,6 +5,7 @@ import { PRODUCT_GRID_FALLBACK_CSS } from './productGrid.js';
 import { CHECKOUT_FLOW_CSS } from './checkoutFlow.js';
 import { SHOP_TOOLBAR_CSS } from './shopToolbar.js';
 import { HEADER_CART_CSS, headerCartRuntime, HEADER_CART_DEFAULTS, type HeaderCartConfig } from './headerCart.js';
+import { MOBILE_MENU_CSS, MOBILE_MENU_RUNTIME } from './mobileMenu.js';
 import { WISHLIST_CSS, WISHLIST_RUNTIME } from './wishlist.js';
 import { ACCOUNT_CSS } from './accountPage.js';
 // Counter C4 — storefront HTML layer. Server-rendered, zero client
@@ -437,6 +438,11 @@ async function addToCart(variantId,qty=1,btn){
     const body={variantId,quantity:qty};if(tok())body.cartToken=tok();
     const r=await api('/cart/items',{method:'POST',body:JSON.stringify(body)});
     setTok(r.token);await refreshCount();
+    // Refresh the PORTED header too: its .js-cart-info badges and drawer only
+    // update on this event, and refreshCount() above only touches the fallback
+    // header's #cart-count. Without it the item was added but the ported badge
+    // stayed blank — "add to cart did nothing" on the live store.
+    window.dispatchEvent(new CustomEvent('therum:cart-changed'));
     // Reveal the cart. Without this the badge ticked up and nothing else
     // happened, so adding from a product page felt like it had failed.
     if(window.__thCartOpen)window.__thCartOpen();
@@ -638,7 +644,7 @@ function layoutInner(title: string, body: string, extraScript: string, header: s
 <title>${esc(title)}</title>
 ${seoTags(title, seo)}
 ${themeCss}
-<style>:root{--th-site-max:${siteMax ?? '1080px'};--th-btn-r:${btnRadius ?? '0'}}${CSS}${BANNER_STYLES}${PRODUCT_GRID_FALLBACK_CSS}${CHECKOUT_FLOW_CSS}${SHOP_TOOLBAR_CSS}${WISHLIST_CSS}${ACCOUNT_CSS}${headerIcons ? HEADER_CART_CSS : ''}</style>
+<style>:root{--th-site-max:${siteMax ?? '1080px'};--th-btn-r:${btnRadius ?? '0'}}${CSS}${BANNER_STYLES}${PRODUCT_GRID_FALLBACK_CSS}${CHECKOUT_FLOW_CSS}${SHOP_TOOLBAR_CSS}${WISHLIST_CSS}${ACCOUNT_CSS}${headerIcons ? HEADER_CART_CSS + MOBILE_MENU_CSS : ''}</style>
 </head>
 <body>
 <div id="th-shell">
@@ -649,7 +655,7 @@ ${body}
 ${footer}
 </div>
 <script>${RUNTIME}${BANNER_RUNTIME}${WISHLIST_RUNTIME}${SUBSCRIBE_SCRIPT}${extraScript}</script>
-${headerIcons ? `<script>${headerCartRuntime(headerIcons)}</script>` : ''}
+${headerIcons ? `<script>${headerCartRuntime(headerIcons)}</script><script>${MOBILE_MENU_RUNTIME}</script>` : ''}
 </body>
 </html>`;
 }

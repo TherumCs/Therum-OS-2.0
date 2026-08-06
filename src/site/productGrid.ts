@@ -2326,7 +2326,13 @@ export const CARD_EVOLVE_RUNTIME = `
         if (payProvider === 'stripe') {
           var key = WALLET_PR_KEY[w.getAttribute('data-wallet')];
           if (stripeCan && key && stripeCan[key]) return payWallet();
-          return showQr();
+          // The QR is a DESKTOP-ONLY bridge: scan it with a phone. On a phone it
+          // would only reopen this very page — useless — so there we never show
+          // it. Send the shopper to the card/other methods below instead.
+          if (!(window.matchMedia && window.matchMedia('(pointer: coarse)').matches)) return showQr();
+          say('That wallet isn\'t available on this device — use card or another option below.', true);
+          openSec('payment');
+          return;
         }
         pay();
       });
