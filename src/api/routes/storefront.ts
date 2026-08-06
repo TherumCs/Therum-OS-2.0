@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { PAGE_CSP, ACCOUNT_PAGE_CSP } from '../../site/pageCsp.js';
 import { googleApp } from '../../counter/adminGoogleSignIn.js';
 import { timingSafeEqual } from 'node:crypto';
+import QRCode from 'qrcode';
 import { db } from '../../lib/db.js';
 import { capabilityService } from '../../services/capability.service.js';
 import { layout, closedPage, CSS, type StoreChrome, type SeoMeta } from '../../site/storefrontHtml.js';
@@ -137,6 +138,31 @@ function originOf(req: { headers: Record<string, unknown>; protocol: string }): 
   const host = String(req.headers['x-forwarded-host'] ?? req.headers.host ?? '');
   const proto = String(req.headers['x-forwarded-proto'] ?? req.protocol ?? 'http').split(',')[0];
   return host ? `${proto}://${host}` : '';
+}
+
+/**
+ * A QR that opens a storefront path on the shopper's phone.
+ *
+ * Apple Pay and Google Pay are DEVICE wallets — a desktop browser tab cannot
+ * present them. The honest bridge is cross-device: the desktop shows this code,
+ * the phone scans it, lands on the product, and pays there with its own native
+ * wallet. Built synchronously (QRCode.create returns the module matrix) so it
+ * embeds straight into the response with no async plumbing.
+ */
+function qrSvg(url: string, px = 200): string {
+  const qr = QRCode.create(url, { errorCorrectionLevel: 'M' });
+  const n = qr.modules.size;
+  const data = qr.modules.data;
+  const cell = px / (n + 2); // one-module quiet zone on every side
+  let rects = '';
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      if (data[y * n + x]) {
+        rects += `<rect x="${((x + 1) * cell).toFixed(2)}" y="${((y + 1) * cell).toFixed(2)}" width="${cell.toFixed(2)}" height="${cell.toFixed(2)}"/>`;
+      }
+    }
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${px} ${px}" role="img" aria-label="Scan to open on your phone"><rect width="${px}" height="${px}" fill="#fff"/><g fill="#000">${rects}</g></svg>`;
 }
 
 /** Pages that must never be indexed: per-shopper, transactional, or tokened. */
@@ -663,6 +689,22 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
   };
 
   app.get('/shop', async (req, reply) => shopPage(req, reply));
+
+  // Cross-device checkout: a QR of a same-origin storefront path, so a desktop
+  // shopper can finish on their phone with Apple Pay / Google Pay. Same-origin
+  // only — the code must never be pointed off-site.
+  app.get('/shop/qr', async (req, reply) => {
+    const path = String((req.query as { path?: unknown }).path ?? '');
+    if (!path.startsWith('/') || path.startsWith('//') || path.includes('://') || path.length > 300) {
+      reply.status(400).send('bad path');
+      return;
+    }
+    const origin = originOf(req) || 'https://sidemoney.co';
+    reply
+      .header('content-type', 'image/svg+xml; charset=utf-8')
+      .header('cache-control', 'public, max-age=3600')
+      .send(qrSvg(origin + path, 200));
+  });
 
   // /c/* — a category at ANY depth, resolved as a path.
   //

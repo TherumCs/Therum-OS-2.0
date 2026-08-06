@@ -481,6 +481,14 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS, per
              looking secondary under a row of icons that do not apply. -->
         <div class="card-pay__step" data-pay-step="who">
           <div class="card-pay__icons" data-pay-wallets hidden></div>
+          <!-- Cross-device: a wallet that is not native on THIS browser reveals
+               this QR instead of vanishing. Scan it, land on the product on the
+               phone, and pay there with Apple Pay / Google Pay. -->
+          <div class="card-pay__qr" data-pay-qr hidden>
+            <div class="card-pay__qr-code" data-pay-qr-img></div>
+            <p class="card-pay__qr-cap">Scan with your phone to pay with Apple&nbsp;Pay or Google&nbsp;Pay.</p>
+            <button class="card-pay__qr-back" type="button" data-pay-qr-back>Back to options</button>
+          </div>
           <button class="card-pay__back-to-ways" type="button" data-pay-ways hidden>or pay a different way</button>
 
           <!-- Sign in is a peer of the payment options, not a form field, so
@@ -1480,25 +1488,12 @@ export const CARD_EVOLVE_RUNTIME = `
         });
         stripePR.on('paymentmethod', onWalletPaymentMethod);
 
-        // Hide any Stripe wallet the device cannot do — a dead button is worse
-        // than no button. What is left works.
-        box.querySelectorAll('[data-wallet-provider="stripe"]').forEach(function(b){
-          var k = WALLET_PR_KEY[b.getAttribute('data-wallet')];
-          // Reveal the available ones; the unsupported stay hidden (they were
-          // never shown). No flash-then-disappear.
-          b.hidden = !(stripeCan && k && stripeCan[k]);
-        });
-        // If nothing express is left visible, drop the row and its divider.
-        var anyVisible = Array.prototype.some.call(box.querySelectorAll('[data-wallet]'), function(b){ return !b.hidden; });
-        if (!anyVisible) {
-          box.hidden = true;
-          var or = payQ('[data-pay-or]'); if (or) or.hidden = true;
-        }
-        // A single surviving wallet is no longer one icon among several — hiding
-        // the others left a lone disc ballooning to fill the row. Style it as the
-        // one action it is: a full-width, named button.
-        var visibleW = Array.prototype.filter.call(box.querySelectorAll('[data-wallet]'), function(b){ return !b.hidden; });
-        box.classList.toggle('is-solo', visibleW.length === 1);
+        // NOTHING is hidden. Every wallet stays visible; canMakePayment above
+        // only decides ROUTING at click time — the native sheet where this
+        // browser supports the wallet, the QR ("pay on your phone") where it
+        // does not. A desktop that cannot present Apple Pay still shows the
+        // button, and tapping it offers the phone hand-off instead of vanishing.
+        void box;
       } catch (e) { /* wallets are a shortcut; the card form still sells */ }
     }
 
@@ -1554,6 +1549,25 @@ export const CARD_EVOLVE_RUNTIME = `
     // Pressing a token-wallet icon: sync the sheet to the current quantity, then
     // show it. A dismissed sheet is not an error — nothing was collapsed, so
     // nothing is restored and nothing is said.
+    // Cross-device fallback: reveal a QR of THIS product's page. The shopper
+    // scans it, lands on the product on their phone, and pays there with the
+    // native wallet. The wallet row stays exactly where it is underneath — the
+    // QR is added, never a swap, so nothing disappears.
+    function showQr(){
+      var img = payQ('[data-pay-qr-img]');
+      if (img && !img.firstChild) {
+        // The product link lives on the CARD ITEM, not this inner root — so
+        // reach up to it. On a PDP (no card item) the page IS the product, so
+        // location.pathname is the right fallback.
+        var item = root.closest('.c-product-grid__item');
+        var link = item && item.querySelector('.woocommerce-LoopProduct-link');
+        var path = (link && link.getAttribute('href')) || location.pathname;
+        img.innerHTML = '<img src="/shop/qr?path=' + encodeURIComponent(path) + '" width="180" height="180" alt="Scan to pay on your phone">';
+      }
+      var panel = payQ('[data-pay-qr]'); if (panel) panel.hidden = false;
+    }
+    function hideQr(){ var panel = payQ('[data-pay-qr]'); if (panel) panel.hidden = true; }
+
     async function payWallet(){
       if (!chosenVariant) return;
       if (!SUBMIT_ENABLED) { say('Test mode — nothing was charged.'); return; }
@@ -1857,11 +1871,6 @@ export const CARD_EVOLVE_RUNTIME = `
             buttons.push('<button type="button" class="card-pay__wallet" data-wallet="' + w
               + '" data-wallet-kind="' + (p.kind || 'token') + '"'
               + ' data-wallet-provider="' + p.provider + '"'
-              // Stripe wallets start HIDDEN and are revealed only once
-              // canMakePayment() confirms the browser can present them — so an
-              // unsupported wallet never flashes in and then vanishes. PayPal
-              // (redirect) needs no such check and shows immediately.
-              + (p.provider === 'stripe' ? ' hidden' : '')
               + ' title="' + walletLabels[w] + '" aria-label="Pay with ' + walletLabels[w] + '">'
               + (walletIcons[w] || '<span class="card-pay__wallet-txt">' + walletLabels[w] + '</span>')
               + '</button>');
@@ -2294,27 +2303,24 @@ export const CARD_EVOLVE_RUNTIME = `
       var goBtn = payQ('[data-pay-go]');
       if (goBtn) goBtn.addEventListener('click', function(){ pay(); });
       payEl.addEventListener('click', function(e){
+        if (e.target.closest('[data-pay-qr-back]')) { hideQr(); return; }
         var w = e.target.closest('[data-wallet]');
         if (!w) return;
         payProvider = w.getAttribute('data-wallet-provider');
         var kind = w.getAttribute('data-wallet-kind');
-        // PayPal approves in its OWN window and is captured server-side, so the
-        // shopper is about to leave the page: collapse to the one chosen and
-        // focus that way. "Or pay a different way" brings the row back if the
-        // sheet is dismissed.
-        if (kind === 'redirect') {
-          var box = payQ('[data-pay-wallets]');
-          if (box) box.querySelectorAll('[data-wallet]').forEach(function(b){ b.hidden = b !== w; });
-          focusWay('wallets');
-          return payRedirect(payProvider);
+        // Every option stays put — nothing is ever hidden or pruned.
+        // PayPal approves in its own popup and is captured server-side.
+        if (kind === 'redirect') return payRedirect(payProvider);
+        // Token wallets (Apple Pay, Google Pay, Link): open the browser's NATIVE
+        // sheet when this browser can present this wallet; otherwise fall back to
+        // the QR — scan to finish on a phone, where the wallet IS native. So a
+        // desktop with no wallet configured still has a real way to pay by phone
+        // rather than a dead button.
+        if (payProvider === 'stripe') {
+          var key = WALLET_PR_KEY[w.getAttribute('data-wallet')];
+          if (stripeCan && key && stripeCan[key]) return payWallet();
+          return showQr();
         }
-        // Token wallets (Apple Pay, Google Pay, Link) open the browser's OWN
-        // sheet as an overlay — the card behind it does not change, so a
-        // dismissed sheet needs nothing restored. The sheet returns the payment
-        // method, the email and the address, so there is NO form and NO email
-        // prompt on this path. That is what makes it the fast one.
-        if (payProvider === 'stripe') return payWallet();
-        // No other token provider is live; the card form stays the path.
         pay();
       });
     }
@@ -2733,6 +2739,10 @@ export const PRODUCT_GRID_FALLBACK_CSS = `
 /* Base wallet button. The stacked-column wrapper it used to sit in is gone —
    the row is .card-pay__icons now — so only the button itself remains. */
 .card-pay__wallet{display:block;width:100%;padding:12px;border:0;border-radius:var(--radius-pill,999px);background:#000;color:#fff;font:600 13px var(--f,inherit);cursor:pointer}
+.card-pay__qr{display:flex;flex-direction:column;align-items:center;gap:9px;padding:12px 0 4px}
+.card-pay__qr-code img{display:block;width:180px;height:180px;border-radius:10px;background:#fff}
+.card-pay__qr-cap{margin:0;font-size:12px;line-height:1.45;color:var(--tx-soft,#666);text-align:center;max-width:230px}
+.card-pay__qr-back{border:0;background:none;color:var(--tx,#111);font:600 12px var(--f,inherit);text-decoration:underline;cursor:pointer;padding:2px}
 .card-pay__step{display:flex;flex-direction:column;gap:8px}
 /* Where it is going, echoed on the payment step. Small and quiet — it is a
    confirmation, not a heading. */
