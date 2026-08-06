@@ -76,7 +76,7 @@ export function ProductStudio({
   const router = useRouter();
   const [p, setP] = useState(initial);
   const [sel, setSel] = useState<Selection>({ kind: 'product' });
-  const [preview, setPreview] = useState<'card' | 'page'>('card');
+  const [preview, setPreview] = useState<'card' | 'page' | 'stock'>('card');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
@@ -342,7 +342,7 @@ export function ProductStudio({
     <div className="th-studio__stage">
       <div className="th-studio__stagebar">
         <div className="th-tabs" role="tablist" aria-label="Preview">
-          {(['card', 'page'] as const).map((mode) => (
+          {(['card', 'page', 'stock'] as const).map((mode) => (
             <button
               key={mode}
               role="tab"
@@ -350,7 +350,7 @@ export function ProductStudio({
               className={'th-tab' + (preview === mode ? ' on' : '')}
               onClick={() => setPreview(mode)}
             >
-              {mode === 'card' ? 'Card' : 'Product page'}
+              {mode === 'card' ? 'Card' : mode === 'page' ? 'Product page' : 'Stock'}
             </button>
           ))}
         </div>
@@ -358,7 +358,66 @@ export function ProductStudio({
       </div>
 
       <div className="th-studio__canvas">
-        {preview === 'card' ? (
+        {preview === 'stock' ? (
+          /* Per-size stock, all in one place. Each variant (colour / size) is a
+             row you set straight here — no clicking into each one. Same PATCH
+             the inspector uses, so the two never disagree. */
+          <div style={{ padding: '4px 2px', overflow: 'auto', width: '100%' }}>
+            {p.variants.length === 0 ? (
+              <p className="th-hint">This product has no size/colour variants yet — add them on the Variants panel to stock each one separately.</p>
+            ) : (
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 'var(--th-fs-sm)' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', borderBottom: '1px solid var(--th-line)' }}>
+                    <th style={{ padding: 8 }}>Colour</th>
+                    <th style={{ padding: 8 }}>Size</th>
+                    <th style={{ padding: 8 }}>Stock</th>
+                    <th style={{ padding: 8 }}>Qty</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {p.variants.map((v) => (
+                    <tr key={v.id} style={{ borderBottom: '1px solid var(--th-line)' }}>
+                      <td style={{ padding: 8 }}>{v.color || <span className="th-hint">—</span>}</td>
+                      <td style={{ padding: 8, fontWeight: 600 }}>{v.size || <span className="th-hint">—</span>}</td>
+                      <td style={{ padding: 8 }}>
+                        <select
+                          value={v.stockStatus ?? 'tracked'}
+                          onChange={(e) => {
+                            const stockStatus = e.target.value;
+                            setP({ ...p, variants: p.variants.map((x) => (x.id === v.id ? { ...x, stockStatus } : x)) });
+                            void call('PATCH', `/api/products/${p.id}/variants/${v.id}`, { stockStatus });
+                          }}
+                          style={{ fontSize: 12 }}
+                        >
+                          <option value="in_stock">In stock</option>
+                          <option value="out_of_stock">Out of stock</option>
+                          <option value="backorder">On backorder</option>
+                          <option value="tracked">Set a quantity…</option>
+                        </select>
+                      </td>
+                      <td style={{ padding: 8 }}>
+                        {(v.stockStatus ?? 'tracked') === 'tracked' ? (
+                          <input
+                            type="number" min={0} defaultValue={v.inventory}
+                            onBlur={(e) => {
+                              const inventory = Number.parseInt(e.target.value, 10);
+                              if (!Number.isFinite(inventory) || inventory === v.inventory) return;
+                              setP({ ...p, variants: p.variants.map((x) => (x.id === v.id ? { ...x, inventory } : x)) });
+                              void call('PATCH', `/api/products/${p.id}/variants/${v.id}`, { inventory });
+                            }}
+                            style={{ width: 72 }}
+                            aria-label={`Stock quantity for ${[v.color, v.size].filter(Boolean).join(' ') || 'variant'}`}
+                          />
+                        ) : <span className="th-hint">—</span>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        ) : preview === 'card' ? (
           /* The REAL card, built by the shop's own code path with the store's
              own settings. The hand-built mock could not honour the sixteen
              card settings, so it disagreed with the shop the moment any of
@@ -397,7 +456,9 @@ export function ProductStudio({
         )}
       </div>
 
-      {/* Look controls, under the thing they change. */}
+      {/* Look controls, under the thing they change — hidden on the Stock grid,
+          which is an editor, not a preview. */}
+      {preview !== 'stock' && (<>
       <div className="th-look">
         <div className="th-look__head">
           <span>{preview === 'card' ? 'Card style' : 'Product page style'}</span>
@@ -438,6 +499,7 @@ export function ProductStudio({
           ? 'A preview, not the live page — card styling follows Customization, which this does not re-implement.'
           : 'The live product page, rendered in a frame. Scroll it like the real thing.'}
       </p>
+      </>)}
     </div>
   );
 
