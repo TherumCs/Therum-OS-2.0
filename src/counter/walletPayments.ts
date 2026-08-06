@@ -158,8 +158,29 @@ export const walletPayments = {
   },
 
   /** Which wallet-capable providers are actually usable right now. */
-  async availableProviders(): Promise<{ provider: string; wallets: string[]; ready: boolean; reason?: string }[]> {
+  /**
+   * Express payment options for the storefront's top row.
+   *
+   * `kind` matters. 'token' providers hand the browser a token their SDK
+   * produced, which our own Pay call then settles — that is what Apple Pay,
+   * Google Pay and Link do through Stripe or Square. PayPal does not work
+   * that way: it approves in its own popup and is captured server-side, so
+   * routing it through the token path would throw at assertWalletProvider.
+   * Reporting the kind lets the card render the button without pretending
+   * the two flows are interchangeable.
+   */
+  async availableProviders(): Promise<{ provider: string; wallets: string[]; ready: boolean; kind: 'token' | 'redirect'; reason?: string }[]> {
     const out = [];
+    // PayPal carries Venmo behind the same button in the US, which is why it
+    // is one entry here and not two.
+    const paypalCredential = await connectionService.credentialFor('paypal');
+    out.push({
+      provider: 'paypal',
+      wallets: ['paypal'],
+      kind: 'redirect' as const,
+      ready: Boolean(paypalCredential),
+      ...(paypalCredential ? {} : { reason: 'PayPal is not connected in Nexus.' }),
+    });
     for (const providerId of ['stripe', 'square']) {
       const wallets = walletsFor(providerId).map((w) => w.id);
       const credential = await connectionService.credentialFor(providerId);
@@ -168,6 +189,7 @@ export const walletPayments = {
       out.push({
         provider: providerId,
         wallets,
+        kind: 'token' as const,
         ready,
         ...(ready
           ? {}

@@ -2,7 +2,8 @@ import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import { settingsService } from '../../services/settings.service.js';
 import { mailTransport } from '../../services/notification.service.js';
-import { sendEmailTo } from '../../services/notification.service.js';
+import { sendEmailTo, type MailAttachment } from '../../services/notification.service.js';
+import { roleBySlug, CAREERS_INBOX, CV_MAX_BYTES, CV_TYPES } from '../../site/careers.js';
 import { checkRateLimit } from '../../lib/rateLimit.js';
 import { TooManyRequestsError, ValidationError } from '../../lib/errors.js';
 
@@ -131,5 +132,80 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
         blurb: t.blurb ?? null,
       })),
     });
+  });
+
+  // ── Job applications ─────────────────────────────────────────────────
+  //
+  // multipart, because the whole point is that someone can attach a CV. The
+  // recipient is a CONSTANT, never a form field — same rule as the contact
+  // route: a form that carries its own destination is an open relay.
+  app.post('/careers/apply', async (req, reply) => {
+    if (!req.isMultipart()) throw new ValidationError('Send the application as a form.', 'body');
+
+    const rl = await checkRateLimit(`careers:${req.ip}`, 4, 900);
+    if (!rl.allowed) {
+      throw new TooManyRequestsError('Too many applications from this address — try again shortly.', rl.retryAfterSeconds);
+    }
+
+    const fields: Record<string, string> = {};
+    let cv: MailAttachment | null = null;
+
+    for await (const part of req.parts()) {
+      if (part.type === 'file') {
+        if (part.fieldname !== 'cv') { await part.toBuffer(); continue; }
+        const buf = await part.toBuffer();
+        if (!buf.length) continue;
+        // Checked AFTER reading, because the browser's own size check can be
+        // bypassed — the ceiling has to be enforced here to mean anything.
+        if (buf.length > CV_MAX_BYTES) {
+          throw new ValidationError('That document is over 5MB. Send a link instead, or write a blurb.', 'cv');
+        }
+        if (part.mimetype && !CV_TYPES.includes(part.mimetype)) {
+          throw new ValidationError('Attach a PDF, DOC, DOCX, TXT or RTF.', 'cv');
+        }
+        // The sender chooses the filename, so it is rebuilt rather than
+        // trusted: a name with a path or a second extension in it has no
+        // business reaching a mail client.
+        const ext = (part.filename || '').toLowerCase().match(/\.(pdf|docx?|txt|rtf)$/)?.[0] ?? '.pdf';
+        cv = { filename: `application${ext}`, content: buf, contentType: part.mimetype };
+      } else {
+        fields[part.fieldname] = String(part.value ?? '').slice(0, 5000);
+      }
+    }
+
+    const name = (fields.name ?? '').trim();
+    const email = (fields.email ?? '').trim();
+    const phone = (fields.phone ?? '').trim();
+    const link = (fields.link ?? '').trim();
+    const about = (fields.about ?? '').trim();
+    const role = roleBySlug((fields.roleSlug ?? '').trim());
+
+    if (!name) throw new ValidationError('Add your name.', 'name');
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new ValidationError('Add a valid email.', 'email');
+    if (!phone) throw new ValidationError('Add a phone number.', 'phone');
+    if (!cv && about.length < 20) {
+      throw new ValidationError('Attach a document or write a few lines about yourself.', 'about');
+    }
+
+    const title = role?.title ?? (fields.role ?? 'General application');
+    const body = [
+      `Role: ${title}`,
+      `Name: ${name}`,
+      `Email: ${email}`,
+      `Phone: ${phone}`,
+      link ? `Work: ${link}` : '',
+      '',
+      about ? about : '(CV attached)',
+    ].filter(Boolean).join('\n');
+
+    const n = await settingsService.getNotifications();
+    const transport = await mailTransport();
+    const deliverable = Boolean(n.emailEnabled && transport.ready);
+    if (!deliverable) {
+      // Better to say so than to show a thank-you for something nobody got.
+      throw new ValidationError('Applications are not reaching us right now — email ' + CAREERS_INBOX + ' directly.', 'email');
+    }
+    await sendEmailTo(CAREERS_INBOX, `[Careers] ${title} — ${name}`, body, cv ? [cv] : undefined);
+    reply.send({ sent: true, role: title });
   });
 }

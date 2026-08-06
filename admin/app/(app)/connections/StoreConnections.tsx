@@ -10,9 +10,12 @@ import { iconColor } from '../settings/connections/ConnectionsClient';
 // iconColor so a provider is the same colour in both places. A lookalike built
 // from scratch is a lookalike that drifts.
 //
-// What differs is WHAT is listed: only what is connected, and only the three
-// categories a store runs on. Nexus is the catalogue and the vault; this is
-// the answer to "am I open for business".
+// What differs is WHAT is listed: only what is CONNECTED (Nexus lists the whole
+// 79-provider catalogue; this lists what's actually wired). The three store
+// categories lead, with their own blurbs and empty-states; then EVERY other
+// category that has a live connection — identity, AI, messaging, whatever — is
+// rendered too, so the store view is a true mirror of the vault and never hides
+// something the merchant connected.
 export interface StoreConnection {
   id: string;
   name: string;
@@ -31,6 +34,24 @@ const GROUPS: { key: string; label: string; blurb: string; empty: string }[] = [
   { key: 'ecommerce', label: 'Ecommerce platforms', blurb: 'Where products and orders sync from.', empty: 'Nothing connected — this store is standalone.' },
   { key: 'custom', label: 'Custom', blurb: 'Connectors you defined yourself.', empty: '' },
 ];
+
+// Friendly names for the OTHER categories a connection can have — anything
+// connected in Nexus outside the three store categories still shows here.
+// Unknown keys fall back to a title-cased version of the key itself.
+const CATEGORY_LABELS: Record<string, string> = {
+  identity: 'Sign-in & identity',
+  ai: 'AI & automation',
+  messaging: 'Messaging & email',
+  email: 'Email',
+  analytics: 'Analytics',
+  storage: 'Storage & files',
+  shipping: 'Shipping & rates',
+  tax: 'Tax',
+  marketing: 'Marketing',
+  crm: 'CRM',
+};
+const catLabel = (k: string): string =>
+  CATEGORY_LABELS[k] ?? k.replace(/(^|[-_ ])(\w)/g, (_, sep, ch) => (sep ? ' ' : '') + ch.toUpperCase()).trim();
 
 function when(iso: string | null): string {
   return iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
@@ -77,6 +98,11 @@ function Card({ c }: { c: StoreConnection }) {
 
 export function StoreConnections({ connections }: { connections: StoreConnection[] }) {
   const live = connections.filter((c) => c.connected);
+  // Every connected category NOT already covered by the three store groups —
+  // identity (Google sign-in), AI (Anthropic), messaging, etc. These used to be
+  // silently dropped, which is why the store looked less connected than it was.
+  const primaryKeys = new Set(GROUPS.map((g) => g.key));
+  const extraCats = [...new Set(live.filter((c) => !primaryKeys.has(c.category)).map((c) => c.category))].sort();
 
   return (
     <div style={{ display: 'grid', gap: 'var(--th-space-20)' }}>
@@ -104,6 +130,25 @@ export function StoreConnections({ connections }: { connections: StoreConnection
                 ))}
               </div>
             )}
+          </div>
+        );
+      })}
+
+      {/* Everything else connected in Nexus, grouped by its own category —
+          shown only when it actually has a connection, no empty furniture. */}
+      {extraCats.map((cat) => {
+        const rows = live.filter((c) => c.category === cat);
+        return (
+          <div className="settings-group" key={cat}>
+            <h3 className="settings-group-title">
+              {catLabel(cat)}{' '}
+              <span className="muted" style={{ fontWeight: 400 }}>— {rows.length}</span>
+            </h3>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, minmax(0, 1fr))', gap: 12 }}>
+              {rows.map((c) => (
+                <Card key={c.id} c={c} />
+              ))}
+            </div>
           </div>
         );
       })}

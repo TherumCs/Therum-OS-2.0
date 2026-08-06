@@ -8,10 +8,12 @@ import { shipmentService } from '../../counter/shipmentService.js';
 import { reviewService } from '../../counter/reviewService.js';
 import { reportService } from '../../counter/reportService.js';
 import { nexusBridge } from '../../counter/nexusBridge.js';
+import { stripePayments } from '../../counter/stripePayments.js';
+import { shippingRateService } from '../../counter/shippingRates.js';
 import { wooImporter } from '../../counter/wooImporter.js';
 import { db } from '../../lib/db.js';
 import { walletPayments, assertWalletProvider } from '../../counter/walletPayments.js';
-import { customerTokenFrom, requireCustomer } from '../../counter/customerSession.js';
+import { customerTokenFrom, requireCustomer, resolveCustomer } from '../../counter/customerSession.js';
 import { plaidApp, createLinkToken, exchangePublicToken, saveLink, linksFor, unlink } from '../../counter/plaid.js';
 import { customerAccountService } from '../../services/customerAccount.service.js';
 import { UnauthorizedError, ValidationError, NotFoundError } from '../../lib/errors.js';
@@ -83,6 +85,62 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
     reply.status(201).send({ ok: true });
   });
 
+  // Shipping options for a cart + destination. Live vendor rates (Printful et al.)
+  // first, the configured manual methods as the floor — a store must always be
+  // able to offer SOMETHING or it cannot sell. US only for now. The line carries
+  // sourceVariantId (the vendor's variant id) so a provider can actually quote;
+  // a plain cart line doesn't have it.
+  app.post('/shop/shipping/rates', async (req, reply) => {
+    const body = z
+      .object({
+        items: z
+          .array(z.object({ variantId: z.string().min(1), quantity: z.number().int().min(1).max(99) }))
+          .min(1)
+          .max(50),
+        address: z.object({
+          name: z.string().max(120).optional(),
+          line1: z.string().min(1).max(200),
+          line2: z.string().max(200).optional(),
+          city: z.string().min(1).max(120),
+          region: z.string().max(60).optional(),
+          postalCode: z.string().max(20).optional(),
+          country: z.string().length(2),
+        }),
+      })
+      .parse(req.body);
+
+    const variants = await db.productVariant.findMany({
+      where: { id: { in: body.items.map((i) => i.variantId) } },
+      select: { id: true, price: true, productId: true, sourceId: true },
+    });
+    const vById = new Map(variants.map((v) => [v.id, v]));
+    let subtotal = 0;
+    const lines = body.items.flatMap((i) => {
+      const v = vById.get(i.variantId);
+      if (!v) return [];
+      const lineTotal = v.price * i.quantity;
+      subtotal += lineTotal;
+      return [
+        {
+          itemId: v.id,
+          productId: v.productId,
+          variantId: v.id,
+          quantity: i.quantity,
+          unitPrice: v.price,
+          lineTotal,
+          sourceVariantId: v.sourceId ?? undefined,
+        },
+      ];
+    });
+    if (lines.length === 0) {
+      reply.send({ rates: [] });
+      return;
+    }
+
+    const rates = await shippingRateService.rates({ lines, subtotal, currency: 'USD', address: body.address });
+    reply.send({ rates });
+  });
+
   // The login and code paths are throttled inside customerAuth; registration
   // was not, so account creation itself was the unlimited door.
   app.post('/shop/account/register', async (req, reply) => {
@@ -131,10 +189,20 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/shop/account/me', async (req, reply) => {
     const customer = await requireCustomer(req);
+    // The default address travels with the session so a returning shopper is
+    // not retyping something the store already holds. Quick checkout signs in
+    // mid-purchase precisely to avoid that typing, and without this the sign
+    // in filled a name and left five address fields blank.
+    const address = await db.address.findFirst({
+      where: { customerId: customer.id },
+      orderBy: [{ isDefault: 'desc' }],
+      select: { line1: true, line2: true, city: true, region: true, postalCode: true, country: true },
+    });
     reply.send({
       id: customer.id,
       email: customer.email,
       name: customer.name,
+      address,
       identities: await customerAuth.identitiesFor(customer.id),
     });
   });
@@ -327,9 +395,227 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
       accessToken: z.string().min(1).max(200),
       provider: z.enum(['stripe', 'square']),
       token: z.string().min(1).max(500),
+      // "Save this card for next time". Honoured ONLY for a request that
+      // carries a valid customer session — a guest cannot vault a card, and
+      // nobody can vault one against somebody else's account, because the
+      // customer is resolved from the session rather than the body.
+      saveCard: z.boolean().optional(),
+      // Paying WITH an already-saved card: the id came from this customer's
+      // own saved list, and is re-checked against it below.
+      savedMethodId: z.string().max(200).optional(),
     }).parse(req.body);
     const { paymentGatewayService } = await import('../../services/paymentGateway.service.js');
-    reply.send(await paymentGatewayService.payWithToken(input.orderNumber, input.accessToken, input.provider, input.token));
+
+    const vault = await resolveVault(req, input.provider, input.saveCard === true);
+    let token = input.token;
+    if (input.savedMethodId) {
+      if (!vault.customerId) throw new ValidationError('Sign in to use a saved card.', 'savedMethodId');
+      const owned = await paymentGatewayService.savedCards(vault.customerId, input.provider);
+      if (!owned.some((c) => c.id === input.savedMethodId)) {
+        throw new ValidationError('That saved card does not belong to this account.', 'savedMethodId');
+      }
+      token = input.savedMethodId;
+    }
+    reply.send(await paymentGatewayService.payWithToken(
+      input.orderNumber, input.accessToken, input.provider, token,
+      { customerId: vault.customerId, save: vault.save, offSession: Boolean(input.savedMethodId) },
+    ));
+  });
+
+  // The shopper's own saved cards. Session-authenticated, and it returns only
+  // what is safe to render: brand, last four, expiry.
+  app.get('/shop/account/payment-methods', async (req, reply) => {
+    const customer = await requireCustomer(req);
+    const { paymentGatewayService } = await import('../../services/paymentGateway.service.js');
+    const customerId = stripeIdOf(customer);
+    reply.send({ cards: customerId ? await paymentGatewayService.savedCards(customerId, 'stripe') : [] });
+  });
+
+  // Remove one. A shopper who can add a card must be able to take it off the
+  // account — otherwise "saved payment methods" is a one-way door.
+  app.delete('/shop/account/payment-methods/:id', async (req, reply) => {
+    const customer = await requireCustomer(req);
+    const { id } = z.object({ id: z.string().min(1).max(200) }).parse(req.params);
+    const customerId = stripeIdOf(customer);
+    if (!customerId) throw new NotFoundError('No saved cards on this account.', 'id');
+    const { paymentGatewayService } = await import('../../services/paymentGateway.service.js');
+    reply.send(await paymentGatewayService.forgetCard(customerId, 'stripe', id));
+  });
+
+  // ── Credentials ───────────────────────────────────────────────────────
+  //
+  // Both throttled per IP like every other unauthenticated-ish write: a
+  // session token is not a licence to brute-force the password that protects
+  // the account it belongs to.
+  app.post('/shop/account/password', async (req, reply) => {
+    const customer = await requireCustomer(req);
+    const input = z.object({
+      current: z.string().min(1).max(200),
+      next: z.string().min(8).max(200),
+    }).parse(req.body);
+    const rl = await checkRateLimit(`pwchange:${req.ip}`, 5, 900);
+    if (!rl.allowed) throw new TooManyRequestsError('Too many attempts — try again shortly.', rl.retryAfterSeconds);
+    const out = await customerAuth.changePassword({
+      customerId: customer.id, current: input.current, next: input.next, ip: req.ip,
+    });
+    // A new session comes back because changing the password drops every
+    // other one — including, without this, the tab it was changed in.
+    reply.send({ changed: true, token: out.token, expiresAt: out.expiresAt });
+  });
+
+  app.post('/shop/account/email', async (req, reply) => {
+    const customer = await requireCustomer(req);
+    const input = z.object({
+      email: z.string().email().max(320),
+      password: z.string().max(200).optional(),
+    }).parse(req.body);
+    const rl = await checkRateLimit(`emchange:${req.ip}`, 5, 900);
+    if (!rl.allowed) throw new TooManyRequestsError('Too many attempts — try again shortly.', rl.retryAfterSeconds);
+    const out = await customerAuth.requestEmailChange({
+      customerId: customer.id, newEmail: input.email, password: input.password, ip: req.ip,
+    });
+    reply.send({ sent: true, to: out.to });
+  });
+
+  app.post('/shop/account/email/confirm', async (req, reply) => {
+    const customer = await requireCustomer(req);
+    const input = z.object({
+      email: z.string().email().max(320),
+      code: z.string().min(4).max(12),
+    }).parse(req.body);
+    const out = await customerAuth.confirmEmailChange({
+      customerId: customer.id, newEmail: input.email, code: input.code, ip: req.ip,
+    });
+    reply.send({ changed: true, email: out.email });
+  });
+
+  // ── Addresses ─────────────────────────────────────────────────────────
+  //
+  // The Address model has existed since the schema was written and had no
+  // HTTP surface at all: a shopper could have an address saved for them by a
+  // paid order and then never see, change or delete it.
+  const AddressInput = z.object({
+    line1: z.string().trim().min(1).max(200),
+    line2: z.string().trim().max(200).optional().nullable(),
+    city: z.string().trim().min(1).max(120),
+    region: z.string().trim().max(120).optional().nullable(),
+    postalCode: z.string().trim().max(40).optional().nullable(),
+    country: z.string().trim().length(2).toUpperCase(),
+    isDefault: z.boolean().optional(),
+  });
+
+  app.get('/shop/account/addresses', async (req, reply) => {
+    const customer = await requireCustomer(req);
+    reply.send({
+      addresses: await db.address.findMany({
+        where: { customerId: customer.id },
+        orderBy: [{ isDefault: 'desc' }, { id: 'asc' }],
+      }),
+    });
+  });
+
+  app.post('/shop/account/addresses', async (req, reply) => {
+    const customer = await requireCustomer(req);
+    const input = AddressInput.parse(req.body);
+    // The first address a customer saves is their default whether they asked
+    // or not — an account with addresses and no default has nothing to
+    // pre-fill a checkout with.
+    const count = await db.address.count({ where: { customerId: customer.id } });
+    const makeDefault = input.isDefault === true || count === 0;
+    if (makeDefault) {
+      await db.address.updateMany({ where: { customerId: customer.id }, data: { isDefault: false } });
+    }
+    reply.status(201).send(await db.address.create({
+      data: { ...input, isDefault: makeDefault, customerId: customer.id },
+    }));
+  });
+
+  app.patch('/shop/account/addresses/:id', async (req, reply) => {
+    const customer = await requireCustomer(req);
+    const { id } = z.object({ id: z.string().min(1).max(60) }).parse(req.params);
+    const input = AddressInput.partial().parse(req.body);
+    // Scoped by customerId as well as id, so a guessed id edits nothing.
+    const owned = await db.address.findFirst({ where: { id, customerId: customer.id }, select: { id: true } });
+    if (!owned) throw new NotFoundError('Address not found.', 'id');
+    if (input.isDefault === true) {
+      await db.address.updateMany({ where: { customerId: customer.id }, data: { isDefault: false } });
+    }
+    reply.send(await db.address.update({ where: { id }, data: input }));
+  });
+
+  app.delete('/shop/account/addresses/:id', async (req, reply) => {
+    const customer = await requireCustomer(req);
+    const { id } = z.object({ id: z.string().min(1).max(60) }).parse(req.params);
+    const row = await db.address.findFirst({ where: { id, customerId: customer.id }, select: { id: true, isDefault: true } });
+    if (!row) throw new NotFoundError('Address not found.', 'id');
+    await db.address.delete({ where: { id } });
+    // Deleting the default promotes the next one, rather than leaving the
+    // account with addresses and nothing marked.
+    if (row.isDefault) {
+      const next = await db.address.findFirst({ where: { customerId: customer.id }, select: { id: true } });
+      if (next) await db.address.update({ where: { id: next.id }, data: { isDefault: true } });
+    }
+    reply.send({ removed: id });
+  });
+
+  // ── Profile ───────────────────────────────────────────────────────────
+  //
+  // Name only. Email is the account's identity and its login, so changing it
+  // is a verification flow rather than a text field, and doing it silently
+  // here would let a session takeover lock the real owner out.
+  app.patch('/shop/account/profile', async (req, reply) => {
+    const customer = await requireCustomer(req);
+    const input = z.object({ name: z.string().trim().min(1).max(120) }).parse(req.body);
+    const updated = await db.customer.update({
+      where: { id: customer.id },
+      data: { name: input.name },
+      select: { id: true, email: true, name: true },
+    });
+    reply.send(updated);
+  });
+
+  // Start a redirect payment (PayPal today) and hand back the approval URL.
+  // Public for the same reason pay-token is: the order's own access token is
+  // the credential, so this can only ever act on an order the caller already
+  // holds the token for.
+  app.post('/shop/checkout/redirect-start', async (req, reply) => {
+    const input = z.object({
+      orderNumber: z.string().min(1).max(60),
+      accessToken: z.string().min(1).max(200),
+      provider: z.enum(['paypal']),
+      // Which PayPal funding the shopper picked. Only 'venmo' changes anything
+      // downstream (it needs payment_source.venmo); the rest use the plain
+      // PayPal flow. Optional so older clients keep working.
+      method: z.string().max(40).optional(),
+    }).parse(req.body);
+    // Venmo's payment_source needs return URLs. Build them from the request's
+    // own origin so this works on any host without a hardcoded base URL.
+    const proto = (req.headers['x-forwarded-proto'] as string) ?? req.protocol ?? 'https';
+    const host = (req.headers['x-forwarded-host'] as string) ?? req.headers.host ?? '';
+    const origin = host ? `${proto}://${host}` : '';
+    const ctx = origin
+      ? {
+          fundingMethod: input.method,
+          returnUrl: `${origin}/order-received/?order=${encodeURIComponent(input.orderNumber)}&token=${encodeURIComponent(input.accessToken)}`,
+          cancelUrl: `${origin}/cart`,
+        }
+      : { fundingMethod: input.method };
+    const { paymentGatewayService } = await import('../../services/paymentGateway.service.js');
+    const intent = await paymentGatewayService.createIntent(input.orderNumber, input.accessToken, input.provider, ctx);
+    reply.send({ redirectUrl: intent.redirectUrl, intentId: intent.intentId, status: intent.status });
+  });
+
+  // Finish one. The card polls this after the approval window closes: unlike
+  // /checkout/return it answers in JSON instead of redirecting, because the
+  // shopper never left the page to begin with.
+  app.post('/shop/checkout/redirect-finish', async (req, reply) => {
+    const input = z.object({
+      orderNumber: z.string().min(1).max(60),
+      accessToken: z.string().min(1).max(200),
+      provider: z.enum(['paypal']),
+    }).parse(req.body);
+    const { paymentGatewayService } = await import('../../services/paymentGateway.service.js');
+    reply.send(await paymentGatewayService.finalizeReturn(input.provider, input.orderNumber, input.accessToken));
   });
 
   app.post('/shop/checkout/wallet-session', async (req, reply) => {
@@ -341,6 +627,45 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
     assertWalletProvider(input.provider);
     reply.send(await walletPayments.session(input.orderNumber, input.accessToken, input.provider));
   });
+}
+
+/** The Stripe customer id kept on a shopper's meta, or null. */
+function stripeIdOf(customer: { meta?: unknown }): string | null {
+  const meta = (customer.meta && typeof customer.meta === 'object' ? customer.meta : {}) as Record<string, unknown>;
+  return typeof meta.stripeCustomerId === 'string' ? meta.stripeCustomerId : null;
+}
+
+/**
+ * Who, if anyone, is this payment being saved against?
+ *
+ * The customer comes from the SESSION, never from the request body, so a
+ * crafted request cannot attach a card to another shopper's account. A guest,
+ * or a request with no session, gets `{ customerId: null, save: false }` and
+ * pays exactly as before — vaulting is additive and never a precondition.
+ *
+ * Never throws: failing to resolve a vault must not stop someone paying.
+ */
+async function resolveVault(
+  req: FastifyRequest,
+  provider: string,
+  wantsSave: boolean,
+): Promise<{ customerId: string | null; save: boolean }> {
+  if (provider !== 'stripe') return { customerId: null, save: false };
+  try {
+    const customer = await resolveCustomer(req);
+    if (!customer) return { customerId: null, save: false };
+    const meta = (customer.meta && typeof customer.meta === 'object' ? customer.meta : {}) as Record<string, unknown>;
+    const existing = typeof meta.stripeCustomerId === 'string' ? meta.stripeCustomerId : null;
+    // Only reach Stripe when there is a reason to: an existing id is enough
+    // to charge against, and a new one is only worth creating if this payment
+    // is actually going to be saved.
+    if (!existing && !wantsSave) return { customerId: null, save: false };
+    const { paymentGatewayService } = await import('../../services/paymentGateway.service.js');
+    const customerId = await paymentGatewayService.ensureVaultCustomer(customer.id, customer.email, customer.name);
+    return { customerId, save: wantsSave };
+  } catch {
+    return { customerId: null, save: false };
+  }
 }
 
 /** Only ever returns what a storefront needs — no internal fields. */
@@ -514,6 +839,28 @@ export async function counterAdminRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/counter/providers/payments', async (_req, reply) => {
     reply.send(await nexusBridge.paymentProviders());
+  });
+
+  // Payments & Transactions — WooPayments-equivalent surfaces. Read-only Stripe
+  // (balance, payouts, ledger, disputes) behind the Counter > Payments screens.
+  // Admin scope: the authenticate + commerce hooks above already guard these.
+  app.get('/counter/payments/overview', async (_req, reply) => {
+    reply.send(await stripePayments.overview());
+  });
+  app.get('/counter/payments/payouts', async (req, reply) => {
+    const limit = Math.min(Number((req.query as { limit?: string }).limit) || 20, 100);
+    reply.send(await stripePayments.payouts(limit));
+  });
+  app.get('/counter/payments/payouts/:id', async (req, reply) => {
+    reply.send(await stripePayments.payout((req.params as { id: string }).id));
+  });
+  app.get('/counter/payments/transactions', async (req, reply) => {
+    const limit = Math.min(Number((req.query as { limit?: string }).limit) || 25, 100);
+    reply.send(await stripePayments.transactions(limit));
+  });
+  app.get('/counter/payments/disputes', async (req, reply) => {
+    const limit = Math.min(Number((req.query as { limit?: string }).limit) || 25, 100);
+    reply.send(await stripePayments.disputes(limit));
   });
 
   // Wallets ------------------------------------------------------------------

@@ -142,7 +142,25 @@ body.th-cart-open .widget_shopping_cart_content .c-product-list-widget__buttons 
   display:flex;flex-direction:column;opacity:0;visibility:hidden;transition:opacity .2s ease}
 .th-search.on{opacity:1;visibility:visible}
 .th-search__bar{display:flex;align-items:center;gap:18px;padding:26px 30px;border-bottom:solid 1px var(--border-color-light,rgba(0,0,0,.08))}
-.th-search__bar input{flex:1;border:0;outline:0;background:none;font:inherit;font-size:28px;letter-spacing:-.01em}
+/* border:0 is not enough — the ported theme styles every input with a border
+   and a background, and its selector outranks a bare element rule here, so the
+   field rendered as a boxed control sitting inside the panel. Doubling the
+   class raises specificity above it without !important.
+   appearance:none removes WebKit's own search decoration: type="search" draws
+   its own clear button, which put a SECOND x next to the panel's close. */
+.th-search .th-search__bar input[type="search"]{flex:1;min-width:0;border:0;outline:0;
+  background:none;box-shadow:none;border-radius:0;padding:0;height:auto;
+  font:inherit;font-size:28px;letter-spacing:-.01em;
+  appearance:none;-webkit-appearance:none}
+.th-search__bar input::-webkit-search-cancel-button,
+.th-search__bar input::-webkit-search-decoration,
+.th-search__bar input::-webkit-search-results-button{-webkit-appearance:none;appearance:none;display:none}
+.th-search__bar input::-ms-clear{display:none}
+/* The magnifier that leads the field, as in the reference. Sized off the
+   input's own font so it keeps proportion when the field grows in immersive. */
+.th-search__icon{flex:0 0 auto;width:1em;height:1em;font-size:inherit;opacity:.45;
+  stroke:currentColor;fill:none;stroke-width:2;pointer-events:none}
+.th-search__bar form{display:flex;align-items:center;gap:.5em;flex:1;min-width:0}
 .th-search__close{border:0;background:none;font-size:26px;line-height:1;cursor:pointer;color:inherit}
 .th-search__body{flex:1;overflow:auto;padding:24px 30px 60px}
 .th-search__hint{font-size:13px;letter-spacing:.04em;color:var(--text-color-light,#888)}
@@ -173,6 +191,41 @@ body.th-cart-open .widget_shopping_cart_content .c-product-list-widget__buttons 
 .th-search__results--list .th-search__hit img,.th-search__results--list .th-search__hit .th-search__ph{
   width:56px;height:56px;flex:0 0 56px;aspect-ratio:auto}
 
+/* CATEGORIES — matches grouped under their category, one column per group.
+   Built from the reference shot: an uppercase group header with the match
+   count, then rows of thumbnail + name + a lighter sub-line, separated by
+   hairlines, with the whole row highlighting on hover.
+
+   auto-fit rather than a fixed column count: the number of groups is however
+   many categories the matches happen to span, which is not knowable when the
+   CSS is written. One category collapses to a single column and still reads
+   correctly. */
+.th-search__results--categories{grid-template-columns:repeat(auto-fit,minmax(210px,1fr));
+  gap:0 44px;max-width:none;align-items:start}
+.th-search__group{min-width:0}
+.th-search__group-head{display:flex;align-items:baseline;gap:7px;padding:0 8px 12px;
+  font-size:11px;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--text-color-light,#8a8a8a)}
+.th-search__group-n{font-weight:400;opacity:.75;letter-spacing:.06em}
+/* The row is the hit itself, so the whole thing is one click target — a name
+   that is a link inside a row that is not leaves a dead margin around it. */
+.th-search__results--categories .th-search__hit{flex-direction:row;align-items:center;gap:13px;
+  padding:11px 8px;border-top:solid 1px var(--border-color-light,rgba(0,0,0,.08));
+  transition:background-color .14s ease}
+.th-search__results--categories .th-search__group .th-search__hit:first-of-type{border-top:0}
+.th-search__results--categories .th-search__hit:hover{background:var(--background-color-dark,#f5f5f5)}
+.th-search__results--categories .th-search__hit img,
+.th-search__results--categories .th-search__hit .th-search__ph{
+  width:34px;height:34px;flex:0 0 34px;border-radius:50%;aspect-ratio:auto}
+.th-search__results--categories .th-search__nm{font-size:13.5px;overflow:hidden;
+  text-overflow:ellipsis;white-space:nowrap}
+.th-search__results--categories .th-search__pr{font-size:11.5px;margin-top:2px}
+/* Stack the groups on a phone: 210px columns beside each other would truncate
+   every name to two words. */
+@media(max-width:600px){
+  .th-search__results--categories{grid-template-columns:minmax(0,1fr);gap:22px 0}
+}
+
 /* SLIDER — one swipeable row. Native overflow scrolling with snap points
    rather than a carousel library: it keeps momentum scrolling and the
    trackpad, which a transform carousel has to reimplement badly. */
@@ -188,7 +241,7 @@ body.th-cart-open .widget_shopping_cart_content .c-product-list-widget__buttons 
 .th-search__hit:hover .th-search__nm{color:var(--accent-color,inherit)}
 /* Two columns survive to phone width — the shopper is comparing two products,
    and one-per-row turns four results into a scroll. */
-@media(max-width:767px){.th-search__bar{padding:18px}.th-search__bar input{font-size:20px}.th-search__body{padding:18px}
+@media(max-width:767px){.th-search__bar{padding:18px}.th-search .th-search__bar input[type="search"]{font-size:20px}.th-search__body{padding:18px}
   .th-search__results{gap:18px 14px}}
 
 /* Immersive: the page itself empties. The panel is transparent and the body
@@ -199,31 +252,86 @@ body.th-search-open #brx-content,body.th-search-open main,body.th-search-open #b
 body.th-search-open footer.site{
   opacity:0;transform:scale(.985);pointer-events:none;
   transition:opacity .32s ease,transform .32s ease}
-.th-search--immersive{background:transparent;backdrop-filter:blur(2px);z-index:1200}
-.th-search--immersive .th-search__bar{border-bottom:0;padding:34px 30px 12px;max-width:1180px;margin:0 auto;width:100%}
-.th-search--immersive .th-search__bar input{font-size:34px;font-weight:500}
-.th-search--immersive .th-search__body{max-width:1180px;margin:0 auto;width:100%}
-/* Immersive gets more room; the column count still comes from the layout. */
+/* IMMERSIVE — the field sits CENTRED in the viewport, full width, over the
+   page; results filter in underneath it.
+   justify-content:center centres the bar+body block as a unit, so with an
+   empty query the field lands mid-screen, and as results arrive the block
+   grows downward around it. That needs .th-search__body to stop being flex:1
+   — stretched, it fills the column and shoves the field back to the top,
+   which is the layout this replaces. */
+.th-search--immersive{background:rgba(255,255,255,.94);backdrop-filter:blur(8px);
+  z-index:1200;justify-content:center}
+.th-search--immersive .th-search__bar{border-bottom:0;padding:0 6vw;width:100%;
+  max-width:none;gap:22px;flex:0 0 auto}
+/* Full width and scaled to the viewport — this field IS the interface here. */
+.th-search--immersive .th-search__bar input[type="search"]{font-size:clamp(26px,4.4vw,52px);
+  font-weight:500;letter-spacing:-.02em}
+.th-search--immersive .th-search__close{font-size:34px;opacity:.5}
+.th-search--immersive .th-search__close:hover{opacity:1}
+/* A rule under the field, the width of the field: it ties the results to the
+   thing that produced them instead of leaving them floating. */
+.th-search--immersive .th-search__body{width:100%;max-width:none;padding:26px 6vw 0;
+  flex:0 1 auto;overflow:auto;margin-top:22px;
+  border-top:solid 1px var(--border-color-light,rgba(0,0,0,.10))}
 .th-search--immersive .th-search__results{max-width:none}
+@media(prefers-reduced-motion:reduce){
+  .th-search--immersive{backdrop-filter:none}
+}
 .th-search__results--grid .th-search__hit img,.th-search__results--grid .th-search__hit .th-search__ph{
   width:100%;height:auto;aspect-ratio:1;flex:none}
 @media(max-width:767px){
   .th-search--immersive .th-search__bar{padding:20px 18px 10px}
-  .th-search--immersive .th-search__bar input{font-size:22px}
+  .th-search--immersive .th-search__bar input[type="search"]{font-size:22px}
 }
 @media(prefers-reduced-motion:reduce){
   body.th-search-open #brx-content,body.th-search-open main,body.th-search-open #brx-footer,
   body.th-search-open footer.site{transform:none;transition:none}
 }
 
-/* Inline search: the same panel, docked under the header instead of covering
-   the page. For a shopper who is mid-scroll and wants to check one thing
-   without losing where they were. */
-.th-search--inline{position:absolute;top:100%;left:0;right:0;bottom:auto;max-height:min(70vh,560px);
-  border-bottom:solid 1px var(--border-color-light,rgba(0,0,0,.12));box-shadow:0 24px 48px rgba(0,0,0,.10)}
-.th-search--inline .th-search__bar{padding:18px 30px}
-.th-search--inline .th-search__bar input{font-size:19px}
-.th-search--inline .th-search__body{padding:18px 30px 30px}
+/* BOXED — the panel drops out of the header as a contained card: a large
+   field along the top, results directly beneath it, inside one box.
+
+   A CARD, not a full-bleed bar. Edge-to-edge, the panel reads as part of the
+   header and the results look like page content that just appeared; boxed and
+   shadowed, it reads as a thing that opened over the page and can be closed.
+
+   Centred with left:50% + translateX rather than left/right insets, because
+   the base .th-search sets inset:0 and a card narrower than the viewport has
+   to override both sides anyway. */
+.th-search--inline{position:absolute;top:100%;left:50%;right:auto;bottom:auto;
+  transform:translateX(-50%);width:min(1120px,calc(100% - 48px));
+  max-height:min(74vh,620px);margin-top:12px;
+  background:var(--background-color,#fff);
+  border:solid 1px var(--border-color-light,rgba(0,0,0,.09));
+  box-shadow:0 28px 64px rgba(0,0,0,.14);overflow:auto}
+/* The larger field asked for. Sized against the box, not the viewport, so it
+   does not outgrow the card it sits in. */
+.th-search--inline .th-search__bar{padding:22px 26px;gap:14px}
+.th-search--inline .th-search__bar input[type="search"]{font-size:24px;font-weight:400}
+.th-search--inline .th-search__body{padding:20px 26px 28px;flex:0 1 auto}
+@media(max-width:767px){
+  .th-search--inline{width:calc(100% - 20px);margin-top:8px}
+  .th-search--inline .th-search__bar{padding:16px 18px}
+  .th-search--inline .th-search__bar input[type="search"]{font-size:19px}
+  .th-search--inline .th-search__body{padding:14px 18px 22px}
+}
+
+/* FULL WIDTH — the docked panel, edge to edge.
+   Carries th-search--inline as well, so it inherits the whole docked
+   behaviour and overrides only the box: no side inset, no gap under the
+   header, and no side border, because at full bleed a vertical edge has
+   nothing to sit against. The drop shadow stays — it is what holds the panel
+   above the page.
+   Written after the boxed rules AND at equal specificity, so these win by
+   order; the mobile block above cannot re-narrow it because this comes later. */
+.th-search--fullwidth{left:0;right:0;transform:none;width:100%;max-width:none;
+  margin-top:0;border-left:0;border-right:0;
+  box-shadow:0 18px 44px rgba(0,0,0,.13)}
+.th-search--fullwidth .th-search__bar,
+.th-search--fullwidth .th-search__body{max-width:1400px;margin-inline:auto;width:100%}
+@media(max-width:767px){
+  .th-search--fullwidth{width:100%;margin-top:0}
+}
 `;
 
 export interface HeaderCartConfig {
@@ -231,9 +339,16 @@ export interface HeaderCartConfig {
   cartSidebarReveal: 'overlay' | 'push';
   /** Hex. The colour uncovered behind a shifted page. */
   cartSidebarGround: string;
-  searchStyle: 'takeover' | 'inline' | 'immersive';
-  /** Result layout: a dense list, a 2-up grid, or a swipeable row. */
-  searchLayout: 'list' | 'grid' | 'slider';
+  searchStyle: 'takeover' | 'inline' | 'fullwidth' | 'immersive';
+  /**
+   * Result layout: a 2-up grid, a dense list, results grouped under their
+   * category, or a swipeable row.
+   *
+   * 'categories' groups the matches by product category, one column per
+   * group with a count in the header — the layout Bam specified from a
+   * reference shot: thumbnail, name, and a lighter sub-line per row.
+   */
+  searchLayout: 'list' | 'grid' | 'categories' | 'slider';
   wishlistEnabled: boolean;
 }
 
@@ -250,7 +365,10 @@ export function headerCartRuntime(cfg: HeaderCartConfig = HEADER_CART_DEFAULTS):
   var GROUND = ${JSON.stringify(cfg.cartSidebarGround)};
   var SEARCH_STYLE = ${JSON.stringify(cfg.searchStyle)};
   var SEARCH_LAYOUT = ${JSON.stringify(cfg.searchLayout ?? 'grid')};
-  var INLINE_SEARCH = SEARCH_STYLE === 'inline';
+  // Both docked styles hang off the header, so they share the anchoring and
+  // positioning path; only their width differs, which is pure CSS.
+  var DOCKED_SEARCH = SEARCH_STYLE === 'inline' || SEARCH_STYLE === 'fullwidth';
+  var INLINE_SEARCH = DOCKED_SEARCH;
   var IMMERSIVE_SEARCH = SEARCH_STYLE === 'immersive';
   var WISHLIST = ${JSON.stringify(cfg.wishlistEnabled)};
   var KEY = 'therum_cart_token';
@@ -515,14 +633,37 @@ export function headerCartRuntime(cfg: HeaderCartConfig = HEADER_CART_DEFAULTS):
   window.addEventListener('storage', function(e){ if (e.key === 'therum_wishlist' || e.key === KEY) counts(); });
 
   // ── Search ──────────────────────────────────────────────────────────────
-  var searchBtn = document.querySelector('.js-search-button');
+  //
+  // THE PORTED CHROME CARRIES THREE MAGNIFIERS, not one: the theme ships a
+  // desktop header and two mobile header variants, all in the DOM at once,
+  // with CSS deciding which is visible. The mobile ones come FIRST, so
+  // querySelector('.js-search-button') returned a 0x0 hidden button and the
+  // click handler landed on something no one can click. Measured on the live
+  // page: count=3, visible=1, and the visible one is index 2.
+  //
+  // Bind EVERY match. Whichever header the viewport is showing, its magnifier
+  // is wired. This is the same trap the cart hooks already avoid — .js-cart
+  // and .js-cart-info are duplicated three times for exactly the same reason.
+  var searchBtns = [].slice.call(document.querySelectorAll('.js-search-button'));
+  // The anchor must come from the button the visitor can actually see, or the
+  // inline panel docks under a header that is not on screen.
+  var searchBtn = searchBtns.filter(function (b) {
+    return b.getBoundingClientRect().width > 0;
+  })[0] || searchBtns[0];
   if (searchBtn) {
     var box = document.createElement('div');
-    box.className = 'th-search' + (INLINE_SEARCH ? ' th-search--inline' : IMMERSIVE_SEARCH ? ' th-search--immersive' : '');
+    box.className = 'th-search'
+      + (SEARCH_STYLE === 'inline' ? ' th-search--inline'
+        : SEARCH_STYLE === 'fullwidth' ? ' th-search--inline th-search--fullwidth'
+        : IMMERSIVE_SEARCH ? ' th-search--immersive' : '');
     box.setAttribute('role', 'dialog');
     box.setAttribute('aria-label', 'Search products');
     box.innerHTML = '<div class="th-search__bar">'
-      + '<form data-search-form style="display:flex;flex:1"><input type="search" name="q" placeholder="Search products" autocomplete="off"></form>'
+      + '<form data-search-form>'
+      + '<svg class="th-search__icon" viewBox="0 0 24 24" aria-hidden="true">'
+      + '<circle cx="11" cy="11" r="7"></circle><path d="M16.5 16.5 21 21"></path></svg>'
+      + '<input type="search" name="q" placeholder="Search products" autocomplete="off">'
+      + '</form>'
       + '<button class="th-search__close" type="button" aria-label="Close">&times;</button></div>'
       + '<div class="th-search__body"><p class="th-search__hint">Type to search the shop.</p></div>';
     // Inline docks under the header, so it belongs INSIDE it — appended to
@@ -547,7 +688,9 @@ export function headerCartRuntime(cfg: HeaderCartConfig = HEADER_CART_DEFAULTS):
       box.classList.remove('on');
       document.body.classList.remove('th-search-open');
     };
-    searchBtn.addEventListener('click', function(e){ e.preventDefault(); openSearch(); });
+    searchBtns.forEach(function (b) {
+      b.addEventListener('click', function(e){ e.preventDefault(); openSearch(); });
+    });
     closeBtn.addEventListener('click', closeSearch);
     // Enter goes to the full shop results, where the filters live — the
     // overlay is for finding something fast, not for replacing that page.
@@ -564,23 +707,60 @@ export function headerCartRuntime(cfg: HeaderCartConfig = HEADER_CART_DEFAULTS):
       if (q.length < 2) { body.innerHTML = '<p class="th-search__hint">Type to search the shop.</p>'; return; }
       timer = setTimeout(async function(){
         try {
-          var r = await api('/products?q=' + encodeURIComponent(q) + '&status=active&limit=8');
+          // The category layout shows several groups at once, so it needs a
+          // deeper pool than the flat layouts — 8 matches split four ways is
+          // two products per column.
+          var cap = SEARCH_LAYOUT === 'categories' ? 24 : 8;
+          var r = await api('/products?q=' + encodeURIComponent(q) + '&status=active&limit=' + cap);
           var items = r.items || [];
-          body.innerHTML = items.length
-            ? '<div class="th-search__results th-search__results--' + SEARCH_LAYOUT + '">'
-              + items.map(function(p){
-                  var prices = (p.variants || []).map(function(v){ return v.price; }).filter(function(n){ return typeof n === 'number'; });
-                  var from = prices.length ? Math.min.apply(null, prices) : null;
-                  return '<a class="th-search__hit" href="/product/' + esc(p.slug) + '">'
-                    + (p.image
-                        ? '<img src="' + esc(p.image) + '" alt="" loading="lazy">'
-                        : '<span class="th-search__ph"></span>')
-                    + '<span><span class="th-search__nm">' + esc(p.name) + '</span>'
-                    + (from === null ? '' : '<span class="th-search__pr">' + (prices.length > 1 ? 'From ' : '') + money(from) + '</span>')
-                    + '</span></a>';
+
+          var hit = function(p){
+            var prices = (p.variants || []).map(function(v){ return v.price; }).filter(function(n){ return typeof n === 'number'; });
+            var from = prices.length ? Math.min.apply(null, prices) : null;
+            return '<a class="th-search__hit" href="/product/' + esc(p.slug) + '">'
+              + (p.image
+                  ? '<img src="' + esc(p.image) + '" alt="" loading="lazy">'
+                  : '<span class="th-search__ph"></span>')
+              + '<span><span class="th-search__nm">' + esc(p.name) + '</span>'
+              + (from === null ? '' : '<span class="th-search__pr">' + (prices.length > 1 ? 'From ' : '') + money(from) + '</span>')
+              + '</span></a>';
+          };
+
+          var results;
+          if (SEARCH_LAYOUT === 'categories') {
+            // Group by category. A product in two categories appears under
+            // both — that is what a category listing means, and hiding it from
+            // one of them would make the counts lie.
+            var groups = [], byName = {};
+            var push = function(name, p){
+              if (!byName[name]) { byName[name] = []; groups.push(name); }
+              byName[name].push(p);
+            };
+            items.forEach(function(p){
+              var cats = (p.categories || []).filter(Boolean);
+              // Uncategorised products still have to appear. Dropping them
+              // would mean a search that matches a product returns nothing,
+              // which reads as a broken search rather than a tidy store.
+              if (!cats.length) return push('Products', p);
+              cats.forEach(function(c){ push(c.name || c.slug, p); });
+            });
+            results = '<div class="th-search__results th-search__results--categories">'
+              + groups.map(function(name){
+                  var list = byName[name];
+                  return '<div class="th-search__group">'
+                    + '<div class="th-search__group-head">' + esc(name)
+                    + '<span class="th-search__group-n">(' + list.length + ')</span></div>'
+                    + list.map(hit).join('')
+                    + '</div>';
                 }).join('')
-              + '</div>'
-              + '<p class="th-search__hint" style="margin-top:28px">Press Enter for all results.</p>'
+              + '</div>';
+          } else {
+            results = '<div class="th-search__results th-search__results--' + SEARCH_LAYOUT + '">'
+              + items.map(hit).join('') + '</div>';
+          }
+
+          body.innerHTML = items.length
+            ? results + '<p class="th-search__hint" style="margin-top:28px">Press Enter for all results.</p>'
             : '<p class="th-search__hint">Nothing matches &ldquo;' + esc(q) + '&rdquo;.</p>';
         } catch (err) {
           body.innerHTML = '<p class="th-search__hint">Search is unavailable right now.</p>';

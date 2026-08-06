@@ -47,6 +47,34 @@ export const ACCOUNT_CSS = `
 .th-acct__submit{width:100%;margin-top:22px;padding:14px;background:var(--button-color,#111);color:var(--white-color,#fff);
   border:0;cursor:pointer;font:inherit;font-size:12px;font-weight:600;letter-spacing:.08em;text-transform:uppercase}
 .th-acct__submit[disabled]{opacity:.5;cursor:default}
+/* ── Details: addresses, cards, name ───────────────────────────────────── */
+.th-acct__sub{margin-top:30px;padding-top:22px;border-top:solid 1px var(--border-color-light,rgba(0,0,0,.12))}
+.th-acct__sub-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:14px}
+.th-acct__sub-head h3{margin:0;font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.th-acct__addr{display:flex;align-items:center;gap:14px;padding:13px 0;
+  border-bottom:solid 1px var(--border-color-light,rgba(0,0,0,.08));font-size:13px;flex-wrap:wrap}
+.th-acct__addr:last-child{border-bottom:0}
+.th-acct__addr-txt{flex:1 1 220px;min-width:0;line-height:1.5}
+.th-acct__addr-acts{display:flex;gap:14px;flex:0 0 auto;margin-left:auto}
+.th-acct__badge{display:inline-block;margin-left:8px;padding:2px 7px;font-size:9px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;border:solid 1px currentColor;vertical-align:middle}
+.th-acct__dim{color:var(--text-color-light,#888)}
+.th-acct__link{background:none;border:0;padding:0;font:inherit;font-size:12px;cursor:pointer;color:inherit;
+  text-decoration:underline;text-underline-offset:3px}
+.th-acct__link--danger{color:var(--accent-color,#c0392b)}
+.th-acct__btn{padding:10px 16px;background:var(--button-color,#111);color:var(--white-color,#fff);border:0;cursor:pointer;
+  font:inherit;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.th-acct__editable{display:flex;align-items:center;gap:12px}
+.th-acct__editrow{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.th-acct__in{width:100%;padding:11px 13px;border:solid 1px var(--border-color-light,rgba(0,0,0,.15));background:none;font:inherit;font-size:14px}
+.th-acct__addrform{display:flex;flex-direction:column;gap:9px;margin-top:16px;padding-top:16px;
+  border-top:dashed 1px var(--border-color-light,rgba(0,0,0,.15))}
+.th-acct__addrrow{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.th-acct__check{display:flex!important;align-items:center;gap:8px;font-size:12px;letter-spacing:0;text-transform:none;font-weight:400;margin:4px 0!important}
+.th-acct__check input{width:auto!important;padding:0!important}
+/* Google renders its own button inside this host; it comes with its own
+   dimensions, so all this does is centre it. */
+.th-acct__gbtn{display:flex;justify-content:center;min-height:44px}
 .th-acct__msg{margin-top:16px;font-size:13px;line-height:1.5}
 .th-acct__msg--bad{color:var(--accent-color,#c0392b)}
 .th-acct__empty{padding:44px 0;text-align:center;font-size:13px;color:var(--text-color-light,#888)}
@@ -58,12 +86,59 @@ export const ACCOUNT_CSS = `
 .th-hello{margin-bottom:26px}
 .th-hello__hi{font-size:24px;font-weight:600;letter-spacing:-.01em}
 .th-hello__sub{font-size:13px;color:var(--text-color-light,#888);margin-top:4px}
-.th-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px}
-.th-card{border:solid 1px var(--border-color-light,rgba(0,0,0,.12));padding:22px;display:flex;flex-direction:column}
+/* ── BENTO ──────────────────────────────────────────────────────────────
+   A fixed four-column track rather than auto-fit, because a bento needs
+   cards of DIFFERENT sizes and auto-fit makes every one the same. Spans are
+   assigned per card by what it holds: a card with a picture strip earns two
+   columns, a single number does not.
+   grid-auto-flow:dense lets a small card backfill a hole a wide one left,
+   so the wall stays solid instead of gap-toothed. */
+.th-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));
+  grid-auto-rows:auto;gap:14px;grid-auto-flow:dense;align-items:stretch}
+.th-card{border:solid 1px var(--border-color-light,rgba(0,0,0,.12));border-radius:14px;
+  padding:22px;min-height:168px;display:flex;flex-direction:column;background:var(--sf,#fff);
+  transition:border-color .2s ease,transform .2s ease,box-shadow .2s ease}
+.th-card:hover{border-color:var(--border-color-dark,rgba(0,0,0,.28))}
+.th-card--w2{grid-column:span 2}
+.th-card--w3{grid-column:span 3}
+.th-card--h2{grid-row:span 2}
 .th-card--span{grid-column:1/-1}
+/* The one card that is an ACTION, not a number: it inverts so the eye lands
+   on it first and the rest of the wall reads as context around it. */
+.th-card--hero{background:var(--tx,#0a0a0a);color:var(--white-color,#fff);border-color:var(--tx,#0a0a0a)}
+.th-card--hero .th-card__label,.th-card--hero .th-card__note{color:rgba(255,255,255,.66)}
+.th-card--hero .th-card__act .th-solid{background:#fff;color:var(--tx,#0a0a0a);border-color:#fff}
+.th-card--hero .th-card__act button:not(.th-solid),.th-card--hero .th-card__act a:not(.th-solid){color:#fff;border-color:rgba(255,255,255,.4)}
+@media(max-width:1000px){
+  .th-cards{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .th-card--w3{grid-column:span 2}
+}
+@media(max-width:620px){
+  /* One column on a phone: a two-up bento at 320px is two cramped columns,
+     not a layout. Spans collapse so nothing tries to be two of one. */
+  .th-cards{grid-template-columns:1fr;grid-auto-rows:auto}
+  .th-card--w2,.th-card--w3,.th-card--h2,.th-card--span{grid-column:auto;grid-row:auto}
+}
+@media(prefers-reduced-motion:reduce){.th-card{transition:none}}
 .th-card__label{font-size:11px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-color-light,#888);margin-bottom:14px}
 .th-card__big{font-size:26px;font-weight:600;letter-spacing:-.01em;line-height:1.15}
 .th-card__note{font-size:13px;color:var(--text-color-light,#888);margin-top:6px;line-height:1.5}
+/* ── THE MORPH ──────────────────────────────────────────────────────────
+   The opened card takes the whole grid and its neighbours fall back rather
+   than vanishing, so the shopper keeps sight of what they are returning to.
+   grid-column:1/-1 with the others dimmed is deliberately NOT display:none —
+   removing them would reflow the page under the reader's hands. */
+.th-cards.is-morphed .th-card{opacity:.25;filter:saturate(.6);pointer-events:none;
+  transition:opacity .3s ease,filter .3s ease}
+.th-cards.is-morphed .th-card.is-open{opacity:1;filter:none;pointer-events:auto;
+  grid-column:1/-1;grid-row:auto}
+.th-card.is-open{box-shadow:0 10px 30px rgba(0,0,0,.10)}
+.th-morph{margin-top:20px;padding-top:18px;border-top:solid 1px var(--border-color-light,rgba(0,0,0,.12))}
+.th-morph__bar{margin-bottom:16px}
+.th-morph__in{max-height:min(62vh,620px);overflow-y:auto}
+/* The inner panel's own cards must not re-inherit the dimming above. */
+.th-morph__in .th-card{opacity:1;filter:none;pointer-events:auto}
+@media(prefers-reduced-motion:reduce){.th-cards.is-morphed .th-card{transition:none}}
 .th-card__act{margin-top:auto;padding-top:18px}
 .th-card__act button,.th-card__act a{display:inline-block;padding:11px 18px;border:solid 1px currentColor;background:none;
   cursor:pointer;text-decoration:none;color:inherit;font:inherit;font-size:11px;font-weight:600;letter-spacing:.06em;text-transform:uppercase}
@@ -102,8 +177,28 @@ export const ACCOUNT_CSS = `
 
 /* ── Product strips ────────────────────────────────────────────────────── */
 .th-picks{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:24px}
-.th-pick{text-decoration:none;color:inherit;display:block}
+/* Five to a row: four products and the shop. */
+.th-picks--5{grid-template-columns:repeat(5,minmax(0,1fr))}
+@media(max-width:1000px){.th-picks--5{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media(max-width:640px){.th-picks--5{grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}}
+.th-pick{text-decoration:none;color:inherit;display:flex;flex-direction:column}
+.th-pick__link{text-decoration:none;color:inherit;display:block}
 .th-pick img,.th-pick .th-ph{width:100%;aspect-ratio:1;object-fit:cover}
+/* Buying from here is the point of surfacing products at all — someone in
+   their account should not have to go to the shop to reorder. */
+.th-pick__buy{margin-top:10px;width:100%;padding:11px 10px;border:solid 1px currentColor;background:none;
+  color:inherit;text-align:center;text-decoration:none;display:block;cursor:pointer;
+  font:inherit;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;
+  transition:background .16s ease,color .16s ease}
+.th-pick__buy:hover{background:var(--button-color,#111);color:var(--white-color,#fff);border-color:var(--button-color,#111)}
+.th-pick__buy:disabled{opacity:.6;cursor:default}
+.th-pick__buy--ghost{color:var(--text-color-light,#888)}
+/* The fifth tile. Deliberately not a product photo — it is a door, and a
+   picture would make it read as one more thing to buy. */
+.th-pick--all .th-pick__allbox{width:100%;aspect-ratio:1;display:flex;align-items:center;justify-content:center;
+  border:dashed 1px var(--border-color-light,rgba(0,0,0,.28));background:var(--background-color-dark,#fafafa)}
+.th-pick__allarrow{font-size:26px;line-height:1}
+.th-pick--all:hover .th-pick__allbox{border-color:currentColor;border-style:solid}
 .th-pick__nm{font-size:13px;font-weight:500;margin-top:10px;line-height:1.35}
 .th-pick__pr{font-size:12px;color:var(--text-color-light,#888);margin-top:3px}
 .th-picks__basis{font-size:12px;color:var(--text-color-light,#888);margin-bottom:18px}
@@ -188,9 +283,101 @@ export function accountMarkup(wishlist: string, googleClientId = ''): string {
     <div class="th-acct__panel" data-acct-panel="picks" hidden><p class="th-acct__empty">Loading…</p></div>
 
     <div class="th-acct__panel" data-acct-panel="details" hidden>
-      <div class="th-acct__row"><span>Name</span><span data-acct-name></span></div>
+      <!-- Name is editable in place. Email is not: it is the login, so
+           changing it belongs in a verification flow rather than a text
+           field that a hijacked session could use to lock the owner out. -->
+      <div class="th-acct__row"><span>Name</span><span class="th-acct__editable">
+        <span data-acct-name></span>
+        <button type="button" class="th-acct__link" data-acct-name-edit>Edit</button>
+      </span></div>
+      <div class="th-acct__row" data-acct-name-form hidden><span></span><span class="th-acct__editrow">
+        <input class="th-acct__in" data-acct-name-input maxlength="120" placeholder="Your name">
+        <button type="button" class="th-acct__btn" data-acct-name-save>Save</button>
+        <button type="button" class="th-acct__link" data-acct-name-cancel>Cancel</button>
+      </span></div>
       <div class="th-acct__row"><span>Email</span><span data-acct-email></span></div>
       <div class="th-acct__row" data-acct-identities-row hidden><span>Signed in with</span><span data-acct-identities></span></div>
+
+      <!-- ── Addresses ──────────────────────────────────────────────────
+           The Address table has existed since the schema was written with no
+           way for a shopper to see or change what was stored for them. -->
+      <div class="th-acct__sub">
+        <div class="th-acct__sub-head">
+          <h3>Addresses</h3>
+          <button type="button" class="th-acct__link" data-acct-addr-new>Add address</button>
+        </div>
+        <div data-acct-addresses><p class="th-acct__empty">Loading…</p></div>
+        <form class="th-acct__addrform" data-acct-addr-form hidden>
+          <input type="hidden" data-acct-addr-id>
+          <input class="th-acct__in" data-addr="line1" placeholder="Street address" autocomplete="shipping address-line1" required>
+          <input class="th-acct__in" data-addr="line2" placeholder="Apt, suite (optional)" autocomplete="shipping address-line2">
+          <div class="th-acct__addrrow">
+            <input class="th-acct__in" data-addr="city" placeholder="City" autocomplete="shipping address-level2" required>
+            <input class="th-acct__in" data-addr="region" placeholder="State" autocomplete="shipping address-level1">
+          </div>
+          <div class="th-acct__addrrow">
+            <input class="th-acct__in" data-addr="postalCode" placeholder="ZIP" inputmode="numeric" autocomplete="shipping postal-code">
+            <input class="th-acct__in" data-addr="country" placeholder="US" maxlength="2" value="US" autocomplete="shipping country" required>
+          </div>
+          <label class="th-acct__check"><input type="checkbox" data-addr="isDefault"> <span>Use as my default</span></label>
+          <div class="th-acct__editrow">
+            <button type="submit" class="th-acct__btn">Save address</button>
+            <button type="button" class="th-acct__link" data-acct-addr-cancel>Cancel</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- ── Security ───────────────────────────────────────────────────
+           Email is the login, so changing it is a two-step with a code to
+           the NEW address — a hijacked session must not be able to point the
+           account somewhere the owner cannot reach. -->
+      <div class="th-acct__sub">
+        <div class="th-acct__sub-head"><h3>Security</h3></div>
+        <div class="th-acct__addr">
+          <div class="th-acct__addr-txt">Password</div>
+          <div class="th-acct__addr-acts">
+            <button type="button" class="th-acct__link" data-acct-pw-edit>Change</button>
+          </div>
+        </div>
+        <form class="th-acct__addrform" data-acct-pw-form hidden>
+          <input class="th-acct__in" data-pw="current" type="password" placeholder="Current password" autocomplete="current-password">
+          <input class="th-acct__in" data-pw="next" type="password" placeholder="New password (8+ characters)" autocomplete="new-password">
+          <div class="th-acct__editrow">
+            <button type="submit" class="th-acct__btn">Save password</button>
+            <button type="button" class="th-acct__link" data-acct-pw-cancel>Cancel</button>
+          </div>
+        </form>
+
+        <div class="th-acct__addr">
+          <div class="th-acct__addr-txt">Sign-in email <span class="th-acct__dim" data-acct-email2></span></div>
+          <div class="th-acct__addr-acts">
+            <button type="button" class="th-acct__link" data-acct-em-edit>Change</button>
+          </div>
+        </div>
+        <form class="th-acct__addrform" data-acct-em-form hidden>
+          <input class="th-acct__in" data-em="email" type="email" placeholder="New email address" autocomplete="email">
+          <input class="th-acct__in" data-em="password" type="password" placeholder="Your password" autocomplete="current-password">
+          <div class="th-acct__editrow">
+            <button type="submit" class="th-acct__btn">Send code</button>
+            <button type="button" class="th-acct__link" data-acct-em-cancel>Cancel</button>
+          </div>
+        </form>
+        <form class="th-acct__addrform" data-acct-em-confirm hidden>
+          <p class="th-acct__dim" style="font-size:12px;margin:0" data-acct-em-sent></p>
+          <input class="th-acct__in" data-em="code" inputmode="numeric" placeholder="6-digit code" autocomplete="one-time-code">
+          <div class="th-acct__editrow">
+            <button type="submit" class="th-acct__btn">Confirm email</button>
+            <button type="button" class="th-acct__link" data-acct-em-cancel>Cancel</button>
+          </div>
+        </form>
+      </div>
+
+      <!-- ── Saved cards ────────────────────────────────────────────────
+           Adding a card without being able to remove it is a one-way door. -->
+      <div class="th-acct__sub" data-acct-cards-wrap hidden>
+        <div class="th-acct__sub-head"><h3>Payment methods</h3></div>
+        <div data-acct-paymethods></div>
+      </div>
       <div class="th-acct__out">
         <button type="button" data-acct-signout>Sign out</button>
         <button type="button" data-acct-signout-all>Sign out everywhere</button>
@@ -270,30 +457,43 @@ export const ACCOUNT_RUNTIME = `
 
     var hasGoogle = ready.some(function(p){ return p.provider === 'google'; });
     if (hasGoogle) {
-      var btn = document.createElement('button');
-      btn.type = 'button';
-      btn.innerHTML = '<svg viewBox="0 0 18 18" width="18" height="18" aria-hidden="true">'
-        + '<path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62z"/>'
-        + '<path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.8.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18z"/>'
-        + '<path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33z"/>'
-        + '<path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.9 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58z"/>'
-        + '</svg><span>Continue with Google</span>';
-      btn.addEventListener('click', async function(){
+      // GOOGLE'S OWN RENDERED BUTTON, not a styled button that calls prompt().
+      //
+      // prompt() is One Tap, and One Tap only appears when the browser ALREADY
+      // holds a live Google session. With no session, after a previous
+      // dismissal, or under third-party-cookie restrictions it shows nothing
+      // at all and logs "Not signed in with the identity provider" — which is
+      // indistinguishable, to the person clicking, from a broken button.
+      //
+      // renderButton opens the full account chooser, so it works for someone
+      // who has never signed into Google in this browser. That is the whole
+      // requirement: it has to work for anyone.
+      var host = document.createElement('div');
+      host.className = 'th-acct__gbtn';
+      socialBox.appendChild(host);
+      (async function(){
         try {
           await gsiScript();
           var cid = socialBox.getAttribute('data-google-client-id');
-          if (!cid) throw new Error('Google sign-in is not configured.');
+          if (!cid) return;
           window.google.accounts.id.initialize({
             client_id: cid,
             callback: function(res){ socialSignedIn('google', res.credential); },
+            // The popup keeps the shopper on this page; redirect mode would
+            // throw away anything they had already typed.
+            ux_mode: 'popup',
           });
-          window.google.accounts.id.prompt();
+          window.google.accounts.id.renderButton(host, {
+            type: 'standard', theme: 'outline', size: 'large',
+            text: 'continue_with', shape: 'rectangular', logo_alignment: 'center',
+            width: Math.min(400, Math.max(200, socialBox.clientWidth || 320)),
+          });
         } catch (err) {
-          msg.className = 'th-acct__msg th-acct__msg--bad';
-          msg.textContent = err.message;
+          // Losing Google costs a shortcut, not the account — the email and
+          // password form underneath still works, so this stays quiet.
+          host.remove();
         }
-      });
-      socialBox.appendChild(btn);
+      })();
     }
 
     if (socialBox.children.length) {
@@ -338,6 +538,7 @@ export const ACCOUNT_RUNTIME = `
     guest.hidden = true; user.hidden = false; root.classList.add('th-acct--wide');
     root.querySelector('[data-acct-name]').textContent = me.name || '—';
     root.querySelector('[data-acct-email]').textContent = me.email;
+    var e2 = root.querySelector('[data-acct-email2]'); if (e2) e2.textContent = me.email;
     root.querySelector('[data-acct-hello]').textContent = me.name ? ('Hey, ' + me.name.split(' ')[0]) : 'Your account';
     root.querySelector('[data-acct-since]').textContent = me.email;
     var ids = me.identities || [];
@@ -347,7 +548,201 @@ export const ACCOUNT_RUNTIME = `
     }
     loaded = {};
     dashboard();
+    loadAddresses();
+    loadCards();
   }
+
+  // ── Addresses ──────────────────────────────────────────────────────────
+  var addrBox = root.querySelector('[data-acct-addresses]');
+  var addrForm = root.querySelector('[data-acct-addr-form]');
+  var addrIdEl = root.querySelector('[data-acct-addr-id]');
+  function addrField(k){ return addrForm && addrForm.querySelector('[data-addr="' + k + '"]'); }
+
+  async function loadAddresses(){
+    if (!addrBox) return;
+    try {
+      var r = await api('/shop/account/addresses');
+      var list = r.addresses || [];
+      addrBox.innerHTML = list.length
+        ? list.map(function(a){
+            return '<div class="th-acct__addr' + (a.isDefault ? ' is-default' : '') + '">'
+              + '<div class="th-acct__addr-txt">'
+              + esc([a.line1, a.line2, a.city, a.region, a.postalCode, a.country].filter(Boolean).join(', '))
+              + (a.isDefault ? '<span class="th-acct__badge">Default</span>' : '')
+              + '</div><div class="th-acct__addr-acts">'
+              + (a.isDefault ? '' : '<button type="button" class="th-acct__link" data-addr-default="' + esc(a.id) + '">Make default</button>')
+              + '<button type="button" class="th-acct__link" data-addr-edit="' + esc(a.id) + '">Edit</button>'
+              + '<button type="button" class="th-acct__link th-acct__link--danger" data-addr-del="' + esc(a.id) + '">Remove</button>'
+              + '</div></div>';
+          }).join('')
+        : '<p class="th-acct__empty">No addresses saved yet.</p>';
+      addrBox.__list = list;
+    } catch (e) {
+      addrBox.innerHTML = '<p class="th-acct__empty">Could not load addresses.</p>';
+    }
+  }
+
+  function openAddr(a){
+    if (!addrForm) return;
+    addrIdEl.value = a ? a.id : '';
+    ['line1','line2','city','region','postalCode','country'].forEach(function(k){
+      var f = addrField(k); if (f) f.value = a ? (a[k] || '') : (k === 'country' ? 'US' : '');
+    });
+    var d = addrField('isDefault'); if (d) d.checked = a ? !!a.isDefault : false;
+    addrForm.hidden = false;
+    var first = addrField('line1'); if (first) first.focus();
+  }
+
+  root.addEventListener('click', async function(e){
+    var t = e.target;
+    if (t.matches('[data-acct-addr-new]')) return openAddr(null);
+    if (t.matches('[data-acct-addr-cancel]')) { addrForm.hidden = true; return; }
+    var ed = t.getAttribute && t.getAttribute('data-addr-edit');
+    if (ed) return openAddr((addrBox.__list || []).filter(function(a){ return a.id === ed; })[0]);
+    var mk = t.getAttribute && t.getAttribute('data-addr-default');
+    if (mk) {
+      await api('/shop/account/addresses/' + encodeURIComponent(mk), { method: 'PATCH', body: JSON.stringify({ isDefault: true }) }).catch(function(){});
+      return loadAddresses();
+    }
+    var del = t.getAttribute && t.getAttribute('data-addr-del');
+    if (del) {
+      // Confirmed, because there is no undo — the row is gone from the
+      // database, not archived.
+      if (!window.confirm('Remove this address?')) return;
+      await api('/shop/account/addresses/' + encodeURIComponent(del), { method: 'DELETE' }).catch(function(){});
+      return loadAddresses();
+    }
+    var rm = t.getAttribute && t.getAttribute('data-card-del');
+    if (rm) {
+      if (!window.confirm('Remove this card? You can add it again at checkout.')) return;
+      await api('/shop/account/payment-methods/' + encodeURIComponent(rm), { method: 'DELETE' }).catch(function(){});
+      return loadCards();
+    }
+  });
+
+  if (addrForm) addrForm.addEventListener('submit', async function(e){
+    e.preventDefault();
+    var body = {};
+    ['line1','line2','city','region','postalCode','country'].forEach(function(k){
+      var f = addrField(k); if (f) body[k] = f.value.trim();
+    });
+    var d = addrField('isDefault'); body.isDefault = !!(d && d.checked);
+    var id = addrIdEl.value;
+    try {
+      await api(id ? '/shop/account/addresses/' + encodeURIComponent(id) : '/shop/account/addresses',
+        { method: id ? 'PATCH' : 'POST', body: JSON.stringify(body) });
+      addrForm.hidden = true;
+      loadAddresses();
+    } catch (err) {
+      if (msg2) msg2.textContent = (err && err.message) || 'Could not save that address.';
+    }
+  });
+
+  // ── Saved cards ────────────────────────────────────────────────────────
+  async function loadCards(){
+    var wrap = root.querySelector('[data-acct-cards-wrap]');
+    var box = root.querySelector('[data-acct-paymethods]');
+    if (!wrap || !box) return;
+    try {
+      var r = await api('/shop/account/payment-methods');
+      var cards = r.cards || [];
+      // Hidden entirely when there are none: a "Payment methods" heading over
+      // an empty box tells a shopper about a feature they have not used yet.
+      wrap.hidden = cards.length === 0;
+      box.innerHTML = cards.map(function(c){
+        return '<div class="th-acct__addr"><div class="th-acct__addr-txt">'
+          + '<strong>' + esc(String(c.brand).toUpperCase()) + '</strong> •••• ' + esc(c.last4)
+          + ' <span class="th-acct__dim">' + esc(String(c.expMonth).padStart(2,'0')) + '/' + esc(String(c.expYear).slice(-2)) + '</span>'
+          + '</div><div class="th-acct__addr-acts">'
+          + '<button type="button" class="th-acct__link th-acct__link--danger" data-card-del="' + esc(c.id) + '">Remove</button>'
+          + '</div></div>';
+      }).join('');
+    } catch (e) { wrap.hidden = true; }
+  }
+
+  // ── Password ───────────────────────────────────────────────────────────
+  var pwForm = root.querySelector('[data-acct-pw-form]');
+  var emForm = root.querySelector('[data-acct-em-form]');
+  var emConfirm = root.querySelector('[data-acct-em-confirm]');
+  var pendingEmail = '';
+  function pwv(k){ var e = pwForm && pwForm.querySelector('[data-pw="' + k + '"]'); return e ? e.value : ''; }
+  function emv(k){
+    var e = (emForm && emForm.querySelector('[data-em="' + k + '"]'))
+         || (emConfirm && emConfirm.querySelector('[data-em="' + k + '"]'));
+    return e ? e.value : '';
+  }
+
+  root.addEventListener('click', function(e){
+    if (e.target.matches('[data-acct-pw-edit]')) { pwForm.hidden = false; pwForm.querySelector('[data-pw="current"]').focus(); }
+    if (e.target.matches('[data-acct-pw-cancel]')) { pwForm.hidden = true; }
+    if (e.target.matches('[data-acct-em-edit]')) { emForm.hidden = false; emConfirm.hidden = true; emForm.querySelector('[data-em="email"]').focus(); }
+    if (e.target.matches('[data-acct-em-cancel]')) { emForm.hidden = true; emConfirm.hidden = true; }
+  });
+
+  if (pwForm) pwForm.addEventListener('submit', async function(e){
+    e.preventDefault();
+    if (pwv('next').length < 8) { if (msg2) msg2.textContent = 'Use at least 8 characters.'; return; }
+    try {
+      var out = await api('/shop/account/password', { method: 'POST',
+        body: JSON.stringify({ current: pwv('current'), next: pwv('next') }) });
+      // Changing the password drops every other session — including this tab's,
+      // so the new token replaces it or the shopper is logged out by their own
+      // security action.
+      if (out.token) { try { localStorage.setItem(KEY, out.token); } catch (err) {} }
+      pwForm.hidden = true;
+      pwForm.querySelectorAll('input').forEach(function(i){ i.value = ''; });
+      if (msg2) msg2.textContent = 'Password changed. Every other device has been signed out.';
+    } catch (err) { if (msg2) msg2.textContent = err.message || 'Could not change that password.'; }
+  });
+
+  // ── Email ──────────────────────────────────────────────────────────────
+  if (emForm) emForm.addEventListener('submit', async function(e){
+    e.preventDefault();
+    try {
+      var out = await api('/shop/account/email', { method: 'POST',
+        body: JSON.stringify({ email: emv('email'), password: emv('password') || undefined }) });
+      pendingEmail = out.to;
+      emForm.hidden = true; emConfirm.hidden = false;
+      var note = root.querySelector('[data-acct-em-sent]');
+      if (note) note.textContent = 'We sent a code to ' + out.to + '. Enter it to finish the change.';
+      emConfirm.querySelector('[data-em="code"]').focus();
+      if (msg2) msg2.textContent = '';
+    } catch (err) { if (msg2) msg2.textContent = err.message || 'Could not start that change.'; }
+  });
+
+  if (emConfirm) emConfirm.addEventListener('submit', async function(e){
+    e.preventDefault();
+    try {
+      var out = await api('/shop/account/email/confirm', { method: 'POST',
+        body: JSON.stringify({ email: pendingEmail, code: emv('code') }) });
+      emConfirm.hidden = true;
+      root.querySelector('[data-acct-email]').textContent = out.email;
+      var e2 = root.querySelector('[data-acct-email2]'); if (e2) e2.textContent = out.email;
+      if (msg2) msg2.textContent = 'Email changed to ' + out.email + '.';
+    } catch (err) { if (msg2) msg2.textContent = err.message || 'That code did not match.'; }
+  });
+
+  // ── Name ───────────────────────────────────────────────────────────────
+  var nameForm = root.querySelector('[data-acct-name-form]');
+  var nameIn = root.querySelector('[data-acct-name-input]');
+  root.addEventListener('click', async function(e){
+    if (e.target.matches('[data-acct-name-edit]')) {
+      nameIn.value = root.querySelector('[data-acct-name]').textContent.replace('—','').trim();
+      nameForm.hidden = false; nameIn.focus(); return;
+    }
+    if (e.target.matches('[data-acct-name-cancel]')) { nameForm.hidden = true; return; }
+    if (e.target.matches('[data-acct-name-save]')) {
+      var v = (nameIn.value || '').trim();
+      if (!v) { if (msg2) msg2.textContent = 'Add a name.'; return; }
+      try {
+        var me = await api('/shop/account/profile', { method: 'PATCH', body: JSON.stringify({ name: v }) });
+        root.querySelector('[data-acct-name]').textContent = me.name || '—';
+        root.querySelector('[data-acct-hello]').textContent = me.name ? ('Hey, ' + me.name.split(' ')[0]) : 'Your account';
+        nameForm.hidden = true;
+        if (msg2) msg2.textContent = '';
+      } catch (err) { if (msg2) msg2.textContent = 'Could not save that name.'; }
+    }
+  });
 
   async function load(){
     if (!tok()) return showGuest();
@@ -370,9 +765,90 @@ export const ACCOUNT_RUNTIME = `
       var want = btn.getAttribute('data-acct-tab');
       root.querySelectorAll('[data-acct-tab]').forEach(function(b){ b.setAttribute('aria-selected', String(b === btn)); });
       root.querySelectorAll('[data-acct-panel]').forEach(function(p){ p.hidden = p.getAttribute('data-acct-panel') !== want; });
+      if (want === 'overview') closeMorph();
       section(want);
     });
   });
+
+  // ── THE MORPH ───────────────────────────────────────────────────────────
+  //
+  // A bento card is a summary AND the door to its detail. Tapping "All 6
+  // orders" used to jump to a separate tab, which threw away the one thing
+  // the layout had just established — where that content lives. Instead the
+  // card GROWS to the full grid and fills with the detail in place; the rest
+  // fade back rather than disappearing, so the shopper can see what they are
+  // returning to.
+  //
+  // The tab bar still works and stays in sync: it is the same content by
+  // another route, not a second implementation.
+  var MORPH = null;
+
+  function closeMorph(){
+    if (!MORPH) return;
+    var host = root.querySelector('[data-acct-cards]');
+    if (host) host.classList.remove('is-morphed');
+    var card = root.querySelector('.th-card.is-open');
+    if (card) {
+      card.classList.remove('is-open');
+      var body = card.querySelector('[data-morph-body]');
+      if (body) body.remove();
+      var keep = card.querySelector('[data-morph-keep]');
+      if (keep) keep.hidden = false;
+    }
+    MORPH = null;
+    root.querySelectorAll('[data-acct-tab]').forEach(function(b){
+      b.setAttribute('aria-selected', String(b.getAttribute('data-acct-tab') === 'overview'));
+    });
+  }
+
+  async function openMorph(name, card){
+    if (MORPH === name) return closeMorph();
+    closeMorph();
+    MORPH = name;
+    var host = root.querySelector('[data-acct-cards]');
+    if (host) host.classList.add('is-morphed');
+    card.classList.add('is-open');
+    // The summary stays as the header of the expanded card — it is the
+    // context for what is underneath, and removing it makes the expansion
+    // feel like a different screen rather than the same card, larger.
+    var keep = card.querySelector('.th-card__act');
+    if (keep) { keep.setAttribute('data-morph-keep', ''); keep.hidden = true; }
+    var body = document.createElement('div');
+    body.setAttribute('data-morph-body', '');
+    body.className = 'th-morph';
+    body.innerHTML = '<div class="th-morph__bar">'
+      + '<button type="button" class="th-acct__link" data-morph-close>← Back to overview</button></div>'
+      + '<div class="th-morph__in"><p class="th-acct__empty">Loading…</p></div>';
+    card.appendChild(body);
+    // Scrolled into view because an expanding card can grow past the fold,
+    // and a shopper who tapped a button should not have to hunt for what it
+    // opened.
+    try { card.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); } catch (e) { /* older browsers */ }
+
+    var into = body.querySelector('.th-morph__in');
+    var src = root.querySelector('[data-acct-panel="' + name + '"]');
+    // Render into the real panel first, then move its markup across, so the
+    // morph and the tab show identical content from one code path.
+    section(name);
+    if (name === 'wishlist') { into.innerHTML = src ? src.innerHTML : ''; return; }
+    for (var i = 0; i < 60 && src && /Loading…/.test(src.innerHTML); i++) {
+      await new Promise(function(r){ setTimeout(r, 100); });
+    }
+    into.innerHTML = src ? src.innerHTML : '<p class="th-acct__empty">Nothing here yet.</p>';
+    root.querySelectorAll('[data-acct-tab]').forEach(function(b){
+      b.setAttribute('aria-selected', String(b.getAttribute('data-acct-tab') === name));
+    });
+  }
+
+  root.addEventListener('click', function(e){
+    if (e.target.closest('[data-morph-close]')) { closeMorph(); return; }
+    var opener = e.target.closest('[data-morph]');
+    if (!opener) return;
+    var card = opener.closest('.th-card');
+    if (card) openMorph(opener.getAttribute('data-morph'), card);
+  });
+  // Escape closes it, like every other expanded thing on the site.
+  document.addEventListener('keydown', function(e){ if (e.key === 'Escape') closeMorph(); });
 
   // Deep panels fetch once, on first view. The dashboard is the exception —
   // it is the landing view, so its data is what the page is FOR.
@@ -402,7 +878,7 @@ export const ACCOUNT_RUNTIME = `
     // Offers first when there are any — it is the only card with something
     // waiting on the shopper, and burying it defeats pushing it at all.
     if (live.length) {
-      cards.push('<div class="th-card">'
+      cards.push('<div class="th-card th-card--hero th-card--w2">'
         + '<div class="th-card__label"><span class="th-dot"></span>' + live.length + (live.length === 1 ? ' offer waiting' : ' offers waiting') + '</div>'
         + '<div class="th-card__big">' + esc(offerValue(live[0])) + '</div>'
         + '<div class="th-card__note">' + esc(live[0].title) + '</div>'
@@ -418,7 +894,7 @@ export const ACCOUNT_RUNTIME = `
     // Last order
     if (orders.length) {
       var o = orders[0];
-      cards.push('<div class="th-card">'
+      cards.push('<div class="th-card th-card--w2">'
         + '<div class="th-card__label">Latest order</div>'
         + '<div class="th-card__big">' + money(o.total, o.currency) + '</div>'
         + '<div class="th-card__note">' + esc(o.number) + ' · ' + esc(o.status) + ' · ' + when(o.placedAt) + '</div>'
@@ -440,7 +916,7 @@ export const ACCOUNT_RUNTIME = `
     // Saved items — hydrated client-side, since the wishlist lives in this
     // browser rather than on the account.
     var saved = wishIds();
-    cards.push('<div class="th-card">'
+    cards.push('<div class="th-card' + (saved.length ? ' th-card--w2' : '') + '">'
       + '<div class="th-card__label">Saved items</div>'
       + '<div class="th-card__big">' + saved.length + (saved.length === 1 ? ' item' : ' items') + '</div>'
       + (saved.length
@@ -458,10 +934,17 @@ export const ACCOUNT_RUNTIME = `
     if (picks.length) {
       el.insertAdjacentHTML('beforeend', '<div class="th-card th-card--span">'
         + '<div class="th-card__label">' + (results[2].basis === 'history' ? 'Picked for you' : 'New in') + '</div>'
-        + '<div class="th-picks">'
-        + picks.map(pickHtml).join('')
-        + '</div>'
-        + '<div class="th-card__act"><a href="/shop">Shop everything</a></div></div>');
+        // Four, then a fifth tile that is the shop itself. Five across reads
+        // as a row rather than a grid that ran out, and someone who wants
+        // none of the four has somewhere to go from the same row.
+        + '<div class="th-picks th-picks--5">'
+        + picks.slice(0, 4).map(pickHtml).join('')
+        + '<a class="th-pick th-pick--all" href="/shop">'
+        +   '<span class="th-pick__allbox"><span class="th-pick__allarrow">&rarr;</span></span>'
+        +   '<div class="th-pick__nm">Shop Sidemoney</div>'
+        +   '<div class="th-pick__pr">Everything in the store</div>'
+        + '</a>'
+        + '</div></div>');
     }
   }
 
@@ -482,18 +965,62 @@ export const ACCOUNT_RUNTIME = `
   }
 
   function pickHtml(p){
-    var prices = (p.variants || []).map(function(v){ return v.price; }).filter(function(n){ return typeof n === 'number'; });
+    var vs = (p.variants || []);
+    var prices = vs.map(function(v){ return v.price; }).filter(function(n){ return typeof n === 'number'; });
     var from = prices.length ? Math.min.apply(null, prices) : null;
-    return '<a class="th-pick" href="/product/' + esc(p.slug) + '">'
-      + (p.image ? '<img src="' + esc(p.image) + '" alt="" loading="lazy">' : '<span class="th-ph"></span>')
-      + '<div class="th-pick__nm">' + esc(p.name) + '</div>'
-      + (from === null ? '' : '<div class="th-pick__pr">' + (prices.length > 1 ? 'From ' : '') + money(from) + '</div>')
-      + '</a>';
+    // Quick buy only where there is nothing to choose. A single-variant
+    // product can go straight to the bag; anything with a size or a colour
+    // needs the PDP, and guessing one for the shopper is worse than a click.
+    var only = vs.length === 1 ? vs[0] : null;
+    var buyable = only && (only.available === undefined || only.available > 0);
+    return '<div class="th-pick">'
+      + '<a class="th-pick__link" href="/product/' + esc(p.slug) + '">'
+      +   (p.image ? '<img src="' + esc(p.image) + '" alt="" loading="lazy">' : '<span class="th-ph"></span>')
+      +   '<div class="th-pick__nm">' + esc(p.name) + '</div>'
+      +   (from === null ? '' : '<div class="th-pick__pr">' + (prices.length > 1 ? 'From ' : '') + money(from) + '</div>')
+      + '</a>'
+      + (buyable
+          ? '<button type="button" class="th-pick__buy" data-pick-buy="' + esc(only.id) + '">Add to bag</button>'
+          : '<a class="th-pick__buy th-pick__buy--ghost" href="/product/' + esc(p.slug) + '">Choose options</a>')
+      + '</div>';
   }
+
+  // Add to bag from the account page. The cart token is the same one the
+  // header badge reads, so the count updates without a reload.
+  root.addEventListener('click', async function(e){
+    var b = e.target.closest && e.target.closest('[data-pick-buy]');
+    if (!b) return;
+    e.preventDefault();
+    var was = b.textContent;
+    b.disabled = true; b.textContent = 'Adding…';
+    try {
+      var tok = null;
+      try { tok = localStorage.getItem('therum_cart_token'); } catch (err) {}
+      var r = await fetch('/api/cart/items', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ cartToken: tok || undefined, variantId: b.getAttribute('data-pick-buy'), quantity: 1 }),
+      });
+      var out = await r.json();
+      if (!r.ok) throw new Error('could not add');
+      if (out.token) { try { localStorage.setItem('therum_cart_token', out.token); } catch (err) {} }
+      window.dispatchEvent(new CustomEvent('therum:cart-changed'));
+      b.textContent = 'In your bag';
+      setTimeout(function(){ b.disabled = false; b.textContent = was; }, 2200);
+    } catch (err) {
+      b.disabled = false; b.textContent = was;
+    }
+  });
 
   root.addEventListener('click', function(e){
     var jump = e.target.closest && e.target.closest('[data-go]');
-    if (jump) go(jump.getAttribute('data-go'));
+    if (!jump) return;
+    var name = jump.getAttribute('data-go');
+    // A card's own button expands THAT card. Only a button outside the grid
+    // falls back to switching tabs — the bento's whole point is that the
+    // detail belongs to the tile you touched.
+    var card = jump.closest('.th-card');
+    if (card && root.querySelector('[data-acct-panel="' + name + '"]')) return openMorph(name, card);
+    go(name);
   });
 
   // ── Orders ──────────────────────────────────────────────────────────────

@@ -93,7 +93,7 @@ export function shippable(order: RoutableOrder): string | null {
   return missing.length ? `missing ${missing.join(', ')}` : null;
 }
 
-async function pushPrintful(order: RoutableOrder, items: RoutableOrder['items']): Promise<RouteResult> {
+async function pushPrintful(order: RoutableOrder, items: RoutableOrder['items'], opts?: { confirm?: boolean }): Promise<RouteResult> {
   const credential = await connectionService.credentialFor('printful');
   if (!credential) return { provider: 'printful', lines: items.length, ok: false, error: 'printful is not connected' };
   // "token|storeId" — the same shape the Nexus tester parses. The store id is
@@ -108,7 +108,10 @@ async function pushPrintful(order: RoutableOrder, items: RoutableOrder['items'])
   };
   if (storeId) headers['X-PF-Store-Id'] = storeId;
 
-  const res = await fetch('https://api.printful.com/orders', {
+  // confirm=1 submits the order straight to production. Set ONLY for orders
+  // that are already paid (via the confirm step below). The checkout-time draft
+  // leaves it off, so an unpaid or test cart is never printed.
+  const res = await fetch(`https://api.printful.com/orders${opts?.confirm ? '?confirm=1' : ''}`, {
     method: 'POST',
     headers,
     body: JSON.stringify({
@@ -127,9 +130,9 @@ async function pushPrintful(order: RoutableOrder, items: RoutableOrder['items'])
   if (!res.ok) {
     return { provider: 'printful', lines: items.length, ok: false, error: json.error?.message ?? `HTTP ${res.status}` };
   }
-  // NOT confirmed on purpose — a draft order is reviewable before it costs
-  // money. Auto-confirming every order the moment it lands is how a test
-  // checkout becomes a real printed cap.
+  // At checkout this is a DRAFT (opts.confirm unset): reviewable, costs nothing,
+  // and a test or unpaid cart never prints. The order is submitted to production
+  // by confirmPrintfulOrder() once it is actually paid.
   return { provider: 'printful', lines: items.length, ok: true, reference: String(json.result?.id ?? '') };
 }
 
@@ -293,4 +296,75 @@ export async function routeOrder(order: RoutableOrder): Promise<RouteResult[]> {
   }).catch(() => { /* see above */ });
 
   return results;
+}
+
+/**
+ * Confirm a paid order's Printful draft — the "auto-confirm" step.
+ *
+ * routeOrder() creates every Printful order as a DRAFT at checkout, before the
+ * money is in. This is the other half: once the order is PAID, submit that draft
+ * to production so it actually prints. Confirming only paid orders is the whole
+ * point — an unpaid draft simply expires unprinted, and a test checkout costs
+ * nothing.
+ *
+ * Dup-safe: it confirms the draft by the Printful order id recorded when the
+ * draft was made (fulfillment_routes.reference), not by re-creating. Only when
+ * no draft was ever recorded — create-time routing was down, or the address was
+ * incomplete then and is complete now — does it create the order already
+ * confirmed. Never throws: a factory hiccup must not unwind a captured payment.
+ */
+export async function confirmPrintfulOrder(order: RoutableOrder): Promise<RouteResult | null> {
+  const items = linesByProvider(order).get('printful');
+  if (!items?.length) return null; // nothing on this order is a Printful line
+
+  const credential = await connectionService.credentialFor('printful');
+  if (!credential) return null;
+  const [token, storeId] = credential.split('|');
+  const headers: Record<string, string> = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+  if (storeId) headers['X-PF-Store-Id'] = storeId;
+
+  // The draft's Printful id, from when routeOrder() created it at checkout.
+  const draft = await db.fulfillmentRoute.findFirst({
+    where: { orderId: order.id, provider: 'printful', ok: true, reference: { not: null } },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  let result: RouteResult;
+  if (draft?.reference) {
+    const res = await fetch(`https://api.printful.com/orders/${encodeURIComponent(draft.reference)}/confirm`, {
+      method: 'POST',
+      headers,
+      signal: AbortSignal.timeout(30_000),
+    });
+    if (res.ok) {
+      result = { provider: 'printful', lines: items.length, ok: true, reference: draft.reference };
+    } else if (res.status === 404) {
+      // The draft is gone (deleted in Printful, or never really made) — create
+      // it already confirmed. Any OTHER error (e.g. already confirmed) is left
+      // as-is: re-creating would double-print.
+      result = await pushPrintful(order, items, { confirm: true });
+    } else {
+      const json = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+      result = { provider: 'printful', lines: items.length, ok: false, error: json.error?.message ?? `confirm HTTP ${res.status}` };
+    }
+  } else {
+    // No draft was recorded — create it already confirmed.
+    result = await pushPrintful(order, items, { confirm: true });
+  }
+
+  // Leave a trail so the admin can see the order was confirmed, not just drafted.
+  await db.fulfillmentRoute
+    .create({
+      data: {
+        orderId: order.id,
+        provider: 'printful',
+        lines: result.lines,
+        ok: result.ok,
+        reference: result.reference ?? null,
+        error: result.error ? `confirm: ${result.error}` : null,
+      },
+    })
+    .catch(() => { /* history is best-effort, never fatal */ });
+
+  return result;
 }

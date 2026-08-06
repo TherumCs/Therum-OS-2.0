@@ -1,9 +1,9 @@
 {
   "name": "@therum/cms-backend",
-  "version": "2.0.0-beta.7",
+  "version": "2.0.0-beta.8",
   "private": true,
   "type": "module",
-  "description": "Therum CMS 2.0 \u2014 backend API (Fastify + Prisma + PostgreSQL)",
+  "description": "Therum CMS 2.0 — backend API (Fastify + Prisma + PostgreSQL)",
   "engines": {
     "node": ">=20"
   },

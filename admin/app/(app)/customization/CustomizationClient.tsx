@@ -24,6 +24,9 @@ export interface CounterSettings extends Record<string, unknown> {
   cardReveal: 'none' | 'fade' | 'rise' | 'stagger';
   cardSubtitle: boolean;
   cardBadges: boolean;
+  pdpStyle: 'classic' | 'apple' | 'athletic' | 'editorial';
+  pdpImageSide: 'left' | 'right';
+  pdpThumbs: 'bottom' | 'side' | 'none';
   memberPricing: 'off' | 'net' | 'was-now';
   memberPriceLabel: string;
   toolbarEnabled: boolean;
@@ -39,8 +42,8 @@ export interface CounterSettings extends Record<string, unknown> {
   toolbarFilterFields: string[];
   toolbarSorts: string[];
   toolbarDefaultSort: string;
-  searchStyle: 'takeover' | 'inline' | 'immersive';
-  searchLayout: 'list' | 'grid' | 'slider';
+  searchStyle: 'takeover' | 'inline' | 'fullwidth' | 'immersive';
+  searchLayout: 'list' | 'grid' | 'categories' | 'slider';
   wishlistEnabled: boolean;
   wishlistOnCards: boolean;
 }
@@ -268,6 +271,44 @@ export function CustomizationClient({ initial }: { initial: CounterSettings }) {
       </div>
 
       <div className="settings-group">
+        <h3 className="settings-group-title">Product page</h3>
+        <p className="settings-group-desc">
+          Store-wide layout for every product page. One markup tree, four arrangements. A single product can override it
+          from the product editor.
+        </p>
+        <FormSelect
+          label="Layout"
+          desc="Classic ships gallery-left, details-right. Apple centres one large image with room to breathe. Athletic is a full-bleed hero with the details floating over it. Editorial leads with an oversized wordmark and puts the price inside the buy button."
+          field="pdpStyle"
+          options={[
+            ['classic', 'Classic — gallery + details'],
+            ['apple', 'Apple — centred'],
+            ['athletic', 'Athletic — full-bleed hero'],
+            ['editorial', 'Editorial — big type'],
+          ]}
+        />
+        <FormSelect
+          label="Images on"
+          desc="Which side the gallery sits on. Ignored by the centred and full-bleed layouts. The gallery stays first in the source, so a keyboard reaches the product before the form."
+          field="pdpImageSide"
+          options={[
+            ['left', 'Left'],
+            ['right', 'Right'],
+          ]}
+        />
+        <FormSelect
+          label="Thumbnails"
+          desc="Where the thumbnail strip sits."
+          field="pdpThumbs"
+          options={[
+            ['bottom', 'Below the image'],
+            ['side', 'Beside the image'],
+            ['none', 'Hidden'],
+          ]}
+        />
+      </div>
+
+      <div className="settings-group">
         <h3 className="settings-group-title">Member pricing</h3>
         <p className="settings-group-desc">
           What a Milieus member (friends and family, wholesale, a members club) sees. Their discount already
@@ -388,7 +429,8 @@ export function CustomizationClient({ initial }: { initial: CounterSettings }) {
           previews={SEARCH_PREVIEWS}
           options={[
             ['takeover', 'Takeover', 'Fills the screen. Best for a deliberate search.'],
-            ['inline', 'Inline', 'Drops under the header. The page stays put.'],
+            ['inline', 'Inline', 'Drops under the header as a card. The page stays put.'],
+            ['fullwidth', 'Full width', 'Drops under the header edge to edge, spanning the page.'],
             ['immersive', 'Immersive', 'The page empties and refills with results as you type.'],
           ]}
         />
@@ -400,6 +442,7 @@ export function CustomizationClient({ initial }: { initial: CounterSettings }) {
           options={[
             ['list', 'List', 'One per row with a small thumbnail. Most results in view.'],
             ['grid', 'Grid', 'Two across, large images. Best when the photograph sells it.'],
+            ['categories', 'Categories', 'Grouped under each category, with a count and thumbnails.'],
             ['slider', 'Slider', 'One swipeable row. Keeps the page short on a phone.'],
           ]}
         />

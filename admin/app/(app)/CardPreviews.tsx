@@ -574,6 +574,29 @@ export const SEARCH_LAYOUT_PREVIEWS: Record<string, React.ReactNode> = {
       ))}
     </Art>
   ),
+  categories: (
+    <Art>
+      {/* grouped under each category: a header with its count, then rows of
+          thumbnail + name + sub-line, separated by hairlines */}
+      <rect x="0" y="0" width={W} height={H} fill={PAPER} />
+      <rect x="10" y="12" width="60" height="7" rx="3.5" fill={INK} opacity="0.7" />
+      {[10, 78].map((x) => (
+        <g key={x}>
+          {/* uppercase group header, then the count beside it */}
+          <rect x={x} y="34" width="30" height="4" rx="2" fill={INK} opacity="0.4" />
+          <rect x={x + 34} y="34" width="7" height="4" rx="2" fill={INK} opacity="0.2" />
+          {[48, 72, 96].map((y) => (
+            <g key={y}>
+              <rect x={x} y={y} width={58} height="0.8" fill={INK} opacity="0.12" />
+              <circle cx={x + 8} cy={y + 12} r="7" fill={FILL} />
+              <rect x={x + 19} y={y + 8} width="34" height="4" rx="2" fill={INK} opacity="0.5" />
+              <rect x={x + 19} y={y + 16} width="22" height="3" rx="1.5" fill={INK} opacity="0.22" />
+            </g>
+          ))}
+        </g>
+      ))}
+    </Art>
+  ),
   slider: (
     <Art>
       {/* one swipeable row — runs off the edge, so the page stays short */}
@@ -632,16 +655,33 @@ export const SEARCH_PREVIEWS: Record<string, React.ReactNode> = {
     <Art>
       <PageBody from={20} />
       <Header />
-      {/* a panel drops out from under the header; the page stays visible */}
+      {/* a CARD drops out from under the header — inset on both sides, so the
+          page shows down its edges */}
+      <g className="wf-rise">
+        <rect x="14" y="26" width={W - 28} height="72" rx="5" fill={PAPER} />
+        <line x1="14" y1="56" x2={W - 14} y2="56" stroke={LINE} />
+        <rect x="24" y="36" width="60" height="8" rx="4" fill={INK} opacity="0.72" />
+        <rect x="24" y="64" width="22" height="22" rx="4" fill={FILL} />
+        <rect x="52" y="69" width="46" height="5" rx="2.5" fill={INK} opacity="0.6" />
+        <rect x="52" y="79" width="26" height="4" rx="2" fill={INK} opacity="0.28" />
+      </g>
+    </Art>
+  ),
+  fullwidth: (
+    <Art>
+      <PageBody from={20} />
+      <Header />
+      {/* the same panel, but edge to edge — it meets both sides of the page */}
       <g className="wf-rise">
         <rect x="0" y="20" width={W} height="74" fill={PAPER} />
+        <line x1="0" y1="50" x2={W} y2="50" stroke={LINE} />
         <line x1="0" y1="94" x2={W} y2="94" stroke={LINE} />
-        <rect x="10" y="30" width="60" height="7" rx="3.5" fill={INK} opacity="0.72" />
-        <rect x="10" y="46" width="24" height="24" rx="4" fill={FILL} />
-        <rect x="40" y="51" width="48" height="5" rx="2.5" fill={INK} opacity="0.6" />
-        <rect x="40" y="61" width="28" height="4" rx="2" fill={INK} opacity="0.28" />
-        <rect x="10" y="74" width="24" height="14" rx="4" fill={FILL} />
-        <rect x="40" y="78" width="42" height="5" rx="2.5" fill={INK} opacity="0.6" />
+        <rect x="10" y="30" width="60" height="8" rx="4" fill={INK} opacity="0.72" />
+        <rect x="10" y="58" width="22" height="22" rx="4" fill={FILL} />
+        <rect x="38" y="63" width="48" height="5" rx="2.5" fill={INK} opacity="0.6" />
+        <rect x="38" y="73" width="28" height="4" rx="2" fill={INK} opacity="0.28" />
+        <rect x="104" y="58" width="22" height="22" rx="4" fill={FILL} />
+        <rect x="132" y="63" width="42" height="5" rx="2.5" fill={INK} opacity="0.6" />
       </g>
     </Art>
   ),

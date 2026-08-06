@@ -92,17 +92,77 @@ export const paymentGatewayService = {
       groups: METHOD_GROUPS.filter((g) => METHODS.some((m) => m.group === g.id && !m.hidden)),
       methods: METHODS.filter((m) => !m.hidden).map((m) => {
         const provider = m.providers.find((p) => connected.has(p)) ?? null;
-        return { id: m.id, group: m.group, label: m.label, sub: m.sub ?? null, needsRedirect: m.needsRedirect, provider, available: provider !== null };
+        return { id: m.id, group: m.group, label: m.label, sub: m.sub ?? null, needsRedirect: m.needsRedirect, provider, available: provider !== null, comingSoon: m.comingSoon ?? false };
       }),
     };
   },
 
   // Guest-safe: authenticated by the order's own access token, not a session.
-  async createIntent(orderNumber: string, accessToken: string, providerId: string) {
+  /**
+   * The shopper's Stripe customer id, created on first use and remembered.
+   *
+   * Stored on `Customer.meta` rather than a new column: it is one opaque
+   * string, and a migration to hold it would have to be run on every
+   * deployment before anyone could save a card. Nothing sensitive lives here
+   * — the card itself never leaves Stripe.
+   */
+  async ensureVaultCustomer(customerId: string, email: string, name: string | null): Promise<string> {
+    const row = await db.customer.findUnique({ where: { id: customerId }, select: { meta: true } });
+    const meta = (row?.meta && typeof row.meta === 'object' ? row.meta : {}) as Record<string, unknown>;
+    const existingId = typeof meta.stripeCustomerId === 'string' ? meta.stripeCustomerId : null;
+    const { credential } = await requireGateway('stripe');
+    const { stripeEnsureCustomer } = await import('../lib/payments/stripeGateway.js');
+    const stripeId = await stripeEnsureCustomer(credential, { existingId, email, name });
+    if (stripeId !== existingId) {
+      await db.customer.update({
+        where: { id: customerId },
+        data: { meta: { ...meta, stripeCustomerId: stripeId } },
+      });
+    }
+    return stripeId;
+  },
+
+  /**
+   * Forget one of a customer's saved cards.
+   *
+   * Ownership is checked HERE rather than trusted from the caller: a
+   * PaymentMethod id is guessable enough that detaching by id alone would let
+   * one signed-in shopper remove another's card.
+   */
+  async forgetCard(stripeCustomerId: string, providerId: string, paymentMethodId: string) {
+    if (providerId !== 'stripe') throw new ValidationError('That provider does not store cards.', 'provider');
+    const owned = await this.savedCards(stripeCustomerId, providerId);
+    if (!owned.some((c) => c.id === paymentMethodId)) {
+      throw new NotFoundError('That card is not on this account.', 'paymentMethodId');
+    }
+    const { credential } = await requireGateway('stripe');
+    const { stripeDetachCard } = await import('../lib/payments/stripeGateway.js');
+    await stripeDetachCard(credential, paymentMethodId);
+    return { removed: paymentMethodId };
+  },
+
+  /** Saved cards for a Stripe customer — brand, last four, expiry only. */
+  async savedCards(stripeCustomerId: string, providerId: string) {
+    if (providerId !== 'stripe') return [];
+    const { credential } = await requireGateway('stripe');
+    const { stripeSavedCards } = await import('../lib/payments/stripeGateway.js');
+    return stripeSavedCards(credential, stripeCustomerId);
+  },
+
+  async createIntent(
+    orderNumber: string,
+    accessToken: string,
+    providerId: string,
+    ctx?: { fundingMethod?: string; returnUrl?: string; cancelUrl?: string },
+  ) {
     const order = await orderByNumberAndToken(orderNumber, accessToken);
     if (order.status !== 'pending') throw new ConflictError(`Order is ${order.status}, not payable.`, 'order');
     const { gateway, credential } = await requireGateway(providerId);
-    const intent = await gateway.createIntent({ id: order.id, number: order.number, total: order.total, currency: order.currency }, credential);
+    const intent = await gateway.createIntent(
+      { id: order.id, number: order.number, total: order.total, currency: order.currency },
+      credential,
+      ctx,
+    );
     // Remember the intent on the payment row — refunds and the return path
     // both need it later.
     await db.payment.update({ where: { orderId: order.id }, data: { txnId: intent.intentId, method: providerId } });
@@ -116,7 +176,18 @@ export const paymentGatewayService = {
    * pay for someone else's order, and a non-pending order is refused rather
    * than charged twice.
    */
-  async payWithToken(orderNumber: string, accessToken: string, providerId: string, token: string) {
+  /**
+   * @param vault  Who to save the card against, and whether to. Only ever
+   *               populated from a verified customer session — a caller
+   *               cannot name someone else's Stripe customer.
+   */
+  async payWithToken(
+    orderNumber: string,
+    accessToken: string,
+    providerId: string,
+    token: string,
+    vault?: { customerId?: string | null; save?: boolean; offSession?: boolean },
+  ) {
     const order = await orderByNumberAndToken(orderNumber, accessToken);
     if (order.status !== 'pending') throw new ConflictError(`Order is ${order.status}, not payable.`, 'order');
     const { gateway, credential } = await requireGateway(providerId);
@@ -128,6 +199,7 @@ export const paymentGatewayService = {
       credential,
       token,
       `tok_${order.id}`,
+      vault,
     );
     await db.payment.update({ where: { orderId: order.id }, data: { txnId: paymentId, method: providerId, status: 'paid' } });
     await db.order.update({ where: { id: order.id }, data: { status: 'processing' } });
@@ -143,7 +215,22 @@ export const paymentGatewayService = {
     const { gateway, credential } = await requireGateway(providerId);
     const intentId = order.payment?.txnId;
     if (!intentId) throw new ConflictError('No payment intent on this order yet.', 'order');
-    const status = await gateway.intentStatus(intentId, credential);
+    let status = await gateway.intentStatus(intentId, credential);
+
+    // PayPal approval is not payment. The payer approving in PayPal's window
+    // leaves the order APPROVED — 'processing' here — and the money only
+    // moves when the merchant captures it. `capturePaypalOrder` was exported
+    // for this and never called from anywhere, so every PayPal checkout
+    // stopped one step short: approved, never captured, never paid, and the
+    // shopper believing they had bought something.
+    if (providerId === 'paypal' && status === 'processing') {
+      const { capturePaypalOrder } = await import('../lib/payments/paypalGateway.js');
+      // Keyed on the ORDER, so a double return — a refreshed tab, a retried
+      // poll — cannot capture the same approval twice.
+      await capturePaypalOrder(intentId, credential, `capture-${order.id}`);
+      status = await gateway.intentStatus(intentId, credential);
+    }
+
     if (status === 'succeeded' && order.status === 'pending') {
       await orderService.markPaid(order.id, intentId, providerId, { via: 'checkout-return', status });
     }

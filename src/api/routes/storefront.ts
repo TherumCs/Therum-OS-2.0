@@ -34,6 +34,7 @@ import { templateHtml, type TemplateSlot } from '../../counter/storefrontTemplat
 import { wishlistMarkup } from '../../site/wishlist.js';
 import { orderTrackingMarkup, ORDER_TRACKING_CSS, ORDER_TRACKING_RUNTIME } from '../../site/orderTracking.js';
 import { availableOf, stockLabel } from '../../counter/availability.js';
+import { ROLES, roleBySlug, rolePage, CAREERS_CSS, CAREERS_RUNTIME, CAREERS_INBOX, CV_MAX_BYTES, CV_TYPES } from '../../site/careers.js';
 import { viewerFor, visibleWhere, canOpenDirectly, GATE_INCLUDE } from '../../counter/visibility.js';
 
 // Counter C4 — the five public storefront surfaces, server-rendered from the
@@ -73,6 +74,8 @@ export interface GalleryItem {
   alt: string;
   type: 'image' | 'video';
   poster: string | null;
+  /** Colourway this shot belongs to, when the gallery records one. */
+  color: string | null;
 }
 
 function normalizeGallery(p: { name: string; image: string | null; images: unknown }): GalleryItem[] {
@@ -80,13 +83,22 @@ function normalizeGallery(p: { name: string; image: string | null; images: unkno
     ...(p.image ? [{ url: p.image, alt: p.name }] : []),
     ...((Array.isArray(p.images) ? p.images : []) as { url?: string; alt?: string; type?: string; poster?: string }[]),
   ];
+  const seen = new Set<string>();
   return raw
-    .filter((i): i is { url: string; alt?: string; type?: string; poster?: string } => typeof i.url === 'string' && i.url.length > 0)
+    .filter((i): i is { url: string; alt?: string; type?: string; poster?: string; color?: string } => typeof i.url === 'string' && i.url.length > 0)
+    // DE-DUPLICATE. The main image is prepended above, and a product whose
+    // main image is also its first gallery shot — the normal case once a
+    // gallery is set — ended up with the same file twice at the front. The
+    // first arrow click then "did nothing", which reads as a broken carousel.
+    .filter((i) => { if (seen.has(i.url)) return false; seen.add(i.url); return true; })
     .map((i) => ({
       url: i.url,
       alt: i.alt ?? p.name,
       type: i.type === 'video' || /\.(mp4|webm|mov)(\?|$)/i.test(i.url) ? 'video' as const : 'image' as const,
       poster: i.poster ?? null,
+      // Which colourway this shot belongs to, when the gallery records it.
+      // Drives the swatch following the carousel.
+      color: i.color ?? null,
     }));
 }
 
@@ -362,12 +374,24 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     const [cats, tags, variantAttrs] = await Promise.all([
       categoryFacets(),
       db.productTag.findMany({ where: { products: { some: scope } }, select: { name: true, slug: true }, orderBy: { name: 'asc' } }),
-      db.productVariant.findMany({ where: { product: scope }, select: { color: true, size: true } }),
+      db.productVariant.findMany({ where: { product: scope }, select: { color: true, size: true, colorCodes: true } }),
     ]);
     const variantPrices = filterOn('price')
       ? await db.productVariant.findMany({ where: { product: scope }, select: { price: true } })
       : [];
     const colors = [...new Set(variantAttrs.map((v) => v.color).filter((c): c is string => !!c))].sort();
+    // colour name -> the provider's hex codes, first row that has them.
+    // Guessing paint from the NAME fails on exactly the colourways that most
+    // need a swatch: "Black/Natural" is two words, only one of which is a CSS
+    // colour, so the whole gradient was invalid and the dot rendered empty.
+    const colorHex = new Map<string, string[]>();
+    for (const v of variantAttrs) {
+      if (!v.color || colorHex.has(v.color)) continue;
+      const codes = Array.isArray(v.colorCodes)
+        ? (v.colorCodes as unknown[]).filter((c): c is string => typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c))
+        : [];
+      if (codes.length) colorHex.set(v.color, codes);
+    }
     const sizes = [...new Set(variantAttrs.map((v) => v.size).filter((s): s is string => !!s))].sort();
     const brands = filterOn('brand')
       ? (await db.vendor.findMany({ where: { products: { some: scope } }, select: { name: true }, orderBy: { name: 'asc' } })).map((v) => v.name)
@@ -449,8 +473,15 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
           name: p.name,
           priceFrom: prices.length ? Math.min(...prices) : 0,
           priceRange: prices.length > 0 && Math.min(...prices) !== Math.max(...prices),
-          media: gallery.map((g) => ({ type: g.type, url: g.url, poster: g.poster })),
-          subtitle: p.categories.length ? p.categories.map((c) => c.name).join(' · ') : (p.vendor?.name ?? null),
+          media: gallery.map((g) => ({ type: g.type, url: g.url, poster: g.poster, color: g.color })),
+          // The category is its own field on the card now, so the subtitle no
+          // longer doubles as one — printing both put the same words twice.
+          // No brand/vendor subtitle on cards — this store IS the brand, so a
+          // "House Brand" line under every title is noise.
+          subtitle: null,
+          // ALL categories — the card shows a small pill per category on hover,
+          // not a single eyebrow. A product can sit in several.
+          categories: p.categories.map((c) => ({ name: c.name, slug: c.slug })),
           // More than one variant means there is a choice to make, so the card
           // sends the shopper to the PDP rather than guessing for them.
           hasOptions: p.variants.length > 1,
@@ -587,7 +618,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
         // and a bare slug no longer identifies which one was clicked.
         filterOn('category') ? { label: 'Category', options: cats.map((c) => opt(c.label, qs({ category: category === c.path ? '' : c.path }), category === c.path)) } : null,
         filterOn('tags') ? { label: 'Tags', options: tags.map((t) => opt(t.name, qs({ tag: tag === t.slug ? '' : t.slug }), tag === t.slug)) } : null,
-        filterOn('color') ? { label: 'Color', options: colors.length > 1 ? colors.map((c) => opt(c, qs({ color: color.toLowerCase() === c.toLowerCase() ? '' : c }), color.toLowerCase() === c.toLowerCase())) : [] } : null,
+        filterOn('color') ? { label: 'Color', swatches: true, options: colors.length > 1 ? colors.map((c) => ({ ...opt(c, qs({ color: color.toLowerCase() === c.toLowerCase() ? '' : c }), color.toLowerCase() === c.toLowerCase()), swatch: c, swatchCodes: colorHex.get(c) ?? [] })) : [] } : null,
         // Sizes render as a chip grid — a set to scan, not a list to read.
         filterOn('size') ? { label: 'Size', grid: true, options: sizes.length > 1 ? sizes.map((z) => opt(z, qs({ size: size.toLowerCase() === z.toLowerCase() ? '' : z }), size.toLowerCase() === z.toLowerCase())) : [] } : null,
         filterOn('brand') ? { label: 'Brand', options: brands.length > 1 ? brands.map((b) => opt(b, qs({ brand: brand.toLowerCase() === b.toLowerCase() ? '' : b }), brand.toLowerCase() === b.toLowerCase())) : [] } : null,
@@ -602,8 +633,14 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     }) : '';
 
     const pageTitle = preset.title ?? 'Shop';
+    // No "Shop" heading on the shop page — the word restates the nav item that
+    // got you here and pushes the products down for nothing. A CATEGORY page
+    // keeps its heading, because there the title is the only thing telling you
+    // which subset of the catalogue you are looking at.
+    // The <title> is unaffected: the browser tab and search results still need
+    // the word.
     html(reply, await page(`${pageTitle} — Therum Store`, `
-      ${await heading(pageTitle)}
+      ${preset.title ? await heading(pageTitle) : ''}
       ${toolbar}
       ${quickBuyOnCards ? quickBuySheetMarkup() : ''}
       ${products.length ? cards : `<div class="empty-state"><div class="big">🛍️</div><p>No products${q || category || tag || color || size ? ' match those filters' : ' here yet'}.</p>${q || category || tag || color || size ? '<p style="margin-top:12px"><a class="btn ghost sm" href="/shop">Clear filters</a></p>' : ''}</div>`}
@@ -695,6 +732,10 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
         // number sitting in the HTML waiting to be rendered by the next person
         // who reaches for it.
         sellable: availableOf(v) > 0,
+        // The most one can take in a single order: the real count, capped at 10
+        // so a print-on-demand line's sentinel billion never becomes the max,
+        // and a one-of-one caps at 1 — exactly the "buy one only" case.
+        max: Math.max(1, Math.min(availableOf(v), 10)),
         // What the shopper is TOLD. The raw number cannot be shown any more:
         // an untracked line is a billion, and "1000000000 in stock" is worse
         // than saying nothing.
@@ -800,11 +841,15 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
               gating the container on the product gallery alone left the script
               with nothing to fill and no thumbnails at all.
             */''}
-          ${gallery.length > 1 || variants.some((v) => v.image) ? `<div class="gallery-strip">${gallery.map((g, i) => `
+          ${gallery.length > 1 || variants.some((v) => v.image) ? `<div class="gallery-striprail">
+            <button type="button" class="gallery-arrow gallery-arrow--prev" data-strip-dir="-1" aria-label="Previous images">‹</button>
+            <div class="gallery-strip">${gallery.map((g, i) => `
             <button type="button" class="gallery-thumb${i === 0 ? ' sel' : ''}" data-src="${esc(g.url)}" data-type="${g.type}"${g.poster ? ` data-poster="${esc(g.poster)}"` : ''} aria-label="${esc(g.type === 'video' ? 'Play video' : g.alt)}">
               <img src="${esc(g.type === 'video' ? (g.poster ?? gallery.find((x) => x.type === 'image')?.url ?? '') : g.url)}" alt="${esc(g.alt)}" loading="lazy">
               ${g.type === 'video' ? '<span class="play-badge">▶</span>' : ''}
-            </button>`).join('')}</div>` : ''}
+            </button>`).join('')}</div>
+            <button type="button" class="gallery-arrow gallery-arrow--next" data-strip-dir="1" aria-label="More images">›</button>
+          </div>` : ''}
         </div>`
       : `<div class="thumb">${esc(p.name)}</div>`;
 
@@ -833,6 +878,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     const price = money(firstAvailable?.price ?? variants[0]?.price ?? 0);
 
     html(reply, await page(`${p.name} — Therum Store`, `
+      <a class="pdp-back" href="/shop" onclick="if(document.referrer.indexOf(location.host)>-1&&history.length>1){history.back();return false;}">‹ Back</a>
       <div class="${pdpClasses}">
         ${pdpStyle === 'editorial' ? `<div class="pdp__wordmark">${esc(p.name.split(' ')[0] ?? p.name)}</div>` : ''}
         <div class="pdp__media">${galleryHtml}</div>
@@ -841,12 +887,26 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
           <h1 class="page-title product-title" style="margin-top:10px">${esc(p.name)}</h1>
           <div class="price-big price" id="price">${price}</div>
           <div class="stock-note" id="stock">${firstAvailable ? esc(firstAvailable.stock) : 'Sold out'}</div>
+          ${taxonomyPills ? `<div class="taxonomy-row pdp-cats">${taxonomyPills}</div>` : ''}
+          ${/* Favorites + Share reuse the store-wide wishlist runtime, which is
+                already on the page — data-wishlist-toggle persists the save and
+                flips aria-pressed; data-share-url opens the native share sheet. */''}
+          <div class="pdp-actions">
+            <button type="button" class="pdp-act" data-wishlist-toggle="${esc(p.id)}" aria-pressed="false" aria-label="Save to favorites">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s-7.4-4.5-9.7-9.1C1 8.6 2.4 5.5 5.3 5c2-.3 3.6.8 4.7 2.4C11.1 5.8 12.7 4.7 14.7 5c2.9.5 4.3 3.6 3 6.9C19.4 16.5 12 21 12 21z"/></svg>
+              <span>Save</span>
+            </button>
+            <button type="button" class="pdp-act" data-share-url="/product/${esc(p.slug)}" data-share-title="${esc(p.name)}" aria-label="Share">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.4 10.7 15.6 6.5M8.4 13.3l7.2 4.2"/></svg>
+              <span>Share</span>
+            </button>
+          </div>
           ${picker}
+          ${firstAvailable ? `<div class="pdp-qty" id="qtywrap"><span class="pdp-qty__label">Quantity</span><div class="qtybox"><button type="button" class="qbtn" data-q="-1" aria-label="One fewer">−</button><span class="qn" id="qn" aria-live="polite">1</span><button type="button" class="qbtn" data-q="1" aria-label="One more">+</button></div></div>` : ''}
           ${/* Editorial puts the price INSIDE the button, which is the whole
                 point of that layout — the price is not repeated above it. */''}
           <button class="btn" id="add" ${firstAvailable ? '' : 'disabled'}>Add to cart${pdpStyle === 'editorial' ? ` · <span id="btn-price">${price}</span>` : ''}</button>
           ${p.description ? `<div class="product-desc">${esc(p.description).replace(/\n/g, '<br>')}</div>` : ''}
-          ${taxonomyPills ? `<div class="taxonomy-row">${taxonomyPills}</div>` : ''}
         </div>
       </div>`, `
 /**
@@ -910,11 +970,30 @@ function bindThumbs(){
 }
 bindThumbs();
 matchFrames();
+stripArrows();
 // The product-level gallery, kept so a variant's shots can be shown in front
 // of it instead of throwing the other angles away.
 const PRODUCT_SHOTS=${JSON.stringify(gallery.filter((g) => g.type === 'image').map((g) => ({ url: g.url, alt: g.alt })))};
 const VARIANTS=${JSON.stringify(variants)};
 let sel=VARIANTS.find(v=>v.sellable)||VARIANTS[0];
+// Quantity — clamped to the selected variant's max (a one-of-one caps at 1,
+// which simply disables +). Re-clamped whenever the chosen variant changes.
+let qty=1;
+const qw=document.getElementById('qtywrap');
+function clampQty(){
+  var max=(sel&&sel.max)||1;
+  if(qty>max)qty=max; if(qty<1)qty=1;
+  var qn=document.getElementById('qn'); if(qn)qn.textContent=qty;
+  if(qw){
+    var minus=qw.querySelector('[data-q="-1"]'),plus=qw.querySelector('[data-q="1"]');
+    if(minus)minus.disabled=qty<=1; if(plus)plus.disabled=qty>=max;
+  }
+}
+if(qw)qw.addEventListener('click',function(e){
+  var b=e.target.closest('[data-q]'); if(!b||b.disabled)return;
+  qty+=Number(b.getAttribute('data-q')); clampQty();
+});
+clampQty();
 // Two independent choices resolve to one variant. Tracking the CHOICES rather
 // than the variant is what lets a shopper change colour without losing the
 // size they already picked.
@@ -934,6 +1013,7 @@ function applyVariant(v){
   document.getElementById('add').disabled=!v.sellable;
   const nm=document.getElementById('swatch-name');if(nm&&v.color)nm.textContent=v.color;
   showVariantShots(v);
+  clampQty();
 }
 const sw=document.getElementById('swatches');
 if(sw)sw.addEventListener('click',(e)=>{
@@ -970,12 +1050,45 @@ if(picker)picker.addEventListener('click',(e)=>{
   document.getElementById('stock').textContent=sel.stock;
   document.getElementById('add').disabled=!sel.sellable;
   showVariantShots(sel);
+  clampQty();
 });
 /**
  * Picking a colour changes the picture, which is what a shopper expects and
  * what WooCommerce does. The variant's own shots go in front of the product
  * gallery rather than replacing it, so the other angles stay reachable.
  */
+/**
+ * The strip's arrows: page by a viewport-width at a time, and go dead at the
+ * ends instead of disappearing.
+ *
+ * Re-evaluated whenever the strip's contents change, because choosing a colour
+ * swaps 24 thumbnails for four — and four fit, so the arrows must go away.
+ */
+function stripArrows(){
+  var rail=document.querySelector('.gallery-striprail');
+  var strip=rail&&rail.querySelector('.gallery-strip');
+  if(!rail||!strip)return;
+  var fits=strip.scrollWidth<=strip.clientWidth+1;
+  rail.setAttribute('data-fits',fits?'1':'0');
+  var sync=function(){
+    var max=strip.scrollWidth-strip.clientWidth;
+    rail.querySelectorAll('[data-strip-dir]').forEach(function(b){
+      var d=Number(b.getAttribute('data-strip-dir'));
+      b.disabled=d<0?strip.scrollLeft<=1:strip.scrollLeft>=max-1;
+    });
+  };
+  if(!rail.__bound){
+    rail.__bound=true;
+    rail.querySelectorAll('[data-strip-dir]').forEach(function(b){
+      b.addEventListener('click',function(){
+        strip.scrollBy({left:Number(b.getAttribute('data-strip-dir'))*strip.clientWidth*0.85,behavior:'smooth'});
+      });
+    });
+    strip.addEventListener('scroll',sync,{passive:true});
+    window.addEventListener('resize',function(){stripArrows();});
+  }
+  sync();
+}
 function renderStrip(shots){
   var strip=document.querySelector('.gallery-strip');
   var main=document.getElementById('gallery-main');
@@ -988,6 +1101,7 @@ function renderStrip(shots){
   }).join('');
   bindThumbs();
   matchFrames();
+  stripArrows();
 }
 /**
  * Picking a colour shows ONLY that colourway's photographs.
@@ -1014,7 +1128,7 @@ function showAllShots(){
 // Seed from the selected variant so the strip matches the colour that is
 // already chosen, rather than showing the product image alone.
 if(sel)showVariantShots(sel);
-document.getElementById('add').addEventListener('click',(e)=>{if(sel)addToCart(sel.id,1,e.target)});
+document.getElementById('add').addEventListener('click',(e)=>{if(sel)addToCart(sel.id,qty,e.target)});
 `, {
       description: (p.description ?? '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300)
         || `${p.name} from The Sidemoney Company.`,
@@ -1095,6 +1209,29 @@ document.getElementById('add').addEventListener('click',(e)=>{if(sel)addToCart(s
 
   // Order tracking. Linked from the footer and previously a 404 — the page
   // existed on the reference site and was never ported.
+  // ── One page per role ────────────────────────────────────────────────
+  //
+  // Every Apply on the careers index pointed at the generic contact form, so
+  // nothing recorded which role a person wanted and there was nowhere to
+  // attach a CV.
+  app.get('/careers/:slug', async (req, reply) => {
+    const slug = String((req.params as { slug?: string }).slug ?? '').slice(0, 80);
+    const role = roleBySlug(slug);
+    if (!role) return reply.status(404).send(await page('Role not found — The Sidemoney Company',
+      '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">That role is not open</h1>'
+      + '<p class="page-sub"><a href="/careers">See the roles we are hiring for</a></p></div>', '', PRIVATE_PAGE));
+    html(reply, await page(`${role.title} — Careers — The Sidemoney Company`,
+      `<style>${CAREERS_CSS}</style>${rolePage(role)}`,
+      CAREERS_RUNTIME,
+      {
+        description: `${role.title} at The Sidemoney Company. ${role.terms}. ${role.blurb}`,
+        canonical: `/careers/${role.slug}`,
+        origin: originOf(req),
+        siteName: 'The Sidemoney Company',
+      },
+    ));
+  });
+
   app.get('/order-tracking', async (req, reply) => {
     if (!(await commerceOn())) return html(reply, closedPage());
     html(reply, await page(

@@ -2,6 +2,7 @@ import { apiGet } from '../../../lib/api';
 import { BASE_PATH } from '../../../lib/session';
 import { Field, SelectField, TextInput } from '../settings/SettingsControls';
 import { StoreConnections, type StoreConnection } from './StoreConnections';
+import { StripeMethods } from './StripeMethods';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +37,20 @@ interface WalletProvider {
   reason?: string;
 }
 
+// A key this store ISSUED so a partner (a POD app, a bridge) can pull the
+// catalog and push orders back. These are real, live connections — the ones the
+// /api/connections list never showed, because that list only reads the outbound
+// `connection` table. Shape mirrors GET /api/store-keys.
+interface StoreKey {
+  id: number | string;
+  label: string;
+  consumerKeyPreview?: string;
+  scope?: string;
+  lastUsedAt?: string | null;
+  revokedAt?: string | null;
+  createdAt?: string;
+}
+
 const PAYMENT_DEFAULTS: Payments = {
   stripePublishableKey: '',
   squareApplicationId: '',
@@ -43,39 +58,21 @@ const PAYMENT_DEFAULTS: Payments = {
   appleDomainAssociation: '',
 };
 
-// The three that describe a store. Identity/AI/messaging are real Nexus
-// categories but they are not what "am I open for business" means.
-const GROUPS: { key: string; label: string; blurb: string; empty: string }[] = [
-  {
-    key: 'payments',
-    label: 'Payments',
-    blurb: 'Who takes the money.',
-    empty: 'No gateway connected, so checkout can only take the mock method.',
-  },
-  {
-    key: 'fulfillment',
-    label: 'Fulfillment',
-    blurb: 'Who prints, packs and ships.',
-    empty: 'No fulfillment provider connected. Orders will sit awaiting manual handling.',
-  },
-  {
-    key: 'ecommerce',
-    label: 'Ecommerce platforms',
-    blurb: 'Where products and orders sync from.',
-    empty: 'No platform connected. This store is standalone.',
-  },
-];
-
 export default async function StoreConnectionsPage() {
-  const [connections, payments, wallets] = await Promise.all([
+  const [connections, payments, wallets, storeKeysResp] = await Promise.all([
     apiGet<StoreConnection[]>('/api/connections').catch((): StoreConnection[] => []),
     apiGet<Payments>('/api/settings/payments').catch(() => PAYMENT_DEFAULTS),
     apiGet<WalletProvider[]>('/api/counter/wallets/providers').catch((): WalletProvider[] => []),
+    apiGet<{ keys: StoreKey[] }>('/api/store-keys').catch(() => ({ keys: [] as StoreKey[] })),
   ]);
 
   const live = connections.filter((c) => c.connected);
-  const custom = live.filter((c) => c.category === 'custom');
-  const total = GROUPS.reduce((n, g) => n + live.filter((c) => c.category === g.key).length, 0) + custom.length;
+  const stripeConnected = live.some((c) => c.id === 'stripe');
+  // Inbound partner keys are connections too. A revoked key is not.
+  const storeKeys = (storeKeysResp.keys ?? []).filter((k) => !k.revokedAt);
+  // Everything connected in Nexus (every category), plus inbound partner keys —
+  // the same set StoreConnections now renders.
+  const total = live.length + storeKeys.length;
 
   return (
     <div>
@@ -86,6 +83,36 @@ export default async function StoreConnectionsPage() {
       </p>
 
       <StoreConnections connections={connections} />
+
+      {/* Inbound partner keys — the connections the outbound list never showed.
+          POD apps and bridges that pull this store's catalog and push orders. */}
+      {storeKeys.length > 0 && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div className="l">Store keys — partners that read this store</div>
+          <p className="th-about-sub">
+            Print-on-demand and bridge apps you&apos;ve given a key so they can pull your catalog and push orders back.
+            These are inbound connections — issued and revoked in{' '}
+            <a href={`${BASE_PATH}/settings/connections`}>Nexus</a>.
+          </p>
+          {storeKeys.map((k) => (
+            <div key={k.id} className="settings-toggle-row">
+              <div className="settings-toggle-row-text">
+                <span className="settings-toggle-row-label">{k.label}</span>
+                <span className="settings-toggle-row-desc">
+                  {k.consumerKeyPreview ? `${k.consumerKeyPreview} · ` : ''}
+                  {k.scope === 'read' ? 'read only' : 'read / write'}
+                  {k.lastUsedAt ? ` · last used ${new Date(k.lastUsedAt).toLocaleDateString()}` : ' · not yet used'}
+                </span>
+              </div>
+              <span className={'th-about-badge' + (k.lastUsedAt ? ' is-prod' : '')}>{k.lastUsedAt ? 'In use' : 'Idle'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* The WooPayments-equivalent method surface — per-method on/off for the
+          configuration checkout uses. Only meaningful once Stripe is connected. */}
+      <StripeMethods stripeConnected={stripeConnected} />
 
       <div className="card" style={{ marginBottom: 14 }}>
         <div className="l">Add a connection</div>

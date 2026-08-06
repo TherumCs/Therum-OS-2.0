@@ -24,6 +24,12 @@ export type CustomerAuthEventType =
   | 'customer_code_failure'
   | 'customer_oauth_login'
   | 'customer_oauth_registered'
+  // Self-service credential changes. Worth a trail of their own: a
+  // password or login-email change is the event a compromised account
+  // is usually noticed by, and it needs to be distinguishable from a
+  // routine sign-in when someone reads the log back.
+  | 'customer_password_changed'
+  | 'customer_email_changed'
   | 'customer_logout'
   | 'customer_identity_unlinked';
 

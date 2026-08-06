@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { Prisma, type OrderStatus } from '@prisma/client';
 import { db } from '../lib/db.js';
 import { emit } from '../counter/webhookDelivery.js';
-import { routeOrder } from '../counter/fulfillmentRouting.js';
+import { routeOrder, confirmPrintfulOrder } from '../counter/fulfillmentRouting.js';
 import { orderWebhookPayload } from '../counter/orderWebhookPayload.js';
 import { hookBus } from '../lib/hooks.js';
 import { NotFoundError, ConflictError, ValidationError } from '../lib/errors.js';
@@ -286,7 +286,63 @@ export const orderService = {
       data: { status: 'paid', txnId, method, pspResponse },
     });
     const result = order.status === 'pending' ? await this.transition(id, { status: 'processing' }) : await this.get(id);
+
+    // Auto-confirm fulfilment: the money is in, so submit this order's Printful
+    // draft to production. Only at the pending→paid edge, so a retried webhook
+    // doesn't re-submit; fire-and-forget, because a factory being down must
+    // never unwind a captured payment — the same rule routeOrder() follows at
+    // checkout.
+    if (order.status === 'pending') {
+      const routable = await db.order.findUnique({ where: { id }, include: orderInclude });
+      if (routable) void confirmPrintfulOrder(routable).catch(() => { /* recorded in fulfillment_routes */ });
+    }
+
+    await this.rememberShippingAddress(id);
     await hookBus.run('onOrderPaid', result);
     return result;
+  },
+
+  /**
+   * Keep a signed-in customer's shipping address so the next checkout can
+   * fill it in for them.
+   *
+   * Only on a PAID order, and only for a customer who has none yet — a
+   * guest's address is not ours to keep, and overwriting a saved one would
+   * silently change where their future orders go because they shipped
+   * something to a friend once.
+   *
+   * Never fatal: a failure here must not unpick a payment that succeeded.
+   */
+  async rememberShippingAddress(orderId: string) {
+    try {
+      const order = await db.order.findUnique({
+        where: { id: orderId },
+        select: { customerId: true, shipAddress: true },
+      });
+      if (!order?.customerId || !order.shipAddress) return;
+      const existing = await db.address.count({ where: { customerId: order.customerId } });
+      if (existing > 0) return;
+      const a = order.shipAddress as Record<string, unknown>;
+      const str = (k: string) => (typeof a[k] === 'string' ? (a[k] as string) : null);
+      const line1 = str('line1');
+      const city = str('city');
+      const country = str('country');
+      if (!line1 || !city || !country) return;
+      await db.address.create({
+        data: {
+          customerId: order.customerId,
+          line1,
+          line2: str('line2'),
+          city,
+          region: str('region'),
+          postalCode: str('postal') ?? str('postalCode'),
+          country,
+          isDefault: true,
+        },
+      });
+    } catch {
+      // A saved address is a convenience. Losing it costs a shopper some
+      // typing next time; throwing here would cost them the order.
+    }
   },
 };

@@ -56,6 +56,7 @@ export function buildNav(commerceActive: boolean, portfolioActive: boolean, stud
       items: [
         { href: '/products', label: 'Product Catalog', icon: 'widgets' },
         { href: '/orders', label: 'Orders', icon: 'import' },
+        { href: '/payments', label: 'Payments & Transactions', icon: 'db' },
         { href: '/promotions', label: 'Promotions', icon: 'studio' },
         { href: '/customization', label: 'Customization', icon: 'palette' },
         // A mini-Nexus scoped to the store: who takes the money, who ships,

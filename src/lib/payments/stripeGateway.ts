@@ -54,7 +54,32 @@ export const stripeGateway: PaymentGateway = {
 
   // In-page payment from a Stripe.js payment-method id. Same reasoning as
   // Square's: tokenised in the browser, confirmed here, no PAN in this system.
-  async payWithToken(order: OrderForPayment, credential: string, token: string, idempotencyKey: string): Promise<string> {
+  async payWithToken(
+    order: OrderForPayment,
+    credential: string,
+    token: string,
+    idempotencyKey: string,
+    vault?: { customerId?: string | null; save?: boolean; offSession?: boolean },
+  ): Promise<string> {
+    // VAULTING happens as part of the charge, not as a second call.
+    // `setup_future_usage` tells Stripe to keep the card against the customer
+    // once this payment succeeds, so a shopper is never charged for a card
+    // that then fails to save — the two outcomes cannot diverge.
+    // `off_session` is the other direction: paying WITH an already-saved card,
+    // where the shopper is not re-entering anything.
+    const params: Record<string, string> = {
+      amount: String(order.total),
+      currency: order.currency.toLowerCase(),
+      payment_method: token,
+      confirm: 'true',
+      'automatic_payment_methods[enabled]': 'true',
+      'automatic_payment_methods[allow_redirects]': 'never',
+      description: `Order ${order.number}`,
+    };
+    if (vault?.customerId) params.customer = vault.customerId;
+    if (vault?.save && vault.customerId) params.setup_future_usage = 'off_session';
+    if (vault?.offSession) params.off_session = 'true';
+
     const res = await fetch('https://api.stripe.com/v1/payment_intents', {
       method: 'POST',
       headers: {
@@ -62,15 +87,7 @@ export const stripeGateway: PaymentGateway = {
         'content-type': 'application/x-www-form-urlencoded',
         'Idempotency-Key': idempotencyKey,
       },
-      body: new URLSearchParams({
-        amount: String(order.total),
-        currency: order.currency.toLowerCase(),
-        payment_method: token,
-        confirm: 'true',
-        'automatic_payment_methods[enabled]': 'true',
-        'automatic_payment_methods[allow_redirects]': 'never',
-        description: `Order ${order.number}`,
-      }),
+      body: new URLSearchParams(params),
     });
     const body = (await res.json()) as { id?: string; error?: { message?: string } };
     if (!res.ok || !body.id) throw new Error(body.error?.message ?? `Stripe returned ${res.status}`);
@@ -150,3 +167,69 @@ export const stripeGateway: PaymentGateway = {
     return String(json.status);
   },
 };
+
+// ─── Saved cards ──────────────────────────────────────────────────────────
+//
+// Deliberately NOT on the PaymentGateway interface. Vaulting is a Stripe
+// shape here — a Customer with PaymentMethods attached — and Square's is a
+// different model entirely. Widening the shared contract would make every
+// gateway implement a concept it does not share.
+//
+// Nothing sensitive is stored on our side: the card lives at Stripe, and all
+// this system ever holds is an opaque customer id plus the brand and last
+// four for display.
+
+/** Find or create the Stripe customer for this shopper. */
+export async function stripeEnsureCustomer(
+  credential: string,
+  opts: { existingId?: string | null; email: string; name?: string | null },
+): Promise<string> {
+  if (opts.existingId) {
+    // Confirm it still exists — a customer deleted in the Stripe dashboard
+    // would otherwise fail every future charge for that shopper.
+    const res = await fetch(`${API}/customers/${encodeURIComponent(opts.existingId)}`, {
+      headers: { Authorization: `Bearer ${credential}` },
+    });
+    if (res.ok) {
+      const j = (await res.json()) as { deleted?: boolean };
+      if (!j.deleted) return opts.existingId;
+    }
+  }
+  const created = await stripePost('/customers', credential, {
+    email: opts.email,
+    ...(opts.name ? { name: opts.name } : {}),
+  });
+  return String(created.id);
+}
+
+/**
+ * Forget a saved card.
+ *
+ * Detach, not delete: the PaymentMethod stops being usable for future
+ * payments, and the charges already made with it keep their record — a
+ * refund on last month's order still resolves. Deleting the history is not
+ * something a "remove card" button should do.
+ */
+export async function stripeDetachCard(credential: string, paymentMethodId: string): Promise<void> {
+  await stripePost(`/payment_methods/${encodeURIComponent(paymentMethodId)}/detach`, credential, {});
+}
+
+/** The cards this shopper has saved, for display only. */
+export async function stripeSavedCards(
+  credential: string,
+  customerId: string,
+): Promise<{ id: string; brand: string; last4: string; expMonth: number; expYear: number }[]> {
+  const res = await fetch(
+    `${API}/payment_methods?customer=${encodeURIComponent(customerId)}&type=card&limit=5`,
+    { headers: { Authorization: `Bearer ${credential}` } },
+  );
+  if (!res.ok) return [];
+  const json = (await res.json()) as { data?: { id: string; card?: { brand?: string; last4?: string; exp_month?: number; exp_year?: number } }[] };
+  return (json.data ?? []).map((pm) => ({
+    id: pm.id,
+    brand: pm.card?.brand ?? 'card',
+    last4: pm.card?.last4 ?? '••••',
+    expMonth: pm.card?.exp_month ?? 0,
+    expYear: pm.card?.exp_year ?? 0,
+  }));
+}

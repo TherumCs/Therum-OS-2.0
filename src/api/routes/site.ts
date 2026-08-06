@@ -342,6 +342,15 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
 
   app.get('/blog/:slug', async (req, reply) => {
     const { slug } = req.params as { slug: string };
+    // A trailing slash lands HERE, not on /blog — '/blog/' matches this route
+    // with an empty slug, which then looked up a post named '' and 404ed. Every
+    // other page on the site tolerates the slash, so a link written the normal
+    // way hit a dead page.
+    //
+    // 301 to the canonical /blog rather than rendering the index at both URLs:
+    // two addresses serving identical content split their own ranking, and the
+    // homepage's editorial cards already point at /blog.
+    if (!slug) return reply.redirect('/blog', 301);
     try {
       // origin carries the section prefix so canonical/og:url match the URL
       // actually served (posts live under /blog, not at the root).

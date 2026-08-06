@@ -493,8 +493,30 @@ export const connectionService = {
   },
 
   async list() {
-    const rows = await db.connection.findMany();
+    const [rows, storeKeys] = await Promise.all([
+      db.connection.findMany(),
+      db.storeCredential.findMany({ where: { revokedAt: null } }).catch(() => [] as { keyId: number; label: string; consumerKey: string; scope: string; lastUsedAt: Date | null; createdAt: Date }[]),
+    ]);
     const byProvider = new Map(rows.map((r) => [r.provider, r]));
+
+    // An issued store key IS a connection — the INBOUND direction: a POD partner
+    // that pulls this store against the WooCommerce-shaped API with a key we
+    // issued. The cards only ever read the outbound `connection` table, so a
+    // partner actively pulling the catalogue (Tapstitch and JetPrint do it daily)
+    // read as "off". Match a key to its provider by a dashless slug of its
+    // partner-set label ("Tapstitch connection" -> tapstitch); a key that has
+    // actually been USED is a proven connection, an issued-but-never-pulled key
+    // is wired but unproven (shown, but not claimed as connected).
+    const dash = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+    const keyByProvider = new Map<string, (typeof storeKeys)[number]>();
+    for (const p of nexusCatalog) {
+      const id = dash(p.id);
+      const match = storeKeys
+        .filter((k) => dash(k.label).includes(id))
+        .sort((a, b) => (b.lastUsedAt?.getTime() ?? 0) - (a.lastUsedAt?.getTime() ?? 0))[0];
+      if (match) keyByProvider.set(p.id, match);
+    }
+
     // Catalog providers first, then any connected custom-* connectors —
     // they're not in the catalog but are first-class rows (findProvider
     // synthesizes their entry).
@@ -504,14 +526,19 @@ export const connectionService = {
       .filter((p): p is NonNullable<typeof p> => Boolean(p));
     return [...nexusCatalog, ...customEntries].map((p) => {
       const row = byProvider.get(p.id);
+      const key = keyByProvider.get(p.id);
+      const keyUsed = !!key?.lastUsedAt;
       return {
         ...p,
-        connected: Boolean(row),
-        maskedPreview: row?.maskedPreview ?? null,
+        // Outbound credential OR a store key that has actually been pulled.
+        connected: Boolean(row) || keyUsed,
+        // Say HOW, honestly — the inbound key, and whether it has been used.
+        storeKey: key ? { keyId: key.keyId, label: key.label, scope: key.scope, lastUsedAt: key.lastUsedAt ?? null, used: keyUsed } : null,
+        maskedPreview: row?.maskedPreview ?? (key ? `••••${key.consumerKey.slice(-4)}` : null),
         authorizeUrl: p.authorizeUrl ?? null,
         apiTokenAlso: p.apiTokenAlso ?? null,
-        status: row?.status ?? null,
-        connectedAt: row?.connectedAt ?? null,
+        status: row?.status ?? (keyUsed ? 'connected' : key ? 'pending' : null),
+        connectedAt: row?.connectedAt ?? key?.createdAt ?? null,
         // Which route this credential came from, so the card can say so and
         // reopen on the right form instead of the default one.
         method: row?.method ?? null,

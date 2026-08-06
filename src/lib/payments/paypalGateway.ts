@@ -113,8 +113,26 @@ const gateway = {
     return (['refunds', 'partial_refunds', 'webhooks', 'p2p', 'bnpl'] as GatewayCapability[]).includes(capability);
   },
 
-  async createIntent(order: OrderForPayment, credential: string): Promise<PaymentIntentResult> {
+  // `ctx` carries the shopper's chosen funding source (venmo / paypal / …) and
+  // the return URLs Venmo needs. It is optional so the interface's other
+  // gateways — none of which redirect — are unaffected.
+  async createIntent(
+    order: OrderForPayment,
+    credential: string,
+    ctx?: { fundingMethod?: string; returnUrl?: string; cancelUrl?: string },
+  ): Promise<PaymentIntentResult> {
     const cred = parse(credential);
+    // Venmo is a distinct PayPal funding source: without payment_source.venmo
+    // the shopper lands on the generic PayPal login instead of the Venmo
+    // hand-off. It REQUIRES experience_context return URLs, so it is only set
+    // when both the method and the URLs are present — otherwise the order is
+    // built exactly as before and PayPal chooses the funding on its own page.
+    // paypal / paypal_credit deliberately stay on that untouched path: Pay
+    // Later still surfaces within the PayPal flow when the buyer is eligible.
+    const paymentSource =
+      ctx?.fundingMethod === 'venmo' && ctx.returnUrl && ctx.cancelUrl
+        ? { payment_source: { venmo: { experience_context: { return_url: ctx.returnUrl, cancel_url: ctx.cancelUrl } } } }
+        : {};
     const created = await pp<{ id: string; status: string; links?: { rel: string; href: string }[] }>(
       cred, '/v2/checkout/orders',
       {
@@ -122,6 +140,7 @@ const gateway = {
         idempotencyKey: `order-${order.id}`,
         body: {
           intent: 'CAPTURE',
+          ...paymentSource,
           purchase_units: [{
             // PayPal echoes this back on the webhook, and it is how a captured
             // payment is matched to an order without trusting the payer.

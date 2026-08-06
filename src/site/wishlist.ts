@@ -32,14 +32,30 @@ export const WISHLIST_CSS = `
 `;
 
 /** The heart, in the theme's card-overlay contract. Rendered per card. */
-export function wishlistButton(productId: string): string {
+/**
+ * The stack of icon buttons over the card's photo.
+ *
+ * Both buttons live in ONE `thumb-button-list` — the theme styles that list as
+ * a column and positions it; two lists would stack two columns on top of each
+ * other. Share is optional so a caller that has no URL to share simply gets
+ * the heart, rather than a button that shares the page you are already on.
+ */
+export function wishlistButton(productId: string, share?: { url: string; title: string }): string {
+  const shareBtn = share
+    ? `
+  <button class="c-product-grid__thumb-button c-product-grid__thumb-button--share" type="button"
+          data-share-url="${share.url}" data-share-title="${share.title}" aria-label="Share">
+    <svg class="c-product-grid__icon c-product-grid__icon--share" viewBox="0 0 24 24" aria-hidden="true"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 10.6 15.4 6.4M8.6 13.4l6.8 4.2"/></svg>
+    <span class="c-product-grid__icon-text">Share</span>
+  </button>`
+    : '';
   return `
 <div class="c-product-grid__thumb-button-list">
   <button class="c-product-grid__thumb-button c-product-grid__thumb-button--wishlist" type="button"
           data-wishlist-toggle="${productId}" aria-label="Add to wishlist" aria-pressed="false">
     <span class="c-product-grid__icon c-product-grid__icon--wishlist"></span>
     <span class="c-product-grid__icon-text">Wishlist</span>
-  </button>
+  </button>${shareBtn}
 </div>`;
 }
 
@@ -82,6 +98,63 @@ export const WISHLIST_RUNTIME = `
   function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, function(c){
     return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]; }); }
   function money(m){ return (m/100).toLocaleString('en-US',{ style:'currency', currency:'USD' }); }
+
+  // ── Share ───────────────────────────────────────────────────────────────
+  //
+  // navigator.share where the device has a share sheet — that is the whole
+  // point on a phone, where the destination is Messages or Instagram and no
+  // web page can know the list. Everywhere else the honest fallback is to put
+  // the link on the clipboard and say so, rather than opening a row of network
+  // buttons the shopper did not ask for.
+  //
+  // The share sheet needs a real user gesture, so this runs straight off the
+  // click with no await before it.
+  document.addEventListener('click', function(e){
+    var btn = e.target.closest && e.target.closest('[data-share-url]');
+    if (!btn) return;
+    // It sits inside the card's link, like the heart.
+    e.preventDefault(); e.stopPropagation();
+    var path = btn.getAttribute('data-share-url') || '';
+    var url = path.indexOf('http') === 0 ? path : location.origin + path;
+    var title = btn.getAttribute('data-share-title') || document.title;
+
+    function flash(text){
+      btn.classList.add('is-shared');
+      var label = btn.querySelector('.c-product-grid__icon-text');
+      var was = label ? label.textContent : '';
+      if (label) label.textContent = text;
+      setTimeout(function(){
+        btn.classList.remove('is-shared');
+        if (label) label.textContent = was;
+      }, 1600);
+    }
+
+    function copy(){
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(url).then(function(){ flash('Copied'); },
+                                               function(){ flash('Copy failed'); });
+      } else {
+        flash('Copy failed');
+      }
+    }
+
+    if (navigator.share) {
+      // TWO KINDS OF REJECTION, and they must not be treated alike.
+      //   AbortError — the shopper opened the sheet and closed it. Their
+      //     decision; copying a link they just declined to send would be
+      //     the button ignoring them.
+      //   anything else — no share target, blocked, unsupported. The API
+      //     exists but did nothing, so fall through to the clipboard rather
+      //     than leaving a button that silently does nothing at all.
+      // Chrome ships navigator.share on desktop where there may be no sheet
+      // behind it, which is exactly this second case.
+      navigator.share({ title: title, url: url }).catch(function(err){
+        if (!err || err.name !== 'AbortError') copy();
+      });
+      return;
+    }
+    copy();
+  });
 
   // ── The heart on product cards ──────────────────────────────────────────
   function paintButtons(){

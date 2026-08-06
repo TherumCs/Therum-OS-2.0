@@ -148,6 +148,21 @@ export async function buildServer() {
         'img-src': ["'self'", 'data:', 'blob:', 'https:'],
       },
     },
+    // ONE LAYER OWNS THESE, AND IT IS NGINX.
+    //
+    // Both were setting them, so every response carried X-Frame-Options,
+    // X-Content-Type-Options and Referrer-Policy twice. Harmless while the
+    // two agree — and they did not: nginx says Referrer-Policy: no-referrer,
+    // helmet says no-referrer... but nginx's own backup config says
+    // strict-origin-when-cross-origin, so the next edit could easily have
+    // left the browser picking between two different policies.
+    //
+    // nginx wins because it is the only layer that covers EVERY response:
+    // /api/uploads and /builder are served by nginx and fastify-static
+    // without touching a route, so headers set only in Node would miss them.
+    frameguard: false,
+    noSniff: false,
+    referrerPolicy: false,
   });
   // Hard ceiling only — the REAL limit is Settings > Uploads > maxUploadMb,
   // enforced in lib/uploadPolicy.ts. This has to sit at or above the schema's

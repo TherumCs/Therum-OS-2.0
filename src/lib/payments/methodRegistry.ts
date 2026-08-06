@@ -22,15 +22,22 @@ export interface PaymentMethod {
    * does not advertise something nobody is going to switch on.
    */
   hidden?: boolean;
+  /**
+   * Show the method, but inert as "payment availability coming soon" instead of
+   * a working button — a rail that is real and intended but still awaiting
+   * provider approval (Sezzle, Zip). Different from `hidden` (not shown at all)
+   * and from a plain unconnected method (hidden as setup-required).
+   */
+  comingSoon?: boolean;
 }
 
 export const METHOD_GROUPS: { id: PaymentMethod['group']; label: string; ico: string; preview: string }[] = [
   { id: 'card', label: 'Card', ico: 'CC', preview: 'Pay with debit or credit. Most common method.' },
-  { id: 'wallets', label: 'Wallets', ico: '⌘', preview: 'Apple Pay · Google Pay · PayPal · Shop Pay' },
+  { id: 'wallets', label: 'Wallets', ico: '⌘', preview: 'Apple Pay · Google Pay · PayPal · Link' },
   { id: 'bnpl', label: 'Pay later', ico: '4×', preview: 'Split into 4 payments · 0% interest' },
   { id: 'bank', label: 'Bank', ico: '⏧', preview: 'Direct from your bank account · saves 2% in fees' },
   { id: 'crypto', label: 'Crypto', ico: '₿', preview: 'BTC · ETH · USDC · SOL · ~10 min confirmation' },
-  { id: 'p2p', label: 'P2P', ico: '$', preview: 'Cash App · Venmo · Zelle · Tap to scan QR' },
+  { id: 'p2p', label: 'P2P', ico: '$', preview: 'Cash App · Venmo · Tap to scan QR' },
 ];
 
 export const METHODS: PaymentMethod[] = [
@@ -42,14 +49,13 @@ export const METHODS: PaymentMethod[] = [
   { id: 'google_pay', group: 'wallets', label: 'Google Pay', providers: ['stripe', 'square'], needsRedirect: false },
   { id: 'link', group: 'wallets', label: 'Link (Stripe)', providers: ['stripe'], needsRedirect: false },
   { id: 'paypal', group: 'wallets', label: 'PayPal', providers: ['paypal'], needsRedirect: true },
-  { id: 'shop_pay', group: 'wallets', label: 'Shop Pay', providers: ['shop_pay'], needsRedirect: true },
 
   // ── BNPL ──
   { id: 'klarna', group: 'bnpl', label: 'Klarna', providers: ['stripe'], needsRedirect: true, sub: '0% interest · every 2 weeks' },
   { id: 'affirm', group: 'bnpl', label: 'Affirm', providers: ['stripe'], needsRedirect: true, sub: 'Rates from 0% to 36% APR' },
   { id: 'afterpay', group: 'bnpl', label: 'Afterpay', providers: ['stripe', 'square'], needsRedirect: true, sub: '0% interest · every 2 weeks' },
-  { id: 'sezzle', group: 'bnpl', label: 'Sezzle', providers: ['sezzle'], needsRedirect: true, sub: '0% interest · every 2 weeks · soft credit check' },
-  { id: 'zip', group: 'bnpl', label: 'Zip', providers: ['zip'], needsRedirect: true, sub: 'Bi-weekly · $1 fee per installment' },
+  { id: 'sezzle', group: 'bnpl', label: 'Sezzle', providers: ['sezzle'], needsRedirect: true, comingSoon: true, sub: '0% interest · every 2 weeks · soft credit check' },
+  { id: 'zip', group: 'bnpl', label: 'Zip', providers: ['zip'], needsRedirect: true, comingSoon: true, sub: 'Bi-weekly · $1 fee per installment' },
   { id: 'paypal_credit', group: 'bnpl', label: 'PayPal Credit', providers: ['paypal'], needsRedirect: true, sub: '6 months no interest on $99+' },
 
   // ── Bank ──
@@ -67,5 +73,4 @@ export const METHODS: PaymentMethod[] = [
   // Venmo rides PayPal Smart Buttons; NO CHECKS EVER.)
   { id: 'cashapp', group: 'p2p', label: 'Cash App', providers: ['stripe', 'square'], needsRedirect: true },
   { id: 'venmo', group: 'p2p', label: 'Venmo', providers: ['paypal'], needsRedirect: true },
-  { id: 'zelle', group: 'p2p', label: 'Zelle', providers: ['zelle'], needsRedirect: true },
 ];

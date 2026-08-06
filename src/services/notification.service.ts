@@ -93,15 +93,28 @@ async function sendEmail(subject: string, body: string): Promise<void> {
 // Customer-facing sends (Counter C6: receipts, refund notices) reuse the
 // same per-call transport + timeouts, addressed to the given recipient
 // instead of the admin. Silently a no-op until SMTP is configured.
-export async function sendEmailTo(to: string, subject: string, body: string): Promise<void> {
+export interface MailAttachment { filename: string; content: Buffer; contentType?: string }
+
+export async function sendEmailTo(
+  to: string,
+  subject: string,
+  body: string,
+  attachments?: MailAttachment[],
+): Promise<void> {
   const n = await settingsService.getNotifications();
   if (!n.emailEnabled) return;
 
   // Nexus providers first — see the note at the top of this file.
   const from = n.smtpFrom || n.smtpUser || n.adminEmail || '';
   if (from) {
-    for (const send of NEXUS_SENDERS) {
-      if (await send({ to, from, subject, body }).catch(() => false)) return;
+    // The Nexus API senders post JSON and carry no files. Mail WITH an
+    // attachment skips them and falls through to SMTP / direct-MX below,
+    // which do — otherwise a CV would vanish and the send would still report
+    // success.
+    if (!attachments?.length) {
+      for (const send of NEXUS_SENDERS) {
+        if (await send({ to, from, subject, body }).catch(() => false)) return;
+      }
     }
   }
 
@@ -147,7 +160,7 @@ export async function sendEmailTo(to: string, subject: string, body: string): Pr
         socketTimeout: 20_000,
       });
       try {
-        await mx.sendMail({ from: n.smtpFrom || n.adminEmail, to, subject, text: body });
+        await mx.sendMail({ from: n.smtpFrom || n.adminEmail, to, subject, text: body, attachments });
         return;
       } catch {
         // Try the next exchanger — a single MX being down is routine.
@@ -172,7 +185,7 @@ export async function sendEmailTo(to: string, subject: string, body: string): Pr
     socketTimeout: 20_000,
   });
   try {
-    await transport.sendMail({ from: n.smtpFrom || n.smtpUser, to, subject, text: body });
+    await transport.sendMail({ from: n.smtpFrom || n.smtpUser, to, subject, text: body, attachments });
   } finally {
     transport.close();
   }

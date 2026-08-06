@@ -151,8 +151,19 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 .variant-picker button:disabled{opacity:0.4;cursor:default;text-decoration:line-through}
 /* Colour swatches. The swatch is the variant's own mockup, not a colour dot:
    "Dark Green/Natural" is two colours and no single dot is honest about it. */
-.swatches{display:flex;flex-wrap:wrap;gap:8px;margin:4px 0 6px}
-.swatch{width:34px;height:34px;padding:0;border:1px solid var(--bd2);background:var(--sf);border-radius:50%;overflow:hidden;cursor:pointer;line-height:0}
+.swatches{display:flex;flex-wrap:wrap;gap:11px;margin:6px 0 8px}
+/* A hairline rather than a full border: on the PDP the swatch is judged as a
+   colour, and a 1px grey ring around every disc reads as a grid of buttons
+   instead of a row of paint. It stays for white and cream, which would
+   otherwise have no edge at all. */
+/* Same reasoning as the card swatch: no border, or the two-tone gradient is
+   inset by it and the border colour shows as a ring. */
+.swatch{width:38px;height:38px;padding:0;border:0;background:var(--sf);
+  background-origin:border-box;background-clip:border-box;
+  border-radius:50%;overflow:hidden;cursor:pointer;line-height:0;
+  box-shadow:0 1px 3px rgba(0,0,0,.16),0 0 0 .5px rgba(0,0,0,.06);
+  transition:transform .14s ease,box-shadow .14s ease}
+.swatch:hover{transform:scale(1.06);box-shadow:0 3px 9px rgba(0,0,0,.22),0 0 0 .5px rgba(0,0,0,.06)}
 .swatch img{width:100%;height:100%;object-fit:cover;display:block}
 .swatch-blank{display:block;width:100%;height:100%;background:var(--bd2)}
 .swatch-fill{display:block;width:100%;height:100%}
@@ -160,7 +171,8 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
    paint that would imply a colourway the product does not have. */
 .swatch--all{background:var(--sf);border-style:dashed}
 .swatch-all-mark{display:flex;align-items:center;justify-content:center;width:100%;height:100%;font-size:9px;font-weight:700;letter-spacing:.06em;color:var(--tx)}
-.swatch.sel{outline:2px solid var(--ac-btn);outline-offset:2px;border-color:transparent}
+.swatch.sel{outline:0;box-shadow:0 0 0 2px var(--sf,#fff),0 0 0 3.5px var(--tx,#111)}
+.swatch:focus-visible{outline:2px solid var(--tx,#111);outline-offset:3px}
 .swatch:disabled{opacity:.35;cursor:default}
 .swatch-name{font-size:13px;color:var(--tx);margin-bottom:10px}
 /* One size is a fact, not a choice — stated once instead of repeated on every
@@ -270,8 +282,63 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
    block rather than a big picture with a few chips loose underneath. Each thumb
    takes an equal share; the height is fixed so a wide image cannot make them
    tall enough to compete with the hero. */
-.gallery-strip{display:flex;gap:10px;margin-top:12px;align-items:stretch}
-.gallery-strip > .gallery-thumb{flex:1 1 0;min-width:0}
+/* A CAROUSEL, not a row that divides itself up.
+   flex:1 1 0 made every thumbnail share the strip equally, so a product with
+   24 shots rendered 24 slivers ~23px wide — unreadable, and unclickable on a
+   phone. Fixed-size thumbs that scroll sideways instead: the strip holds its
+   size whether the product has three photographs or thirty.
+   Native overflow scrolling rather than a carousel library, so trackpad,
+   touch and shift-wheel all work without reimplementation. */
+/* ── PDP: back, favorites/share, quantity ─────────────────────────────── */
+.pdp-back{display:inline-flex;align-items:center;gap:4px;margin:0 0 14px;padding:6px 12px 6px 8px;
+  font-size:13px;font-weight:600;color:var(--tx2,#666);text-decoration:none;background:none;
+  border:1px solid var(--bd,#e5e7eb);border-radius:999px;cursor:pointer;transition:color var(--e),border-color var(--e)}
+.pdp-back:hover{color:var(--tx,#111);border-color:var(--tx,#111)}
+.pdp-actions{display:flex;gap:8px;margin:14px 0 2px}
+.pdp-act{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid var(--bd,#e5e7eb);
+  border-radius:999px;background:var(--sf,#fff);color:var(--tx,#111);font:600 12px var(--f,inherit);cursor:pointer;
+  transition:border-color var(--e),background var(--e),color var(--e)}
+.pdp-act:hover{border-color:var(--tx,#111)}
+.pdp-act svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linejoin:round}
+.pdp-act[aria-pressed="true"]{background:var(--tx,#111);color:var(--sf,#fff);border-color:var(--tx,#111)}
+.pdp-act[aria-pressed="true"] svg{fill:currentColor;stroke:currentColor}
+.pdp-cats{margin:12px 0 2px}
+.pdp-qty{display:flex;align-items:center;gap:14px;margin:16px 0 4px}
+.pdp-qty__label{font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--tx2,#666)}
+.qtybox{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--bd,#e5e7eb);border-radius:10px;padding:4px}
+.qbtn{width:30px;height:30px;border:0;background:none;font-size:18px;line-height:1;cursor:pointer;color:var(--tx,#111);
+  border-radius:7px;display:inline-flex;align-items:center;justify-content:center;transition:background var(--e)}
+.qbtn:hover:not(:disabled){background:var(--sf2,#f4f4f5)}
+.qbtn:disabled{opacity:.3;cursor:not-allowed}
+.qn{min-width:26px;text-align:center;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+.gallery-strip{display:flex;gap:10px;margin-top:12px;align-items:stretch;
+  overflow-x:auto;overflow-y:hidden;scroll-snap-type:x proximity;
+  /* overflow-y:hidden clips the selected thumb's 2px ring — no top padding meant
+     the first/selected thumbnail's border was sliced off the top. Pad the clip
+     box: room above for the ring, a little each side for the first/last. */
+  scroll-behavior:smooth;padding:4px 2px 7px;
+  scrollbar-width:thin;scrollbar-color:var(--bd2) transparent}
+.gallery-strip::-webkit-scrollbar{height:6px}
+.gallery-strip::-webkit-scrollbar-thumb{background:var(--bd2);border-radius:3px}
+.gallery-strip::-webkit-scrollbar-track{background:transparent}
+/* aspect-ratio drives the width from whatever height the layout has chosen,
+   so the apple layout's 64px thumbs stay square too. */
+.gallery-strip > .gallery-thumb{flex:0 0 auto;aspect-ratio:1;width:auto;scroll-snap-align:start}
+/* ARROWS. Every shot stays in the strip — all 24 of them — and these page
+   through it rather than the strip dividing itself up to fit. The rail holds
+   them outside the scrolling area so they never sit on top of a thumbnail. */
+.gallery-striprail{display:flex;align-items:center;gap:6px;margin-top:12px}
+.gallery-striprail > .gallery-strip{margin-top:0;flex:1 1 auto;min-width:0}
+.gallery-arrow{flex:0 0 auto;width:28px;height:28px;display:flex;align-items:center;justify-content:center;
+  border:1px solid var(--bd);border-radius:50%;background:var(--sf);color:var(--tx);
+  font-size:17px;line-height:1;cursor:pointer;padding:0;
+  transition:border-color var(--e),opacity var(--e)}
+.gallery-arrow:hover{border-color:var(--tx)}
+/* Disabled at the ends rather than hidden — a control that vanishes makes the
+   strip jump sideways as you reach the last thumbnail. */
+.gallery-arrow:disabled{opacity:.3;cursor:default}
+/* Nothing to page through: the arrows would be two dead circles. */
+.gallery-striprail[data-fits="1"] .gallery-arrow{display:none}
 /* One size everywhere, square, and aligned to the gallery's left edge. The
    strip used to inherit whatever the layout gave it, so the same product
    showed 64px thumbs in one style and stretched ones in another. */
@@ -305,8 +372,19 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 .gallery-main video{width:100%;height:100%;object-fit:cover;display:block}
 .gallery-thumb{position:relative}
 .gallery-thumb .play-badge{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:18px;background:rgba(0,0,0,.25);pointer-events:none}
-.taxonomy-row{margin-top:16px;display:flex;gap:6px;flex-wrap:wrap}
+.taxonomy-row{margin-top:16px;display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .taxonomy-row .pill:hover{background:#eee;color:var(--tx)}
+/* ── REMOVABLE PILLS ────────────────────────────────────────────────────
+   A category or tag the shopper is filtered BY carries its own dismiss, so
+   getting out of a filter is one tap on the thing that put you in it —
+   rather than hunting for a Clear that drops every other filter with it. */
+.pill--rm{padding-right:5px;gap:4px}
+.pill__x{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;
+  margin-left:2px;border:0;border-radius:50%;background:transparent;color:inherit;
+  font:inherit;font-size:13px;line-height:1;cursor:pointer;opacity:.55;
+  transition:opacity .15s ease,background .15s ease;text-decoration:none}
+.pill__x:hover{opacity:1;background:rgba(0,0,0,.10)}
+.pill__x:focus-visible{outline:2px solid currentColor;outline-offset:1px}
 .price-big{font-size:24px;font-weight:700;font-variant-numeric:tabular-nums;margin:10px 0 4px}
 .stock-note{font-size:13px;color:var(--tx2);margin-bottom:18px}
 `;
@@ -361,10 +439,13 @@ document.addEventListener('DOMContentLoaded',function(){
   var canHover=window.matchMedia('(hover: hover)').matches;
   document.querySelectorAll('.card-media').forEach(function(m){
     var stills=[];try{stills=JSON.parse(m.dataset.stills||'[]')}catch(e){}
+    // Which colourway each still belongs to, same order as stills. The gallery
+    // runs colour by colour, so crossing into the next block means the card is
+    // now showing a different colourway than the one the swatches claim.
+    var stillColors=[];try{stillColors=JSON.parse(m.dataset.stillColors||'[]')}catch(e){}
     var img=m.querySelector('.card-still');
     var video=m.querySelector('.card-video');
     var dots=m.querySelectorAll('.card-dots .dot');
-    var card=m.closest('.c-product-grid__item')||m.closest('.card')||m;
     var idx=0;
     // Arrows are tap-targets too — that IS the mobile story (no hover on
     // touch). They live inside the card <a>, so they must swallow the click
@@ -373,17 +454,36 @@ document.addEventListener('DOMContentLoaded',function(){
       btn.addEventListener('click',function(e){
         e.preventDefault();e.stopPropagation();
         if(!img||stills.length<2)return;
+        // RE-SYNC BEFORE STEPPING. A colour swatch sets img.src directly, so
+        // this counter goes stale the moment one is picked — stepping from the
+        // old index made the first arrow click jump somewhere unrelated and
+        // silently discard the chosen colourway.
+        // Whatever is on screen now is the truth; find it and step from there.
+        var here=stills.indexOf(img.getAttribute('src'));
+        if(here>=0)idx=here;
         idx=(idx+Number(btn.dataset.dir)+stills.length)%stills.length;
         img.src=stills[idx];
+        // Browsing the gallery IS leaving the chosen colourway behind, so the
+        // card stops suppressing its hover preview.
+        m.classList.remove('card-media--picked');
         dots.forEach(function(d,i){d.classList.toggle('on',i===idx)});
+        // THE SWATCH FOLLOWS THE CAROUSEL. Step past the last angle of the red
+        // hat and the next shot is a black one — the selected swatch has to
+        // move with it, or the card shows one colour and claims another, and
+        // Buy now would add the colour you are no longer looking at.
+        var col=stillColors[idx];
+        if(col)m.dispatchEvent(new CustomEvent('therum:gallery-color',{bubbles:true,detail:{color:col}}));
       });
     });
     if(video&&canHover){
-      card.addEventListener('mouseenter',function(){
+      // Bound to the MEDIA, not the whole card: entering the card anywhere —
+      // including reaching for a colour swatch — used to start playback and
+      // hold it there while you clicked. The video belongs to the picture.
+      m.addEventListener('mouseenter',function(){
         m.classList.add('playing');
         video.play().catch(function(){});
       });
-      card.addEventListener('mouseleave',function(){
+      m.addEventListener('mouseleave',function(){
         m.classList.remove('playing');
         video.pause();video.currentTime=0;
       });

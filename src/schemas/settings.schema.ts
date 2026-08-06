@@ -554,8 +554,8 @@ export const CounterSettingsInput = z.object({
    *              results as the shopper types. The search becomes the page
    *              rather than sitting on top of it.
    */
-  searchStyle: z.enum(['takeover', 'inline', 'immersive']).optional(),
-  searchLayout: z.enum(['list', 'grid', 'slider']).optional(),
+  searchStyle: z.enum(['takeover', 'inline', 'fullwidth', 'immersive']).optional(),
+  searchLayout: z.enum(['list', 'grid', 'categories', 'slider']).optional(),
 
   // ── Wishlist ────────────────────────────────────────────────────────────
   wishlistEnabled: z.boolean().optional(),

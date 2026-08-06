@@ -44,7 +44,13 @@ export interface PaymentGateway {
   // Sync-ish; throws on failure. `credential` is the decrypted Nexus
   // connection credential for this provider (shape is provider-specific,
   // e.g. Stripe secret key, "Public:Private" for Braintree).
-  createIntent(order: OrderForPayment, credential: string): Promise<PaymentIntentResult>;
+  // `ctx` is only meaningful to redirect gateways that offer distinct funding
+  // sources (PayPal's Venmo). Every other gateway ignores it.
+  createIntent(
+    order: OrderForPayment,
+    credential: string,
+    ctx?: { fundingMethod?: string; returnUrl?: string; cancelUrl?: string },
+  ): Promise<PaymentIntentResult>;
 
   // Returns the provider's refund id. amount <= (total - refundedTotal),
   // enforced (atomically) by the service before this is called. ctx carries
@@ -72,5 +78,15 @@ export interface PaymentGateway {
   // numbers out of this system entirely.
   //
   // Returns the provider's payment id. Throws on decline.
-  payWithToken?(order: OrderForPayment, credential: string, token: string, idempotencyKey: string): Promise<string>;
+  /**
+   * @param vault Optional saved-card intent. Gateways that have no vault
+   *              concept ignore it — it is never required to take a payment.
+   */
+  payWithToken?(
+    order: OrderForPayment,
+    credential: string,
+    token: string,
+    idempotencyKey: string,
+    vault?: { customerId?: string | null; save?: boolean; offSession?: boolean },
+  ): Promise<string>;
 }

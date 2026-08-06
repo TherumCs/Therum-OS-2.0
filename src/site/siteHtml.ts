@@ -1,5 +1,7 @@
 import { BANNER_RUNTIME, BANNER_STYLES } from './bannerRuntime.js';
+import { CONTACT_CSS, CONTACT_RUNTIME } from './contactForm.js';
 import { SUBSCRIBE_SCRIPT } from './shortcodes.js';
+import { MOBILE_MENU_CSS, MOBILE_MENU_RUNTIME } from './mobileMenu.js';
 import { HEADER_CART_CSS, headerCartRuntime, HEADER_CART_DEFAULTS, type HeaderCartConfig } from './headerCart.js';
 // Base Theme — the default public frontend shell. Deliberately minimal
 // (Bam: "default theme so stuff is just popping up"; the full theme system
@@ -147,6 +149,36 @@ export const PORTED_DOC_CSS = `
 @media(max-width:374px){
   :where(#brx-content) :where([class*="el-"]){max-width:100%}
 }
+/* Footer columns on tablet. The ported layout lays the five columns out in a
+   flex-wrap ROW, and because they are different heights — the newsletter block
+   is tall, "LEARN" is two links — the wrap staggers them: a heading drifts away
+   from its own list and the next column collides into the gap. A grid with the
+   rows aligned to the top removes the masonry. #brx-footer gives this id-level
+   specificity so it beats the ported sheet, which is linked AFTER this block.
+   Above 1023 the five sit in their intended row; below 560 they stack. */
+@media(max-width:1023px){
+  #brx-footer .th-el-97b044b{display:grid;grid-template-columns:1fr 1fr;align-items:start;gap:36px 24px}
+  /* The newsletter block (first child, no link list) is much taller than a
+     two-link column like LEARN. Left in the same grid row it forces that row
+     tall and drops a big gap between LEARN and POLICIES. Spanning it full width
+     lets the four real link columns align as a clean 2x2 beneath it. */
+  #brx-footer .th-el-97b044b > :first-child{grid-column:1/-1}
+}
+@media(max-width:560px){
+  #brx-footer .th-el-97b044b{grid-template-columns:1fr;gap:30px}
+}
+/* THE DOUBLE CART. The ported ideapark slide-out mobile menu is dead on this
+   stack — its open/close JS was ideapark's, and it is replaced by the .th-mmenu
+   overlay. Left in the flow, the panel renders its own nav AND a SECOND cart
+   button (.c-header__menu-bottom) right beside the real header bag, which is
+   the "double cart" that also shoves things around on resize. Hide the panel
+   and its scrim; keep .c-header__menu-button (the hamburger that opens the
+   overlay) untouched — it is a different class. display:none keeps the ported
+   nav links in the DOM, so the overlay can still read them. */
+#brx-header .c-header__menu-wrap,
+#brx-header .c-header__menu-shadow,
+#brx-header .c-header__menu-content,
+#brx-header .c-header__menu-bottom{display:none!important}
 `;
 
 export interface NavItem {
@@ -239,7 +271,7 @@ ${p.body}
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(p.title)}</title>
 ${p.headExtra ?? ''}
-<style>:root{--th-site-max:${siteMax}}${CSS}${BANNER_STYLES}${hasChrome ? HEADER_CART_CSS + PORTED_DOC_CSS : ''}</style>
+<style>:root{--th-site-max:${siteMax}}${CSS}${BANNER_STYLES}${CONTACT_CSS}${hasChrome ? HEADER_CART_CSS + PORTED_DOC_CSS + MOBILE_MENU_CSS : ''}</style>
 ${p.dock ? `<style>${p.dock.styles}</style>` : ''}
 ${p.chromeCssUrl ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap"><link rel="stylesheet" href="${esc(p.chromeCssUrl)}">` : ''}
 ${p.pageCss ? `<style>${p.pageCss}</style>` : ''}
@@ -251,8 +283,8 @@ ${main}
 ${footer}
 </div>
 ${p.dock ? `${p.dock.markup}\n<script>${p.dock.script}</script>` : ''}
-<script>${BANNER_RUNTIME}${SUBSCRIBE_SCRIPT}</script>
-${hasChrome ? `<script>${headerCartRuntime(p.headerIcons ?? HEADER_CART_DEFAULTS)}</script>` : ''}
+<script>${BANNER_RUNTIME}${SUBSCRIBE_SCRIPT}${CONTACT_RUNTIME}</script>
+${hasChrome ? `<script>${headerCartRuntime(p.headerIcons ?? HEADER_CART_DEFAULTS)}</script><script>${MOBILE_MENU_RUNTIME}</script>` : ''}
 </body>
 </html>`;
   return applyPerf(html, p.perf);

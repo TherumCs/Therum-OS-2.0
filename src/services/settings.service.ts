@@ -308,9 +308,9 @@ export interface CounterSettings {
   toolbarFilterFields: ('category' | 'tags' | 'color' | 'size' | 'brand' | 'price' | 'availability')[];
   toolbarSorts: ('new' | 'oldest' | 'name' | 'name-desc' | 'price-asc' | 'price-desc' | 'best-selling')[];
   toolbarDefaultSort: 'new' | 'oldest' | 'name' | 'name-desc' | 'price-asc' | 'price-desc' | 'best-selling';
-  searchStyle: 'takeover' | 'inline' | 'immersive';
+  searchStyle: 'takeover' | 'inline' | 'fullwidth' | 'immersive';
   /** How results are laid out inside whichever search style is on. */
-  searchLayout: 'list' | 'grid' | 'slider';
+  searchLayout: 'list' | 'grid' | 'categories' | 'slider';
   wishlistEnabled: boolean;
   wishlistOnCards: boolean;
 }

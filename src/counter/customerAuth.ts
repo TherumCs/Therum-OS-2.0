@@ -424,6 +424,87 @@ export const customerAuth = {
    * address). Doing it on a merely-typed email would hand over someone else's
    * order history to anyone who guessed their address.
    */
+  /**
+   * Change a password, proving the old one first.
+   *
+   * The current password is required even though the caller already holds a
+   * session: a session can be a borrowed laptop, and "someone walked away
+   * from a logged-in browser" should not be enough to lock the owner out of
+   * their own account.
+   *
+   * Every OTHER session is dropped afterwards. If the reason for the change
+   * was that somebody else had the old password, leaving their session alive
+   * makes the change pointless.
+   */
+  async changePassword(input: { customerId: string; current: string; next: string; ip?: string }) {
+    if (input.next.length < 8) throw new ValidationError('Use at least 8 characters.', 'password');
+    if (input.next === input.current) throw new ValidationError('That is the password you already have.', 'password');
+    const identity = await db.customerIdentity.findFirst({
+      where: { customerId: input.customerId, kind: 'password' },
+    });
+    if (!identity?.secretHash) {
+      throw new ValidationError('This account signs in with a code or a social login, so it has no password to change.', 'password');
+    }
+    if (!(await verifyPassword(input.current, identity.secretHash))) {
+      throw new ValidationError('That is not your current password.', 'current');
+    }
+    await db.customerIdentity.update({
+      where: { id: identity.id },
+      data: { secretHash: await hashPassword(input.next) },
+    });
+    await this.signOutAll(input.customerId, input.ip);
+    await authEventService.logCustomer('customer_password_changed', identity.subject, input.ip ?? null, 'self-service');
+    // A fresh session, so changing the password does not sign you out of the
+    // tab you changed it in.
+    return issueSession(input.customerId);
+  },
+
+  /**
+   * Change the email an account signs in with.
+   *
+   * Two-step on purpose: a code goes to the NEW address and the change only
+   * lands once it comes back. Without that, one hijacked session could point
+   * the account at an attacker's inbox and the real owner would have no way
+   * back in — which is exactly why this was never a plain text field.
+   */
+  async requestEmailChange(input: { customerId: string; newEmail: string; password?: string; ip?: string }) {
+    const email = normalizeEmail(input.newEmail);
+    const taken = await db.customerIdentity.findFirst({ where: { kind: 'password', subject: email } });
+    if (taken && taken.customerId !== input.customerId) {
+      throw new ValidationError('Another account already uses that email.', 'email');
+    }
+    const identity = await db.customerIdentity.findFirst({
+      where: { customerId: input.customerId, kind: 'password' },
+    });
+    // Password accounts must re-authenticate. Code and social accounts have
+    // no password to check, and the code sent to the new address is itself
+    // the proof.
+    if (identity?.secretHash) {
+      if (!input.password) throw new ValidationError('Enter your password to change your email.', 'password');
+      if (!(await verifyPassword(input.password, identity.secretHash))) {
+        throw new ValidationError('That password is not right.', 'password');
+      }
+    }
+    const out = await this.requestCode({ destination: email, kind: 'email', ip: input.ip });
+    return { sent: true, to: email, ...(out.code ? { code: out.code } : {}) };
+  },
+
+  /** Second half: the code proves the new address is reachable. */
+  async confirmEmailChange(input: { customerId: string; newEmail: string; code: string; ip?: string }) {
+    const email = normalizeEmail(input.newEmail);
+    // verifyCode would SIGN IN as whoever owns that address; here it is only
+    // being used to prove the address is reachable, so the session it returns
+    // is discarded and the change is applied to the customer who asked.
+    await this.verifyCode({ destination: email, kind: 'email', code: input.code, ip: input.ip });
+    await db.customer.update({ where: { id: input.customerId }, data: { email } });
+    await db.customerIdentity.updateMany({
+      where: { customerId: input.customerId, kind: { in: ['password', 'email'] } },
+      data: { subject: email },
+    });
+    await authEventService.logCustomer('customer_email_changed', email, input.ip ?? null, 'self-service');
+    return { email };
+  },
+
   async claimGuestOrders(customerId: string, email: string) {
     const { count } = await db.order.updateMany({
       where: { guestEmail: email.toLowerCase(), customerId: null },

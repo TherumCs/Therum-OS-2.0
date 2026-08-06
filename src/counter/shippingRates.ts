@@ -58,29 +58,64 @@ export interface RateProvider {
 }
 
 // ── Printful ──────────────────────────────────────────────────────────────
-// Printful quotes per-destination rates from the real catalog items. It needs
-// each line mapped to a Printful variant; until that mapping exists this
-// returns nothing and the configured rates are used, which is honest — a rate
-// invented for a POD parcel would be a number the store cannot honour.
+// Printful quotes per-destination rates from the real catalog items.
+//
+// /shipping/rates wants Printful's CATALOG variant id — NOT the sync_variant_id
+// we store on the line (that one is only valid for /orders). Passing the sync id
+// returns "Invalid variant ID" and the quote silently falls back to the manual
+// rates, which is why real Printful rates never showed. Resolve sync → catalog
+// once per variant and cache it, so a rate quote doesn't fan out to an extra API
+// call per line on every address keystroke.
+const printfulCatalogCache = new Map<number, number | null>();
+async function printfulCatalogVariant(syncId: number, headers: Record<string, string>): Promise<number | null> {
+  if (printfulCatalogCache.has(syncId)) return printfulCatalogCache.get(syncId)!;
+  let id: number | null = null;
+  try {
+    const res = await fetch(`https://api.printful.com/sync/variant/${syncId}`, {
+      headers,
+      signal: AbortSignal.timeout(6000),
+    });
+    if (res.ok) {
+      const j = (await res.json()) as { result?: { variant_id?: number; sync_variant?: { variant_id?: number } } };
+      id = j.result?.variant_id ?? j.result?.sync_variant?.variant_id ?? null;
+    }
+  } catch {
+    /* leave null — the manual rates cover it */
+  }
+  printfulCatalogCache.set(syncId, id);
+  return id;
+}
+
 const printful: RateProvider = {
   id: 'printful',
   async quote(req) {
-    const key = await connectionService.credentialFor('printful');
-    if (!key) return [];
+    const cred = await connectionService.credentialFor('printful');
+    if (!cred) return [];
+    // Credential is "token|storeId". The token ALONE is the Bearer, and a
+    // multi-store token is refused without X-PF-Store-Id. Using the whole
+    // credential as the token (the old bug) 401'd every call — so nothing quoted
+    // and the manual rates always won.
+    const [token, storeId] = cred.split('|');
+    const headers: Record<string, string> = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+    if (storeId) headers['X-PF-Store-Id'] = storeId;
 
-    const items = req.lines
-      .map((l) => {
-        const variantId = Number((l as { sourceVariantId?: string }).sourceVariantId);
-        return Number.isFinite(variantId) ? { variant_id: variantId, quantity: l.quantity } : null;
-      })
-      .filter((v): v is { variant_id: number; quantity: number } => v !== null);
+    const items = (
+      await Promise.all(
+        req.lines.map(async (l) => {
+          const syncId = Number((l as { sourceVariantId?: string }).sourceVariantId);
+          if (!Number.isFinite(syncId)) return null;
+          const variantId = await printfulCatalogVariant(syncId, headers);
+          return variantId ? { variant_id: variantId, quantity: l.quantity } : null;
+        }),
+      )
+    ).filter((v): v is { variant_id: number; quantity: number } => v !== null);
     // No line maps to a Printful variant — nothing to quote against.
     if (items.length === 0) return [];
 
     try {
       const res = await fetch('https://api.printful.com/shipping/rates', {
         method: 'POST',
-        headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+        headers,
         body: JSON.stringify({
           recipient: {
             address1: req.address.line1,
