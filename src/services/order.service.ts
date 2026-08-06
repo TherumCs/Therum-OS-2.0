@@ -277,6 +277,24 @@ export const orderService = {
     return result.stripped;
   },
 
+  /**
+   * Fill blank contact fields from a redirect provider's capture — PayPal
+   * collects the email and shipping in its own window, so a formless PayPal
+   * checkout arrives here with an empty order. Only fills what is MISSING (never
+   * overwrites a value the shopper already gave) and no-ops when there is
+   * nothing to add, so it is safe to call on every return. Runs before markPaid
+   * so fulfillment sees the address.
+   */
+  async backfillContact(id: string, contact: { email: string | null; shipAddress: unknown | null } | null | undefined) {
+    if (!contact || (!contact.email && !contact.shipAddress)) return;
+    const order = await db.order.findUnique({ where: { id }, select: { guestEmail: true, shipAddress: true } });
+    if (!order) return;
+    const data: Prisma.OrderUpdateInput = {};
+    if (contact.email && !order.guestEmail) data.guestEmail = contact.email;
+    if (contact.shipAddress && !order.shipAddress) data.shipAddress = contact.shipAddress as Prisma.InputJsonValue;
+    if (Object.keys(data).length > 0) await db.order.update({ where: { id }, data });
+  },
+
   // Called by the payment webhook: mark paid + advance pending → processing.
   async markPaid(id: string, txnId: string | null, method: string | null, pspResponse: Prisma.InputJsonValue) {
     const order = await db.order.findUnique({ where: { id }, select: { id: true, status: true } });

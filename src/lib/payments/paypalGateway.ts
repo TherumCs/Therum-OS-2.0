@@ -103,6 +103,47 @@ function mapStatus(s: string): string {
   }
 }
 
+/** Contact PayPal collected in its own window, read off the capture response so
+ *  a formless PayPal checkout can be backfilled with an email and a ship-to.
+ *  Every field is optional in PayPal's payload — hence the guards. */
+export interface PaypalContact {
+  email: string | null;
+  shipAddress: { name: string; line1: string; line2?: string; city: string; region?: string; postalCode?: string; country: string } | null;
+}
+
+interface PaypalCaptureResponse {
+  status: string;
+  payer?: { email_address?: string; name?: { given_name?: string; surname?: string } };
+  purchase_units?: {
+    shipping?: {
+      name?: { full_name?: string };
+      address?: {
+        address_line_1?: string; address_line_2?: string;
+        admin_area_2?: string; admin_area_1?: string; postal_code?: string; country_code?: string;
+      };
+    };
+  }[];
+}
+
+function paypalContact(done: PaypalCaptureResponse): PaypalContact {
+  const payer = done.payer ?? {};
+  const ship = (done.purchase_units ?? [])[0]?.shipping ?? {};
+  const a = ship.address ?? {};
+  const name = ship.name?.full_name || [payer.name?.given_name, payer.name?.surname].filter(Boolean).join(' ') || '';
+  const shipAddress = a.address_line_1
+    ? {
+        name,
+        line1: a.address_line_1,
+        ...(a.address_line_2 ? { line2: a.address_line_2 } : {}),
+        city: a.admin_area_2 ?? '',
+        ...(a.admin_area_1 ? { region: a.admin_area_1 } : {}),
+        ...(a.postal_code ? { postalCode: a.postal_code } : {}),
+        country: (a.country_code ?? 'US').toUpperCase(),
+      }
+    : null;
+  return { email: payer.email_address ?? null, shipAddress };
+}
+
 const gateway = {
   id: () => 'paypal',
   displayName: () => 'PayPal',
@@ -141,6 +182,11 @@ const gateway = {
         body: {
           intent: 'CAPTURE',
           ...paymentSource,
+          // Ask PayPal to collect and hand back the payer's shipping address, so
+          // a formless PayPal checkout (no address typed on our side) still ends
+          // up with a ship-to. The capture response carries it, and finalizeReturn
+          // backfills the order.
+          application_context: { shipping_preference: 'GET_FROM_FILE' },
           purchase_units: [{
             // PayPal echoes this back on the webhook, and it is how a captured
             // payment is matched to an order without trusting the payer.
@@ -196,13 +242,15 @@ const gateway = {
    * authorises on approval and only moves money on capture, so skipping this
    * leaves an order the shopper believes they paid for and which never settles.
    */
-  async capture(orderId: string, credential: string, idempotencyKey: string): Promise<string> {
+  async capture(orderId: string, credential: string, idempotencyKey: string): Promise<{ status: string; contact: PaypalContact }> {
     const cred = parse(credential);
-    const done = await pp<{ id: string; status: string }>(
+    const done = await pp<PaypalCaptureResponse>(
       cred, `/v2/checkout/orders/${orderId}/capture`,
       { method: 'POST', idempotencyKey },
     );
-    return mapStatus(done.status);
+    // The capture response carries the payer's email and the shipping address
+    // they confirmed in PayPal — returned so a formless checkout can backfill.
+    return { status: mapStatus(done.status), contact: paypalContact(done) };
   },
 
   async verifyWebhook(rawBody: string, headers: Record<string, string | string[] | undefined>, credential: string): Promise<Record<string, unknown> | null> {

@@ -227,7 +227,11 @@ export const paymentGatewayService = {
       const { capturePaypalOrder } = await import('../lib/payments/paypalGateway.js');
       // Keyed on the ORDER, so a double return — a refreshed tab, a retried
       // poll — cannot capture the same approval twice.
-      await capturePaypalOrder(intentId, credential, `capture-${order.id}`);
+      const cap = await capturePaypalOrder(intentId, credential, `capture-${order.id}`);
+      // PayPal collected the email + shipping in its own window; fill any blanks
+      // on the order so a formless PayPal checkout still has a receipt address
+      // and a ship-to. Before markPaid, so fulfillment sees the address.
+      await orderService.backfillContact(order.id, cap.contact);
       status = await gateway.intentStatus(intentId, credential);
     }
 

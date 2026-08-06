@@ -991,9 +991,11 @@ export const CARD_EVOLVE_RUNTIME = `
     }
 
     function draw(){
-      // Colour is chosen on the SWATCHES (the card face), not here — rendering
-      // a colour row too was the redundant second control. Only size remains.
-      rowsEl.innerHTML = row('s', 'Size', sizes);
+      // Size AND colour are chosen ENTIRELY on the card picker now (card-pk,
+      // under the title). Rendering a Size row here too was the duplicate "SIZE"
+      // row that showed on every Buy Now. The pick face keeps only its confirm
+      // button, driven by the same chosen-state the card picker writes.
+      rowsEl.innerHTML = '';
       var v = match();
       var ready = !!v && v.a > 0
         && (colors.length < 2 || chosen.c !== null)
@@ -1272,20 +1274,23 @@ export const CARD_EVOLVE_RUNTIME = `
         say('Test mode — submission is switched off, so nothing was charged.');
         return;
       }
+      // NO form required. PayPal collects the email and shipping address in its
+      // own window, and the server backfills the order from PayPal's capture. If
+      // the shopper happened to type them already, pass them through; otherwise
+      // the order is created blank and PayPal fills it in — the same one-tap
+      // promise as the other wallets.
       var email = (payQ('[data-pay-email]') || {}).value || '';
       var a = addr();
-      if (!email || !a.name || !a.line1 || !a.city || a.country.length !== 2) {
-        focusWay('details');
-        openSec('who');
-        say('Add your email and address first — PayPal needs somewhere to ship it.', true);
-        return;
-      }
+      var hasAddr = !!(a.name && a.line1 && a.city && a.country.length === 2);
       var win = window.open('', 'therum_pay', 'width=480,height=720');
       payStep('sending');
       try {
         var cart = await api('/cart/items', { variantId: chosenVariant.i, quantity: qty });
-        await api('/cart/shipping', { cartToken: cart.token, shipAddress: a });
-        var order = await api('/cart/checkout', { cartToken: cart.token, email: email, shipAddress: a });
+        if (hasAddr) await api('/cart/shipping', { cartToken: cart.token, shipAddress: a });
+        var checkoutBody = { cartToken: cart.token };
+        if (email) checkoutBody.email = email;
+        if (hasAddr) checkoutBody.shipAddress = a;
+        var order = await api('/cart/checkout', checkoutBody);
         var started = await api('/shop/checkout/redirect-start', {
           orderNumber: order.orderNumber, accessToken: order.accessToken, provider: provider,
         });
@@ -1739,11 +1744,13 @@ export const CARD_EVOLVE_RUNTIME = `
         // expressMethods is still populated; nothing here consumes it.
         box.hidden = false;
         box.innerHTML =
-          '<div class="card-pay__tabs">' + groups.map(function(g){
-            var any = methods.some(function(m){ return m.group === g.id && m.available; });
-            return '<button type="button" class="card-pay__tab" data-mgroup="' + g.id + '"'
-              + (any ? '' : ' disabled title="No provider connected for this yet"')
-              + '>' + g.ico + ' ' + g.label + '</button>';
+          '<div class="card-pay__tabs">' + groups.filter(function(g){
+            // Hide a group entirely when nothing in it is set up — a disabled
+            // tab just advertises what the store cannot do yet. Coming-soon
+            // methods are a deliberate tease, so a group holding one still shows.
+            return methods.some(function(m){ return m.group === g.id && (m.available || m.comingSoon); });
+          }).map(function(g){
+            return '<button type="button" class="card-pay__tab" data-mgroup="' + g.id + '">' + g.ico + ' ' + g.label + '</button>';
           }).join('') + '</div><div class="card-pay__methods" data-pay-methods></div>';
 
         box.addEventListener('click', function(e){
