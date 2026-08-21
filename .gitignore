@@ -1,0 +1,38 @@
+node_modules/
+dist/
+.env
+.env.local
+# Every .env variant, not just the two we happened to have. A file named
+# .env.backup-20260728-172516 was sitting untracked and unignored, one
+# `git add -A` away from publishing live credentials to a GitHub repo.
+.env.*
+!.env.example
+*.log
+.DS_Store
+prisma/*.db
+coverage/
+# ANCHORED to the repo root. As a bare `uploads/` this matched ANY directory
+# called uploads at any depth — and silently excluded
+# admin/app/(app)/settings/uploads/, the entire Uploads settings page, from the
+# repository. It was on disk and working locally, so nothing looked wrong; a
+# fresh clone simply would not have had that page.
+/uploads/
+.next/
+admin/.next/
+admin/.env.local
+builder/dist/
+.next-test/
+*.tsbuildinfo
+
+# Database backups — real dumps of live content, never committed.
+backups/
+
+# Bricks is COMMERCIAL, licensed software — installed through the Bricks
+# Bridge ZIP installer, not source we wrote. Vendoring it here republished a
+# paid theme and made the repo 96% not-our-code (77.8 MB of 81 MB).
+# Therum OS is Therum OS. Nothing licensed belongs in this repo.
+bricks-addons/
+
+# Forge/cli-* audit output envelopes (tool artifacts, not source)
+.claude/cli-*.json
+.claude/tangle-partition.json

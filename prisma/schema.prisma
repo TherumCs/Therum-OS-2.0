@@ -1,0 +1,1390 @@
+// Therum CMS 2.0 — data shape is the source of truth.
+// Money is stored as INTEGER MINOR UNITS (cents). Never floats for money.
+// External `sourceId` makes vendor imports idempotent (re-import never dupes).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─── Enums (state machines) ──────────────────────────────────────────────
+
+enum ProductStatus {
+  draft
+  active
+  archived
+}
+
+enum VendorPlatform {
+  shopify
+  woocommerce
+  stripe
+  square
+  custom
+}
+
+enum SyncStatus {
+  idle
+  syncing
+  error
+}
+
+enum OrderStatus {
+  pending
+  processing
+  shipped
+  delivered
+  failed
+  cancelled
+}
+
+enum PaymentStatus {
+  pending
+  authorized
+  paid
+  failed
+  refunded
+}
+
+// ─── Vendor: source of truth for multi-vendor ───────────────────────────
+
+model Vendor {
+  id            String         @id @default(cuid())
+  name          String
+  platform      VendorPlatform @default(custom)
+  apiKey        String?        @map("api_key")
+  webhookSecret String?        @map("webhook_secret")
+  syncStatus    SyncStatus     @default(idle) @map("sync_status")
+  lastSync      DateTime?      @map("last_sync")
+  productsCount Int            @default(0) @map("products_count")
+  createdAt     DateTime       @default(now()) @map("created_at")
+  updatedAt     DateTime       @updatedAt @map("updated_at")
+
+  products       Product[]
+  sourceVariants ProductVariant[] @relation("VariantSourceVendor")
+
+  @@map("vendors")
+}
+
+// ─── Product: core merged-product type ──────────────────────────────────
+
+// deletedAt is the TRASH, and it is a timestamp rather than a status value on
+// purpose: restoring has to put a thing back where it was. A `trashed` status
+// would overwrite draft/active/archived, so everything restored would come
+// back looking the same and an operator would have to guess.
+model Product {
+  deletedAt   DateTime? @map("deleted_at")
+  id          String        @id @default(cuid())
+  wooId       Int?          @unique @map("woo_id")
+  name        String
+  slug        String        @unique
+  description String?
+  image       String?
+  // Gallery beyond the primary image: [{url, alt}] (catalog presentation).
+  images      Json          @default("[]")
+  status      ProductStatus @default(draft)
+
+  /**
+   * WHO may see this, which is a separate question from whether it is
+   * published. `status` is the lifecycle (draft -> active -> archived);
+   * visibility is the audience. A product can be perfectly Active AND private,
+   * so folding these into one dropdown loses a real combination.
+   * public     — anyone.
+   * private    — UNLISTED: absent from listings, but the direct link works
+   * for anyone holding it. The link is the credential.
+   * restricted — must match a milieu in `audiences` OR a customer in
+   * `access`; the two COMBINE. Everyone else gets a 404 and no
+   * hint the product exists.
+   * ENFORCED AT THE CART AND CHECKOUT, not only in listings. Hiding a product
+   * from /shop while the API still accepts its variant id is not private.
+   */
+  visibility String   @default("public")
+  // Null vendorId = a merged product the engine owns (multi-vendor).
+  vendorId   String?  @map("vendor_id")
+  // External id from the source platform — idempotency key for imports.
+  sourceId   String?  @map("source_id")
+  // Which fulfilment provider prints this — 'printful', 'printify', 'tapstitch'.
+  // Distinct from vendorId, which is a MARKETPLACE seller and a real foreign
+  // key. Order routing reads this to decide which factory gets the line.
+  fulfillmentProvider String? @map("fulfillment_provider")
+  meta       Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  vendor            Vendor?            @relation(fields: [vendorId], references: [id], onDelete: SetNull)
+  variants          ProductVariant[]
+  clusterMembership ClusterMembership?
+  categories        ProductCategory[]
+  tags              ProductTag[]
+  reviews           ProductReview[]
+  audiences         ProductAudience[]
+  access            ProductAccess[]
+
+  @@unique([vendorId, sourceId], name: "vendor_source")
+  @@index([status])
+  @@map("products")
+}
+
+// ─── Catalog taxonomy (Woo parity: hierarchical categories, flat tags) ──
+
+model ProductCategory {
+  deletedAt DateTime? @map("deleted_at")
+  id       String  @id @default(cuid())
+  wooId    Int?    @unique @map("woo_id")
+  name     String
+  // NOT globally unique — unique WITHIN ITS PARENT.
+  //
+  // A global unique slug is the WooCommerce problem: you can have one
+  // "t-shirts" in the whole store, so the second one becomes t-shirts-1 or has
+  // to be renamed womens-t-shirts. Scoped to the parent, Mens > T-Shirts and
+  // Womens > T-Shirts are both plain "t-shirts" and their URLs stay clean:
+  // /c/mens/t-shirts and /c/womens/t-shirts.
+  //
+  // Because a slug alone no longer identifies a category, everything resolves
+  // by PATH — see src/counter/categoryTree.ts.
+  slug     String
+  parentId String? @map("parent_id")
+
+  parent   ProductCategory?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children ProductCategory[] @relation("CategoryTree")
+  products Product[]
+
+  // Siblings cannot share a slug. NOTE this does NOT cover TOP-LEVEL
+  // categories: Postgres treats NULLs as distinct, so every parent_id IS NULL
+  // row escapes this constraint. A partial unique index in the migration covers
+  // those, and taxonomy.service checks it in application code too.
+  @@unique([parentId, slug])
+  @@index([parentId])
+  @@map("product_categories")
+}
+
+model ProductTag {
+  deletedAt DateTime? @map("deleted_at")
+  id   String @id @default(cuid())
+  wooId Int?  @unique @map("woo_id")
+  name String
+  slug String @unique
+
+  products Product[]
+
+  @@map("product_tags")
+}
+
+// ─── ProductVariant: the sellable unit ──────────────────────────────────
+
+model ProductVariant {
+  id             String  @id @default(cuid())
+  wooId          Int?    @unique @map("woo_id")
+  productId      String  @map("product_id")
+  sku            String?
+  // Money in minor units (cents).
+  price          Int     @default(0)
+  cost           Int?
+  color          String?
+  size           String?
+  // For merged products, which vendor this specific variant came from.
+  sourceVendorId String? @map("source_vendor_id")
+  sourceId       String? @map("source_id")
+  inventory      Int     @default(0)
+  // Reserved (held) inventory; available = inventory - reserved.
+  reserved       Int     @default(0)
+
+  /**
+   * How this variant's availability is decided.
+   * tracked       — `inventory` is the truth; selling decrements it.
+   * in_stock      — always sellable, no counting.
+   * out_of_stock  — never sellable, whatever `inventory` says.
+   * backorder     — sellable, and the buyer is told it ships later.
+   * Print-on-demand is the reason this exists. A POD line has no stock to run
+   * out of, and the previous workaround was to import it with an inventory of
+   * 999999 — which showed up in the admin as a real number a merchant could
+   * edit and mean nothing by, and would have silently become 999998 on the
+   * first sale.
+   */
+  stockStatus String @default("tracked") @map("stock_status")
+
+  /**
+   * The variant's OWN image. A colourway is a different photograph, and
+   * without this the gallery cannot change when the shopper picks one —
+   * which is what WooCommerce does and what its absence here looked like.
+   */
+  image  String?
+  /**
+   * Extra shots for this specific variant: [{url, alt}].
+   */
+  images Json    @default("[]")
+
+  /**
+   * The actual colours of this variant, as hex: ["#c70b3c", "#f9e9d1"].
+   * Taken from the provider, never inferred from the name. Printful publishes
+   * `color_code` and `color_code2` per catalog variant, and a name like
+   * "Red/Natural" is two colours — guessing a single hex from that word would
+   * be wrong in both directions. One entry renders a solid swatch, two render
+   * a split.
+   */
+  colorCodes Json     @default("[]") @map("color_codes")
+  meta       Json     @default("{}")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  product      Product     @relation(fields: [productId], references: [id], onDelete: Cascade)
+  sourceVendor Vendor?     @relation("VariantSourceVendor", fields: [sourceVendorId], references: [id], onDelete: SetNull)
+  orderItems   OrderItem[]
+  backInStockSubs BackInStockSubscription[]
+
+  @@unique([sourceVendorId, sourceId], name: "variant_vendor_source")
+  @@index([productId])
+  @@map("product_variants")
+}
+
+// Back-in-stock alerts: one row per (variant, email). notifiedAt is stamped
+// once the variant is restocked and the alert is sent, so it fires at most once
+// per sign-up.
+model BackInStockSubscription {
+  id         String    @id @default(cuid())
+  variantId  String    @map("variant_id")
+  email      String
+  createdAt  DateTime  @default(now()) @map("created_at")
+  notifiedAt DateTime? @map("notified_at")
+
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Cascade)
+
+  @@unique([variantId, email])
+  @@index([variantId])
+  @@map("back_in_stock_subscriptions")
+}
+
+// ─── Customer ────────────────────────────────────────────────────────────
+
+model Customer {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  // `name` is the customer's freely-editable display name / username (they can
+  // change it as often as they like). firstName/lastName are the real name for
+  // the back office and shipping — kept separate so a chosen handle never
+  // overwrites the name on file.
+  name      String?
+  firstName String?  @map("first_name")
+  lastName  String?  @map("last_name")
+  meta      Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  addresses     Address[]
+  orders        Order[]
+  memberships   MilieuMembership[]
+  reviews       ProductReview[]
+  identities    CustomerIdentity[]
+  sessions      CustomerSession[]
+  offers        CustomerOffer[]
+  productAccess ProductAccess[]
+  bankLinks     BankLink[]
+
+  @@map("customers")
+}
+
+// A coupon pushed to ONE named customer, so it shows up in their account
+// instead of having to be advertised publicly and hoped for.
+//
+// Deliberately a JOIN rather than a copy of the coupon: the coupon carries all
+// the rules (amount, minimum, expiry, usage limits) and stays the single place
+// they are enforced at checkout. This row only records who was offered it,
+// what they were told, and whether they took it. Revoking the coupon kills
+// every offer of it at once, which is the behaviour a merchant expects.
+model CustomerOffer {
+  id         String    @id @default(cuid())
+  customerId String    @map("customer_id")
+  couponId   String    @map("coupon_id")
+  // What the shopper reads. The coupon's own `description` is internal copy;
+  // this is the pitch, written per push.
+  title      String
+  message    String?
+  // active | claimed | dismissed. Expiry is the coupon's own, not a second
+  // source of truth.
+  status     String    @default("active")
+  seenAt     DateTime? @map("seen_at")
+  claimedAt  DateTime? @map("claimed_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  coupon   Coupon   @relation(fields: [couponId], references: [id], onDelete: Cascade)
+
+  // One live offer of a given coupon per customer — pushing the same campaign
+  // twice should update the message, not stack duplicates in their account.
+  @@unique([customerId, couponId])
+  @@index([customerId, status])
+  @@index([couponId])
+  @@map("customer_offers")
+}
+
+model Address {
+  id         String  @id @default(cuid())
+  customerId String  @map("customer_id")
+  line1      String
+  line2      String?
+  city       String
+  region     String?
+  postalCode String? @map("postal_code")
+  country    String
+  isDefault  Boolean @default(false) @map("is_default")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@map("addresses")
+}
+
+// ─── Order: atomic state machine ─────────────────────────────────────────
+
+model Order {
+  id             String      @id @default(cuid())
+  // Human-facing order number, high-entropy + unique.
+  number         String      @unique
+  status         OrderStatus @default(pending)
+  customerId     String?     @map("customer_id")
+  // Total in minor units (cents) — after any membership discount.
+  total          Int         @default(0)
+  // Milieus member discount applied at creation (Milieus M2): percent, the
+  // deducted amount in cents, and the receipt label ("VIP discount (10%)").
+  // Zero/null = no discount applied.
+  discountPct    Float       @default(0) @map("discount_pct")
+  discountAmount Int         @default(0) @map("discount_amount")
+  discountLabel  String?     @map("discount_label")
+  currency       String      @default("USD")
+  // Idempotency key for create (prevents double-submit dupes).
+  idempotencyKey String?     @unique @map("idempotency_key")
+  // Guest receipt access (Counter C1, 1.x provisions rule): 32-hex token
+  // minted at creation, accepted by /order-received via constant-time
+  // compare — a guest's receipt link works without an account.
+  accessToken    String?     @unique @map("access_token")
+  // Shipping and tax as CHARGED, in minor units, and the speed the shopper
+  // picked. Held on the order because `total` is what was actually taken and
+  // must be reproducible from its parts — without these, a receipt could not
+  // explain its own number, and the order total silently dropped both (the
+  // cart said $83.45 and the order was created for $54.00).
+  shippingTotal  Int         @default(0) @map("shipping_total")
+  taxTotal       Int         @default(0) @map("tax_total")
+  shippingMethod String?     @map("shipping_method")
+  // Sum of succeeded refunds in minor units; refundable = total - this.
+  refundedTotal  Int         @default(0) @map("refunded_total")
+  // Guest contact email (Counter C2) — a storefront order's billing email,
+  // stored independent of any customer ACCOUNT (Woo's billing_email model).
+  // An unverified checkout email must NOT bind the order to a pre-existing
+  // customer or inherit its membership (audit H-1); it's a receipt address
+  // only. Customer-account association + member discounts wait for real
+  // storefront customer auth.
+  guestEmail     String?     @map("guest_email")
+  // External id from the source platform — the idempotency key that makes a
+  // WooCommerce order import re-runnable without duplicating history.
+  sourceId       String?     @map("source_id")
+  // Shipping address captured AT CHECKOUT, on the order itself.
+  //
+  // Addresses otherwise hang off Customer, which left a guest order with no
+  // address anywhere — its shipments were created empty and could never be
+  // quoted. An order is also a historical record: a customer editing their
+  // saved address later must not silently rewrite where a past parcel went.
+  shipAddress    Json        @default("{}") @map("ship_address")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+  // Free-form JSON for lifecycle bookkeeping (e.g. reviewRequestedAt) — never
+  // a source of truth, just flags a sweep stamps so it does not re-fire.
+  meta           Json        @default("{}")
+
+  customer          Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  items             OrderItem[]
+  payment           Payment?
+  refunds           Refund[]
+  routes            FulfillmentRoute[]
+  couponRedemptions CouponRedemption[]
+  shipments         OrderShipment[]
+
+  @@index([status])
+  @@index([customerId])
+  @@map("orders")
+}
+
+model OrderItem {
+  id          String @id @default(cuid())
+  orderId     String @map("order_id")
+  variantId   String @map("variant_id")
+  quantity    Int
+  // Snapshot of the price at time of order (minor units) — never recompute.
+  priceAtTime Int    @map("price_at_time")
+
+  order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([variantId])
+  @@map("order_items")
+}
+
+// ── Counter coupons (C3) ───────────────────────────────────────────
+// Ported from 1.x Counter's coupons/coupon_redemptions (see
+// docs/superpowers/specs/2026-07-24-counter-c3-coupons-design.md). v1 is
+// percent|fixed, cart-scope, single-coupon-per-cart; the redemption ledger
+// tracks per-user limits by guest email (no customer accounts yet) and
+// releases on refund so a refunded order doesn't burn a usage slot.
+
+enum CouponType {
+  percent
+  fixed
+}
+
+model Coupon {
+  id                String     @id @default(cuid())
+  code              String     @unique
+  type              CouponType
+  // percent: 1..100. fixed: minor units off the subtotal.
+  amount            Int
+  minimumAmount     Int?       @map("minimum_amount")
+  maximumAmount     Int?       @map("maximum_amount")
+  usageLimit        Int?       @map("usage_limit")
+  usageLimitPerUser Int?       @map("usage_limit_per_user")
+  usageCount        Int        @default(0) @map("usage_count")
+  individualUse     Boolean    @default(true) @map("individual_use")
+  startsAt          DateTime?  @map("starts_at")
+  expiresAt         DateTime?  @map("expires_at")
+  status            String     @default("active") // active | inactive
+  description       String?
+  // Restrict this code to members of ONE milieu (customer group). Null = open
+  // to anyone with the code. Enforced against a verified customer SESSION, not
+  // the typed checkout email — see coupon.service.ts validate().
+  milieuId          String?    @map("milieu_id")
+  createdAt         DateTime   @default(now()) @map("created_at")
+  updatedAt         DateTime   @updatedAt @map("updated_at")
+
+  redemptions CouponRedemption[]
+  offers      CustomerOffer[]
+  milieu      Milieu?            @relation(fields: [milieuId], references: [id], onDelete: SetNull)
+
+  @@index([status])
+  @@index([milieuId])
+  @@map("coupons")
+}
+
+model CouponRedemption {
+  id         String    @id @default(cuid())
+  couponId   String    @map("coupon_id")
+  orderId    String    @map("order_id")
+  // Per-user limit tracks by guest email until customer accounts exist.
+  email      String?
+  amount     Int
+  appliedAt  DateTime  @default(now()) @map("applied_at")
+  // Set on refund → frees the per-user slot (1.x releaseRedemptionsForOrder).
+  releasedAt DateTime? @map("released_at")
+
+  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  order  Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([couponId, orderId], name: "coupon_order")
+  @@index([couponId, email])
+  @@index([orderId])
+  @@map("coupon_redemptions")
+}
+
+// ── Counter payments (C1) ──────────────────────────────────────────
+// Canonical PSP webhook ledger — every provider event lands here exactly
+// once (1.x rule: replay deduped on UNIQUE(provider, provider_event_id);
+// timestamp-less providers fall back to sha256 of the raw signed body).
+model PaymentEvent {
+  id              String   @id @default(cuid())
+  provider        String
+  providerEventId String   @map("provider_event_id")
+  // payment.succeeded|failed|refunded, refund.succeeded|failed,
+  // dispute.opened|lost|won — receivers ignore unknown kinds.
+  kind            String
+  paymentIntentId String?  @map("payment_intent_id")
+  refundId        String?  @map("refund_id")
+  payload         Json     @default("{}")
+  // Audit C-1: an event is acknowledged to the provider ONLY once applied.
+  // A ledgered-but-unapplied row (apply threw) is re-applied on the
+  // provider's retry instead of being swallowed as a replay.
+  applied         Boolean  @default(false)
+  receivedAt      DateTime @default(now()) @map("received_at")
+
+  @@unique([provider, providerEventId], name: "provider_event")
+  @@index([paymentIntentId])
+  @@map("payment_events")
+}
+
+// A refund against an order — partial or full. amount in minor units.
+model Refund {
+  id               String   @id @default(cuid())
+  orderId          String   @map("order_id")
+  amount           Int
+  reason           String?
+  provider         String
+  // Provider's own refund id (from gateway.refund()); idempotency key
+  // dedupes retries at the provider.
+  providerRefundId String?  @map("provider_refund_id")
+  idempotencyKey   String   @unique @map("idempotency_key")
+  status           String   @default("pending") // pending | succeeded | failed
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@map("refunds")
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  orderId     String        @unique @map("order_id")
+  status      PaymentStatus @default(pending)
+  method      String?
+  txnId       String?       @map("txn_id")
+  amount      Int           @default(0)
+  pspResponse Json          @default("{}") @map("psp_response")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("payments")
+}
+
+// ─── Extension: sandboxed plugin manifest + state ────────────────────────
+
+model Extension {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  version   String
+  // { hooks: string[], ui_entry: string, permissions: string[] }
+  manifest  Json     @default("{}")
+  enabled   Boolean  @default(false)
+  config    Json     @default("{}")
+  // health: ok | unhealthy — set when an extension throws.
+  health    String   @default("ok")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("extensions")
+}
+
+// ─── Admin accounts ───────────────────────────────────────────────────────
+// A real account, not a shared secret — first one is created via the one-time
+// setup gate (see auth.service.ts: needsSetup/setup), matching how 1.9.44
+// always had an actual WordPress admin user.
+model AdminUser {
+  id                 String   @id @default(cuid())
+  username           String   @unique
+  passwordHash       String   @map("password_hash")
+  // Per-user dashboard card order/size: [{ id, size }] — 'up'/'down' reorder
+  // + a size-tier picker, not full drag-and-drop (see admin/lib/dashboard.ts).
+  dashboardLayout    Json?    @map("dashboard_layout")
+  // Per-user sidebar section/item order + custom sections: { v, sections:
+  // [{id,label}], items: {sectionId:[itemId,...]} } — mirrors 1.9.44's
+  // therum_sidebar_layout user meta shape exactly (see sidebar.ts for the
+  // ported therum_apply_sidebar_layout() merge algorithm).
+  sidebarLayout      Json?    @map("sidebar_layout")
+  // Desktop Mode — 1.9.44's version depends on a third-party WordPress
+  // plugin (Automattic's desktop-mode/desktop-mode.php); built natively
+  // here instead, since the actual feature (draggable windows + a dock,
+  // chrome yielding while active) has nothing WordPress-specific about it.
+  // Per-user, matching 1.9.44's own per-account activation.
+  desktopModeEnabled Boolean  @default(false) @map("desktop_mode_enabled")
+  // Media library view state — 1.9.44's therum_pref_media_view_mode /
+  // therum_pref_media_density user meta (its density slider is 3-7 cols,
+  // matched exactly below). Per-user, same reasoning as the fields above.
+  mediaViewMode      String?  @default("grid") @map("media_view_mode")
+  mediaDensity       Int?     @default(5) @map("media_density")
+  // Quick Controls' per-user Behavior tab — real, working preferences
+  // (distinct from the flagged fixture-only "Login-screen customization"/
+  // "list-page defaults" panels in the source doc, which never had a working
+  // save handler and weren't ported). loginLandingPage is a path like
+  // "/dashboard" or "/pages"; sidebarFolded is its own boolean, not derived
+  // from sidebarLayout above (that field stores section/item order, a
+  // different shape); listPageRowCount overrides the global
+  // Appearance.itemsPerPage default when set.
+  loginLandingPage   String?  @map("login_landing_page")
+  sidebarFolded      Boolean  @default(false) @map("sidebar_folded")
+  listPageRowCount   Int?     @map("list_page_row_count")
+  // Quick Controls' per-user Advanced tab — sanitized at write time
+  // (see me.service.ts's sanitizeCustomCss), scoped to this user's own
+  // admin view only, matching the source's "one user's own admin view"
+  // framing exactly.
+  customCss          String?  @map("custom_css")
+  // TOTP 2FA (RFC 6238) — secret is base32, generated on enroll, only
+  // committed live once a real code is verified (see twoFactor.service.ts).
+  // No QR delivery: manual secret entry only, matching 1.9.44's own
+  // secure-by-default choice (never send the raw secret to a 3rd-party
+  // QR-rendering endpoint) — and avoids adding a QR-generation dependency
+  // for a feature most authenticator apps support via manual entry anyway.
+  totpSecret         String?  @map("totp_secret")
+  totpEnabled        Boolean  @default(false) @map("totp_enabled")
+  // [{ hash, usedAt }] — 8 single-use recovery codes, hashed at rest (scrypt,
+  // same as the password), generated once at enrollment and never shown again.
+  backupCodes        Json?    @map("backup_codes")
+  // Anti-replay: last accepted 30s time-step index, rejects immediate code reuse.
+  totpLastStep       Int?     @map("totp_last_step")
+  createdAt          DateTime @default(now()) @map("created_at")
+  // Custom roles via capability bundles (section 06 of the feature
+  // inventory) — null is the ORIGINAL, unrestricted tier every account had
+  // before this feature existed (full admin, matching signJwt's historical
+  // hardcoded 'admin' role exactly, so no existing account's access changes
+  // by this column merely existing). Only a non-null roleId narrows access,
+  // via the Role's own bundles — see role.service.ts's resolveAccess().
+  // The Google account allowed to sign in AS this admin.
+  //
+  // An explicit link, never an inference. Matching on "any verified Google
+  // email" would mean anyone with a Google account could sign in and approve a
+  // partner connection — the credential-vending hole again, wearing a nicer
+  // button. Null means Google sign-in is not available for this account.
+  googleEmail        String?  @unique @map("google_email")
+  roleId             String?  @map("role_id")
+
+  apiTokens ApiToken[]
+  role      Role?      @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@index([roleId])
+  @@map("admin_users")
+}
+
+// ─── Auth audit log ───────────────────────────────────────────────────────
+// 1.9.44 had NO auth-specific audit log at all (confirmed in the research
+// pass) — this is a clean-slate addition, not a port. Append-only; no user
+// deletion cascade concern since it outlives the account on purpose (an
+// audit trail that vanishes when the account is deleted defeats the point).
+// ─── Store credentials (this site AS a store) ─────────────────────────────
+// Print-on-demand platforms (Printful, Printify, Tapstitch…) connect by
+// PULLING from your store: they ask for a WooCommerce-style consumer key and
+// secret and then call the store's REST API themselves. Counter could already
+// read a Woo store (wooImporter) but could not BE one, so there was no way to
+// give those platforms anything — which is exactly why the connection could
+// not be completed from their side.
+//
+// The secret is hashed at rest like a password: it is shown once at creation
+// and never again, because a store credential is a full API login.
+model StoreCredential {
+  id          String    @id @default(cuid())
+  /**
+   * A NUMERIC id, because WooCommerce's is one.
+   * The auth handshake hands `key_id` back to the partner, and WooCommerce's
+   * is a database auto-increment. Partners parse it as an integer; a cuid
+   * string fails that parse and the connection is rejected AFTER the keys were
+   * accepted — which reads as "connection failed" with nothing wrong on either
+   * side's logs.
+   */
+  keyId       Int       @unique @default(autoincrement()) @map("key_id")
+  label       String
+  consumerKey String    @unique @map("consumer_key")
+  secretHash  String    @map("secret_hash")
+  // 'read' cannot mutate anything; POD platforms that only pull products need
+  // nothing more, and handing out write access by default is how a compromised
+  // partner becomes a compromised store.
+  scope       String    @default("read_write")
+  lastUsedAt  DateTime? @map("last_used_at")
+  lastUsedIp  String?   @map("last_used_ip")
+  revokedAt   DateTime? @map("revoked_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([revokedAt])
+  @@map("store_credentials")
+}
+
+model AuthEvent {
+  id        String   @id @default(cuid())
+  type      String // admin: login_success | login_failure | login_locked | setup | logout | 2fa_enabled | 2fa_disabled | 2fa_challenge_failed
+  // customer: customer_* (see AuthEventType)
+  username  String // not a FK — must still record events for usernames that don't exist (failed logins)
+  // Which login surface this happened on. Storefront customers and admin
+  // operators are different populations with different threat models, and a
+  // single mixed list makes a burst of customer failures look like an attack on
+  // the admin (or hides one among the noise). Defaulted so every existing row
+  // stays what it already was: an admin event.
+  scope     String   @default("admin")
+  ip        String?
+  detail    String?
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([username, createdAt])
+  @@index([scope, createdAt])
+  @@map("auth_events")
+}
+
+// ─── API tokens: scoped bearer tokens for non-browser callers ────────────
+// Directly modeled on 1.9.44's Phase-5.1 API Tokens system (the most
+// directly-reusable prior art the research pass found) — capability-scoped
+// bearer tokens as an alternative to sharing the admin password with
+// scripts/CI/external tools. Token value is shown once at creation; only
+// its hash is ever stored.
+model ApiToken {
+  id         String    @id @default(cuid())
+  userId     String    @map("user_id")
+  name       String
+  tokenHash  String    @unique @map("token_hash")
+  // First few chars of the real token, kept for display ("tro_ab12••••") so
+  // a user can tell tokens apart without the hash being reversible.
+  prefix     String
+  scope      String    @default("read") // 'read' | 'write'
+  createdAt  DateTime  @default(now()) @map("created_at")
+  expiresAt  DateTime? @map("expires_at")
+  lastUsedAt DateTime? @map("last_used_at")
+  lastUsedIp String?   @map("last_used_ip")
+  revokedAt  DateTime? @map("revoked_at")
+
+  user AdminUser @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("api_tokens")
+}
+
+// ─── Custom roles: composable capability bundles ─────────────────────────
+// Ported concept from 1.9.44's Permissions page: named roles built from a
+// fixed set of composable bundles, rather than a fixed admin/editor/author
+// ladder. bundles is a subset of: read, write, publish, edit-broadly,
+// manage-settings, storefront-customer, storefront-manager (see
+// role.service.ts's BUNDLES for the canonical list + role.schema.ts for
+// the Zod-enforced enum). onDelete: Restrict on AdminUser.role means a
+// role in active use can't be deleted out from under its users — they must
+// be reassigned first, so nobody is ever silently promoted to full admin
+// (roleId: null) by a role's deletion.
+model Role {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  bundles   String[]
+  createdAt DateTime @default(now()) @map("created_at")
+
+  users AdminUser[]
+
+  @@map("roles")
+}
+
+// ─── Settings: generic key/value config store ────────────────────────────
+// The Node/Postgres analog of WP's wp_options table, minus the autoload-cache
+// baggage that only existed because WP loads every autoloaded option into one
+// PHP array on every request — Postgres just indexes on the key. Every
+// settings screen (Appearance, Login, Notifications, Backup, ...) is a typed
+// wrapper over this one table (see src/services/settings.service.ts).
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}
+
+// ─── Settings > Redirects — core rule CRUD (1.9.44's 404 monitor + JSON/CSV
+// import-export are a separate, larger follow-up, not built here yet). ─────
+model RedirectRule {
+  id        String   @id @default(cuid())
+  from      String
+  to        String
+  code      Int      @default(301)
+  isRegex   Boolean  @default(false) @map("is_regex")
+  enabled   Boolean  @default(true)
+  hits      Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([from])
+  @@map("redirect_rules")
+}
+
+// ─── 404 monitor ──────────────────────────────────────────────────────────
+// One row per distinct missed path (upserted, not appended) — a scanner
+// hammering the same dead URL shouldn't grow this table unbounded, just
+// increment count/lastSeenAt on the existing row.
+model NotFoundHit {
+  id          String   @id @default(cuid())
+  path        String   @unique
+  method      String
+  referer     String?
+  count       Int      @default(1)
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime @default(now()) @updatedAt @map("last_seen_at")
+
+  @@map("not_found_hits")
+}
+
+// ─── Folio: native Content engine ────────────────────────────────────────
+
+enum ContentType {
+  page
+  post
+  case_study
+  // Counter's storefront screens, editable the way Woo ships default
+  // templates. A template is content like any other row — same editor, same
+  // rendering — so shop/PDP/cart/checkout/account stop being hardcoded
+  // TypeScript that only a developer can change.
+  template
+}
+
+enum ContentStatus {
+  draft
+  published
+  archived
+}
+
+model Content {
+  deletedAt   DateTime? @map("deleted_at")
+  id          String        @id @default(cuid())
+  type        ContentType   @default(page)
+  title       String
+  slug        String        @unique
+  status      ContentStatus @default(draft)
+  excerpt     String?
+  coverImage  String?       @map("cover_image")
+  // Body is a builder canvas tree, markdown, or html — bodyFormat says which.
+  body        Json          @default("{}")
+  bodyFormat  String        @default("canvas") @map("body_format")
+  // SEO block: { title, description, ogImage, canonical, noindex }.
+  seo         Json          @default("{}")
+  meta        Json          @default("{}")
+  publishedAt DateTime?     @map("published_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  @@index([type, status])
+  @@map("content")
+}
+
+model MediaAsset {
+  id        String   @id @default(cuid())
+  url       String
+  alt       String?
+  kind      String   @default("image") // image | video | file
+  width     Int?
+  height    Int?
+  size      Int?
+  meta      Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("media_assets")
+}
+
+// Nexus (the Connections hub Studio app) — one credential per provider,
+// encrypted at rest (AES-256-GCM, key derived from JWT_SECRET — see
+// connection.service.ts). Only maskedPreview ever round-trips to the
+// browser; credentialEncrypted never leaves this table.
+model Connection {
+  id                  String    @id @default(cuid())
+  provider            String    @unique
+  category            String
+  credentialEncrypted String    @map("credential_encrypted")
+  maskedPreview       String    @map("masked_preview")
+  status              String    @default("connected") // connected | error
+  /**
+   * WHICH connect route this credential came from.
+   * A provider can offer several — Printful takes a key pair this store issues
+   * AND a private token of its own — and the stored string means different
+   * things in each case. Without this the tester has to guess, and testing a
+   * token as if it were a store key reports "failed" for a credential that is
+   * perfectly good.
+   */
+  method              String?   @default("fields")
+  connectedAt         DateTime  @default(now()) @map("connected_at")
+  lastTestedAt        DateTime? @map("last_tested_at")
+  lastTestOk          Boolean?  @map("last_test_ok")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@map("connections")
+}
+
+model ConnectionAuditLog {
+  id       String   @id @default(cuid())
+  provider String
+  action   String // connect | disconnect | test
+  actorId  String?  @map("actor_id")
+  detail   String?
+  at       DateTime @default(now())
+
+  @@index([provider, at])
+  @@map("connection_audit_log")
+}
+
+// Real, generic receiver (POST /api/webhooks/connections/:provider) so the
+// "inbound webhook URL" the Connections page advertises actually logs
+// something. `verified` is real for github/stripe/slack once a webhook
+// secret is configured (see WebhookSecret + src/lib/webhookSignatures.ts)
+// — null means no signature scheme wired for that provider yet, not "failed".
+// A webhook a PARTNER registered on this store — outbound, us -> them.
+//
+// Distinct from WebhookLog/WebhookSecret above, which are INBOUND (a provider
+// calling us, verified with a secret we configured). Nothing here existed, so
+// a connected partner could read the catalogue and never learn an order had
+// happened: Printful's plugin registers exactly this and then waits for us to
+// call it. Fulfilment cannot work without it.
+//
+// Shaped to WooCommerce's /wc/v3/webhooks because that is the API partners
+// already speak — topic is "resource.event" (order.created, order.updated).
+model StoreWebhook {
+  id              String   @id @default(cuid())
+  name            String
+  // "order.created", "order.updated", "product.updated", ...
+  topic           String
+  deliveryUrl     String   @map("delivery_url")
+  // The partner supplies this (or we mint one) and signs nothing without it —
+  // it is how THEY verify the call came from this store. Encrypted at rest for
+  // the same reason store credentials are.
+  secretEncrypted String   @map("secret_encrypted")
+  status          String   @default("active") // active | paused | disabled
+  // Which partner key registered it, so revoking a connection can take its
+  // webhooks with it rather than leaving orphans posting to a dead endpoint.
+  credentialId    String?  @map("credential_id")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  deliveries WebhookDelivery[]
+
+  @@index([topic, status])
+  @@index([credentialId])
+  @@map("store_webhooks")
+}
+
+// One attempt to deliver one event. Kept because "the partner says they never
+// got the order" is otherwise unanswerable.
+model WebhookDelivery {
+  id           String       @id @default(cuid())
+  webhookId    String       @map("webhook_id")
+  webhook      StoreWebhook @relation(fields: [webhookId], references: [id], onDelete: Cascade)
+  topic        String
+  resourceId   String       @map("resource_id")
+  // null until a response arrives; a timeout leaves it null with an error set.
+  responseCode Int?         @map("response_code")
+  error        String?
+  attempt      Int          @default(1)
+  durationMs   Int?         @map("duration_ms")
+  createdAt    DateTime     @default(now()) @map("created_at")
+
+  @@index([webhookId, createdAt])
+  @@index([resourceId])
+  @@map("webhook_deliveries")
+}
+
+// One attempt to send one order's lines to one fulfilment provider.
+//
+// The push-side twin of WebhookDelivery. Both answer the same question from
+// opposite directions: "did the factory ever hear about this order?" Without a
+// record, a paid order that never reached Printful is indistinguishable from
+// one that did — and the customer finds out first.
+model FulfillmentRoute {
+  id         String   @id @default(cuid())
+  orderId    String   @map("order_id")
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider   String
+  lines      Int
+  ok         Boolean
+  // The provider's own order id, so a human can find it on their side.
+  reference  String?
+  error      String?
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  @@index([orderId])
+  @@index([provider, ok])
+  @@map("fulfillment_routes")
+}
+
+// A bank connection a SHOPPER authorised through Plaid.
+//
+// This is consumer financial data, which is a different class of thing from
+// everything else this store holds. Three rules follow from that and are
+// enforced here rather than trusted to callers:
+//
+//   1. The access token is encrypted at rest like any other secret, and is
+//      NEVER sent to a browser — only the store's server ever holds it.
+//   2. Only display-safe fields are stored in the clear: which institution,
+//      the last four digits, the account nickname. Enough to show someone
+//      which account they linked, and nothing that can move money.
+//   3. Unlinking DELETES the row. A "disconnected" flag would leave a live
+//      access token in the database belonging to someone who asked to revoke
+//      it, which is the wrong answer to that request.
+model BankLink {
+  id             String   @id @default(cuid())
+  customerId     String   @map("customer_id")
+  customer       Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // Plaid's identifier for the linked login. Unique so a re-link replaces
+  // rather than duplicates.
+  itemId         String   @unique @map("item_id")
+  accessTokenEncrypted String @map("access_token_encrypted")
+
+  institutionName String? @map("institution_name")
+  institutionId   String? @map("institution_id")
+
+  // Display only. Never enough to originate a transaction.
+  accountMask    String?  @map("account_mask")
+  accountName    String?  @map("account_name")
+  accountType    String?  @map("account_type")
+
+  status         String   @default("active") // active | needs_reauth | revoked
+  linkedAt       DateTime @default(now()) @map("linked_at")
+  lastSyncedAt   DateTime? @map("last_synced_at")
+
+  @@index([customerId])
+  @@map("bank_links")
+}
+
+model WebhookLog {
+  id             String   @id @default(cuid())
+  provider       String
+  event          String?
+  payloadSummary String?  @map("payload_summary") // truncated, not the full raw body indefinitely
+  verified       Boolean?
+  receivedAt     DateTime @default(now()) @map("received_at")
+
+  @@index([provider, receivedAt])
+  @@map("webhook_log")
+}
+
+// This install's own configured signing secret for a provider's webhooks
+// (what the provider's dashboard calls a "signing secret" / "webhook
+// secret") — separate from OAuthAppCredential (authorization, not inbound
+// verification) and from Connection (an outbound-call credential).
+model WebhookSecret {
+  id              String   @id @default(cuid())
+  provider        String   @unique
+  secretEncrypted String   @map("secret_encrypted")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  @@map("webhook_secrets")
+}
+
+// This Therum install's own registered OAuth app with a provider (its
+// client_id/client_secret) — separate from Connection, which stores a
+// per-connection credential (an API key, or an OAuth *access token* once
+// granted). Admin-configured once per provider before "Connect" can start a
+// real authorization-code flow for that provider.
+model OAuthAppCredential {
+  id                    String   @id @default(cuid())
+  provider              String   @unique
+  clientId              String   @map("client_id")
+  clientSecretEncrypted String   @map("client_secret_encrypted")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+
+  @@map("oauth_app_credentials")
+}
+
+// ── Milieus (memberships) ───────────────────────────────────────────
+// Named customer groups — the 2.0 native engine for the "memberships"
+// capability. Semantics ported from the 1.x WP plugin (see
+// docs/superpowers/specs/2026-07-21-milieus-native-design.md): members are
+// Customers here, not WP users, so the 1.x capability-bundle machinery
+// (WP roles) has no 2.0 equivalent and is deliberately absent.
+
+enum MembershipSource {
+  manual
+  link
+  csv
+  api
+}
+
+model Milieu {
+  id                  String    @id @default(cuid())
+  name                String
+  slug                String    @unique
+  color               String    @default("#2563eb")
+  // Percent off at checkout; 0 = no discount. Largest single milieu wins —
+  // no stacking (1.x wc-pricing.php rule, user-confirmed).
+  discountPct         Float     @default(0) @map("discount_pct")
+  // Group lifetime: the milieu itself auto-deletes at this time and its
+  // members drop out. Null = forever (1.x expires_at = 0).
+  expiresAt           DateTime? @map("expires_at")
+  // Default membership duration in days for each new member; 0 = permanent.
+  // (1.x stored {value, unit} — simplified to days-only by design.)
+  memberDurationDays  Int       @default(0) @map("member_duration_days")
+  // Public registration link (M4) — 1.x reg.{enabled, slug, approval,
+  // max_signups, signup_count}; the branding fields (logo/bg/welcome) wait
+  // for a public site to render them on.
+  regEnabled          Boolean   @default(false) @map("reg_enabled")
+  regSlug             String?   @unique @map("reg_slug")
+  regRequiresApproval Boolean   @default(false) @map("reg_requires_approval")
+  // 0 = unlimited.
+  regMaxSignups       Int       @default(0) @map("reg_max_signups")
+  regSignupCount      Int       @default(0) @map("reg_signup_count")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  memberships      MilieuMembership[]
+  // Coupons restricted to this group — see Coupon.milieuId.
+  coupons          Coupon[]
+  productAudiences ProductAudience[]
+
+  @@map("milieus")
+}
+
+// ── Cluster (merged products) ───────────────────────────────────────
+// Symmetric product groups ported from the 1.x plugin (see
+// docs/superpowers/specs/2026-07-22-cluster-native-design.md). The primary
+// member is the customer-facing product; the merged variant view is resolved
+// at read time from live member variants — never copied, so no sync drift.
+
+model ClusterGroup {
+  id               String   @id @default(cuid())
+  name             String
+  // Explicit primary override; null = earliest-created member (2.0 analog of
+  // 1.x's lowest-ID rule). 1.x mirrors this value onto every member's row;
+  // storing it once here is the same semantics with one source of truth.
+  primaryProductId String?  @map("primary_product_id")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  members ClusterMembership[]
+
+  @@map("cluster_groups")
+}
+
+model ClusterMembership {
+  id        String   @id @default(cuid())
+  groupId   String   @map("group_id")
+  // 1.x invariant: a product belongs to at most one group.
+  productId String   @unique @map("product_id")
+  addedAt   DateTime @default(now()) @map("added_at")
+
+  group   ClusterGroup @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  product Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@index([groupId])
+  @@map("cluster_memberships")
+}
+
+model MilieuMembership {
+  id             String           @id @default(cuid())
+  milieuId       String           @map("milieu_id")
+  customerId     String           @map("customer_id")
+  assignedAt     DateTime         @default(now()) @map("assigned_at")
+  // Null = permanent (1.x expires = 0).
+  expiresAt      DateTime?        @map("expires_at")
+  source         MembershipSource @default(manual)
+  // Expiring-soon reminder fires at most once per membership (1.x
+  // _milieus_reminder_sent_ flag).
+  reminderSentAt DateTime?        @map("reminder_sent_at")
+  // Set while awaiting admin approval (1.x approval gate); null = active.
+  // Pending memberships get no discount and are excluded from the sweep's
+  // benefits until approved.
+  pendingAt      DateTime?        @map("pending_at")
+
+  milieu   Milieu   @relation(fields: [milieuId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([milieuId, customerId], name: "milieu_customer")
+  @@index([customerId])
+  @@index([expiresAt])
+  @@map("milieu_memberships")
+}
+
+// ─── Counter: fulfilment ───────────────────────────────────────────────────
+// Ported from Counter 0.45's OrderShipment. An order can have MANY shipments:
+// a multi-vendor or part-POD basket ships in pieces, and Woo's single
+// order-level tracking field is exactly what makes that unrepresentable there.
+// Money in minor units, like everywhere else in this schema.
+model OrderShipment {
+  id                String    @id @default(cuid())
+  orderId           String    @map("order_id")
+  // Null = the store itself fulfils. Set = which vendor/POD partner owns it.
+  vendorId          String?   @map("vendor_id")
+  status            String    @default("pending")
+  // Provider identifiers, filled once a real quote/label exists.
+  shippingProvider  String?   @map("shipping_provider")
+  shippingMethod    String?   @map("shipping_method")
+  podProvider       String?   @map("pod_provider")
+  quoteRef          String?   @map("quote_ref")
+  quotedAt          DateTime? @map("quoted_at")
+  shippingTotal     Int       @default(0) @map("shipping_total")
+  taxTotal          Int       @default(0) @map("tax_total")
+  trackingCarrier   String?   @map("tracking_carrier")
+  trackingNumber    String?   @map("tracking_number")
+  shipAddress       Json      @default("{}") @map("ship_address")
+  shippedAt         DateTime? @map("shipped_at")
+  // What the carrier said when the label was bought. Null until a provider
+  // that returns one fills it in — the tracking page shows the real date or
+  // says it does not have one, rather than inventing a delivery window.
+  estimatedDelivery DateTime? @map("estimated_delivery")
+  deliveredAt       DateTime? @map("delivered_at")
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId])
+  @@index([status])
+  @@map("order_shipments")
+}
+
+// ─── Counter: product reviews ──────────────────────────────────────────────
+// Ported from Counter 0.45's Review model. `verified` is the differentiator
+// Woo needs a plugin for: set only when the reviewer actually bought the
+// product, computed from order history rather than self-declared.
+model ProductReview {
+  id            String   @id @default(cuid())
+  productId     String   @map("product_id")
+  customerId    String?  @map("customer_id")
+  reviewerName  String   @map("reviewer_name")
+  reviewerEmail String   @map("reviewer_email")
+  rating        Int
+  title         String?
+  body          String
+  // pending | approved | spam — moderated by default, because an unmoderated
+  // review form is a spam endpoint.
+  status        String   @default("pending")
+  verified      Boolean  @default(false)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  product  Product   @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([productId, status])
+  @@index([status])
+  @@index([customerId])
+  @@map("product_reviews")
+}
+
+// ─── Counter: customer accounts ────────────────────────────────────────────
+// One customer, MANY ways to prove they are that customer. Someone who buys as
+// a guest, later signs in with Google, and later still adds a phone is one
+// person — not three. Woo ties an account to a single WP user row and makes
+// social login a plugin's problem; this makes identity a first-class list.
+//
+// Guest checkout stays exactly as it is: an order with a guestEmail and no
+// customer. When that email later registers, their history is theirs to claim.
+model CustomerIdentity {
+  id         String    @id @default(cuid())
+  customerId String    @map("customer_id")
+  // password | oauth | phone | email
+  kind       String
+  // For oauth: google/apple/facebook. Null for password/phone/email.
+  provider   String?
+  // The thing that identifies them WITHIN that kind: the provider's stable
+  // user id, an E.164 phone number, or a lowercased email.
+  subject    String
+  // Password hash. Null for every passwordless kind — a null here is not a
+  // blank password, it is "this identity does not use one".
+  secretHash String?   @map("secret_hash")
+  verifiedAt DateTime? @map("verified_at")
+  lastUsedAt DateTime? @map("last_used_at")
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  // One identity per (kind, provider, subject) across the whole store —
+  // two customers cannot both claim the same Google account or phone number.
+  @@unique([kind, provider, subject])
+  @@index([customerId])
+  @@map("customer_identities")
+}
+
+// Short-lived one-time codes for phone and email sign-in.
+// The CODE ITSELF IS NEVER STORED — only a hash, same reasoning as passwords:
+// a leaked database must not hand over live login codes.
+model CustomerAuthCode {
+  id          String    @id @default(cuid())
+  // Phone (E.164) or lowercased email.
+  destination String
+  kind        String
+  codeHash    String    @map("code_hash")
+  expiresAt   DateTime  @map("expires_at")
+  consumedAt  DateTime? @map("consumed_at")
+  attempts    Int       @default(0)
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  @@index([destination, kind])
+  @@index([expiresAt])
+  @@map("customer_auth_codes")
+}
+
+// Storefront sessions, deliberately separate from AdminUser sessions: a
+// customer must never hold a token that the admin API would accept.
+model CustomerSession {
+  id         String   @id @default(cuid())
+  customerId String   @map("customer_id")
+  tokenHash  String   @unique @map("token_hash")
+  expiresAt  DateTime @map("expires_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  lastSeenAt DateTime @default(now()) @map("last_seen_at")
+  userAgent  String?  @map("user_agent")
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([customerId])
+  @@index([expiresAt])
+  @@map("customer_sessions")
+}
+
+// Every privileged action the Server panel ran, successful or not.
+//
+// A failed privileged action is the more interesting row of the two: it is
+// either a misconfiguration or somebody probing what the panel will do. Output
+// is captured scrubbed and truncated at the service layer, never raw.
+model HostActionLog {
+  id         String    @id @default(cuid())
+  actionId   String    @map("action_id")
+  actorId    String?   @map("actor_id")
+  /**
+   * running | ok | failed | interrupted.
+   * The row is written BEFORE the action runs, because several of these
+   * actions kill the process that would otherwise write it afterwards —
+   * `pm2 reload therum-cms-api` restarts the very server handling the request,
+   * and a provider-level restart takes the whole box. Recording only on
+   * completion meant the most disruptive actions were the ones that left no
+   * trace at all.
+   * 'interrupted' is set at boot for any row still 'running': the truthful
+   * answer after a reboot is "this started and we never saw it finish", not a
+   * guess in either direction.
+   */
+  status     String    @default("running")
+  ok         Boolean   @default(false)
+  output     String    @default("")
+  durationMs Int       @default(0) @map("duration_ms")
+  at         DateTime  @default(now())
+  finishedAt DateTime? @map("finished_at")
+
+  @@index([actionId, at])
+  @@index([at])
+  @@index([status])
+  @@map("host_action_log")
+}
+
+// Addresses collected by the coming-soon page.
+//
+// Deliberately its own table rather than a Customer: someone who wants to know
+// when you open has not bought anything, has no account, and must not turn up
+// in customer counts or marketing that assumes a purchase. Promoting one to a
+// Customer is a real decision, made later, on purpose.
+model EmailSignup {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  /**
+   * Where it came from, so a second capture surface stays distinguishable.
+   */
+  source    String   @default("coming-soon")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([createdAt])
+  @@map("email_signups")
+}
+
+/**
+ * Which milieus can see a `visibility = "milieu"` product.
+ */
+model ProductAudience {
+  productId String @map("product_id")
+  milieuId  String @map("milieu_id")
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  milieu  Milieu  @relation(fields: [milieuId], references: [id], onDelete: Cascade)
+
+  @@id([productId, milieuId])
+  @@index([milieuId])
+  @@map("product_audiences")
+}
+
+/**
+ * Which individual customers can see a `visibility = "account"` product.
+ */
+model ProductAccess {
+  productId  String   @map("product_id")
+  customerId String   @map("customer_id")
+  grantedAt  DateTime @default(now()) @map("granted_at")
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@id([productId, customerId])
+  @@index([customerId])
+  @@map("product_access")
+}

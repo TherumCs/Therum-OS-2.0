@@ -1,0 +1,67 @@
+{
+  "name": "@therum/cms-backend",
+  "version": "2.0.0-beta.9",
+  "private": true,
+  "type": "module",
+  "description": "Therum CMS 2.0 — backend API (Fastify + Prisma + PostgreSQL)",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "node --env-file=.env --watch dist/server.js",
+    "dev:tsx": "node --env-file=.env --import tsx --watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "build:watch": "tsc -p tsconfig.json --watch",
+    "start": "node --env-file=.env dist/server.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "db:up": "docker compose up -d",
+    "db:down": "docker compose down",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "prisma:studio": "prisma studio",
+    "seed": "node --env-file=.env dist/seed.js",
+    "mint-jwt": "node --env-file=.env scripts/mint-jwt.mjs",
+    "test": "LOG_LEVEL=fatal node --env-file=.env --test --test-concurrency=1 test/*.test.mjs",
+    "test:ci": "LOG_LEVEL=fatal node --test --test-concurrency=1 test/*.test.mjs",
+    "test:coverage": "LOG_LEVEL=fatal node --test --experimental-test-coverage --test-concurrency=1 test/*.test.mjs",
+    "test:runtime": "node tools/runtime-check.mjs",
+    "test:smoke": "DATABASE_URL=postgresql://smoke:smoke@localhost:5432/smoke REDIS_URL=redis://localhost:6379 JWT_SECRET=smoke-tier-signing-key-not-used-anywhere-real LOG_LEVEL=fatal node --test test/catalog-import.test.mjs test/fulfillment-routing.test.mjs test/shortcodes.test.mjs test/webhook.test.mjs"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1086.0",
+    "@fastify/cors": "^11.3.0",
+    "@fastify/helmet": "^13.1.0",
+    "@fastify/jwt": "^10.2.0",
+    "@fastify/multipart": "^10.1.0",
+    "@fastify/static": "^10.1.0",
+    "@prisma/adapter-pg": "^7.8.0",
+    "@prisma/client": "^7.8.0",
+    "archiver": "^8.0.0",
+    "bullmq": "^5.80.2",
+    "dotenv": "^17.4.2",
+    "exceljs": "^4.4.0",
+    "fastify": "^5.10.0",
+    "ioredis": "^5.4.1",
+    "nodemailer": "^9.0.3",
+    "pdfjs-dist": "^6.2.108",
+    "pg": "^8.22.0",
+    "pino": "^10.3.1",
+    "qrcode": "^1.5.4",
+    "sharp": "^0.35.3",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/archiver": "^8.0.0",
+    "@types/node": "^26.1.1",
+    "@types/nodemailer": "^8.0.1",
+    "@types/pg": "^8.20.0",
+    "@types/qrcode": "^1.5.6",
+    "pino-pretty": "^13.0.0",
+    "prisma": "^7.8.0",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
+  }
+}

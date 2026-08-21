@@ -1,0 +1,491 @@
+import { db } from '../lib/db.js';
+import { connectionService } from '../services/connection.service.js';
+import { slugify } from '../lib/slug.js';
+import { ValidationError } from '../lib/errors.js';
+import { printfulLink } from '../services/printfulLink.service.js';
+
+// Pull a catalog FROM any connected provider.
+//
+// Same model as WooCommerce: products can be authored here, but most arrive
+// from a provider. A provider is a REGISTRY ENTRY — it turns its own API into
+// the normalised shape below and nothing else. Everything after that (matching,
+// upserting, what a re-sync is allowed to overwrite) is shared, so adding a
+// provider is one adapter, not another sync.
+//
+// The first version of this was written against Printful alone, which was the
+// wrong shape: the interesting logic is provider-agnostic and was trapped
+// inside one integration.
+
+/** What every provider must produce, whatever its own API looks like. */
+export interface NormalizedVariant {
+  /** The provider's own id for this variant — the idempotency key. */
+  sourceId: string;
+  sku: string | null;
+  /** Minor units. Providers quote decimals, cents, or strings; adapters convert. */
+  price: number;
+  color: string | null;
+  size: string | null;
+  inventory: number;
+  /** How availability is decided — POD lines are 'in_stock', not a big number. */
+  stockStatus: string;
+  /** This variant's own photo, so picking a colour changes the picture. */
+  image: string | null;
+  /** Every other shot Printful renders for this variant: [{url, alt}]. */
+  images: { url: string; alt: string }[];
+  /** The variant's real colours as hex, from the provider. 2 = two-tone. */
+  colorCodes: string[];
+}
+
+export interface NormalizedProduct {
+  sourceId: string;
+  name: string;
+  image: string | null;
+  variants: NormalizedVariant[];
+}
+
+export interface CatalogProvider {
+  id: string;
+  label: string;
+  /** Throw for auth/transport problems — the caller reports them verbatim. */
+  fetch(credential: string): Promise<NormalizedProduct[]>;
+}
+
+export interface SyncResult {
+  provider: string;
+  created: number;
+  updated: number;
+  variants: number;
+  skipped: { name: string; reason: string }[];
+}
+
+// Print-on-demand has no stock to run out of, so POD lines are imported as
+// 'in_stock' — availability by STATUS, not by counting.
+//
+// This used to import an inventory of 999999 instead. That number showed up in
+// the admin as if it were a real count a merchant could edit, meant nothing,
+// and would have quietly become 999998 on the first sale. See
+// counter/availability.ts.
+const POD_STOCK = 'in_stock';
+const POD_INVENTORY = 0;
+
+async function json<T>(url: string, headers: Record<string, string>, label: string): Promise<T> {
+  const res = await fetch(url, { headers, signal: AbortSignal.timeout(20_000) });
+  const body = (await res.json().catch(() => ({}))) as {
+    result?: T;
+    data?: T;
+    error?: { message?: string } | string;
+  };
+  if (!res.ok) {
+    const err = typeof body.error === 'string' ? body.error : body.error?.message;
+    throw new ValidationError(err ?? `${label} returned ${res.status}`);
+  }
+  return (body.result ?? body.data ?? (body as unknown)) as T;
+}
+
+const money = (v: unknown): number | null => {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) : null;
+};
+
+// ── Printful ──────────────────────────────────────────────────────────────
+// BEARER ONLY. Printful retired Basic API-key auth; its API answers "Basic API
+// token authentication is no longer supported... create a new OAuth 2.0 token".
+// Verified live against a stored legacy key, which 401s.
+const printful: CatalogProvider = {
+  id: 'printful',
+  label: 'Printful',
+  async fetch(credential) {
+    // TWO credentials can drive this, because Printful has two directions and
+    // they are not interchangeable:
+    //
+    //   - a PRIVATE TOKEN (developers.printful.com > Tokens > Create a token),
+    //     which is what pulls the catalogue. Bearer, and the only thing that
+    //     works for reading their API.
+    //   - the consumer key/secret pair in the Nexus card, which is the OTHER
+    //     direction — what Printful uses to log in to THIS store.
+    //
+    // The card holds the second, so pulling with it produces a 401 that reads
+    // like a bad key. The private token is preferred whenever one is stored.
+    const linked = await printfulLink.token();
+    const [cardToken, cardStoreId] = credential.split('|');
+    const token = linked ?? cardToken ?? credential;
+    let storeId = (await printfulLink.storeId()) ?? cardStoreId;
+    // Validate the store id against what this token can actually reach. A stale
+    // or wrong id (carried from a previous account) otherwise 400s every sync
+    // with "Store not found or not accessible" — the exact failure a real token
+    // hit here. If the token has exactly one store, adopt it and remember it;
+    // if it has several and none match, say which ids are valid instead of
+    // failing opaquely.
+    try {
+      const stores = await json<{ id: number | string; name: string }[]>('https://api.printful.com/stores', { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, 'Printful');
+      const list = Array.isArray(stores) ? stores : [];
+      if (list.length && !list.some((s) => String(s.id) === String(storeId))) {
+        const only = list.length === 1 ? list[0] : null;
+        if (only) {
+          storeId = String(only.id);
+          if (linked) await printfulLink.save(token, Number(storeId));
+        } else {
+          const opts = list.map((s) => `${s.name} (id ${s.id})`).join(', ');
+          throw new ValidationError(`Printful store ${storeId ?? '(none)'} isn't accessible by this token. Pick one of: ${opts}, then set it in the Printful connection.`);
+        }
+      }
+    } catch (e) {
+      if (e instanceof ValidationError) throw e;
+      // A transient /stores failure shouldn't block a sync whose id is fine.
+    }
+    const headers: Record<string, string> = {
+      'content-type': 'application/json',
+      authorization: `Bearer ${token}`,
+      // Printful records the integration from this. Matching the plugin's own
+      // format (class-printful-client.php:15,32) keeps this store recognisable
+      // to them as a WooCommerce integration rather than an unknown client.
+      'user-agent': 'Printful WooCommerce Plugin 2.2.12 (WP 6.5 + WC 9.0.0)',
+    };
+    // Accounts with more than one store 400 without this.
+    if (storeId) headers['X-PF-Store-Id'] = String(storeId);
+
+    // `/store/products` is the WRONG endpoint and fails in a way that reads as
+    // an account problem: Printful answers 400 "This API endpoint applies only
+    // to Printful stores based on the Manual Order / API platform." A store
+    // connected to WooCommerce is not that platform, so the products live under
+    // `/sync/products` instead. Both exist, only one works per store type.
+    const summaries = await json<{ id: number; name: string; thumbnail_url?: string }[]>(
+      'https://api.printful.com/sync/products?limit=100',
+      headers,
+      'Printful',
+    );
+    /**
+     * Colour HEX comes from Printful's CATALOG variant, not the sync variant —
+     * `color_code` plus `color_code2` for two-tone. Cached per catalog variant
+     * id because a store re-uses the same blank across products, and this is
+     * one HTTP call per colour otherwise.
+     *
+     * Never inferred from the colour NAME: "Red/Natural" is two colours, and a
+     * name-to-hex guess is wrong in both directions.
+     */
+    const colorCache = new Map<number, string[]>();
+    async function colorsFor(catalogVariantId: number | undefined): Promise<string[]> {
+      if (!catalogVariantId) return [];
+      const hit = colorCache.get(catalogVariantId);
+      if (hit) return hit;
+      const codes = await json<{ variant?: { color_code?: string | null; color_code2?: string | null } }>(
+        `https://api.printful.com/products/variant/${catalogVariantId}`,
+        headers,
+        'Printful',
+      )
+        // ORDER MATTERS, and Printful's is the reverse of its own label.
+        // For "Red/Natural" it returns color_code #f9e9d1 (the natural) and
+        // color_code2 #c70b3c (the red) — so `color_code2` is the FIRST word of
+        // the name. Emitting them in API order paints natural-then-red under a
+        // label reading "Red/Natural", which is the swatch disagreeing with its
+        // own caption. Verified across every two-tone variant in this store.
+        .then((r) => [r.variant?.color_code2, r.variant?.color_code].filter((c): c is string => typeof c === 'string' && /^#[0-9a-f]{3,8}$/i.test(c)))
+        // A missing colour is not a failed sync — the swatch falls back to the
+        // variant's photograph.
+        .catch(() => [] as string[]);
+      colorCache.set(catalogVariantId, codes);
+      return codes;
+    }
+
+    const out: NormalizedProduct[] = [];
+    for (const s of summaries ?? []) {
+      const detail = await json<{
+        sync_product?: { id: number; name: string; thumbnail_url?: string };
+        sync_variants?: {
+          id: number; sku?: string | null; retail_price?: string | null; size?: string | null; color?: string | null;
+          variant_id?: number;
+          files?: { type?: string; preview_url?: string | null }[];
+          product?: { image?: string | null };
+        }[];
+      }>(`https://api.printful.com/sync/products/${s.id}`, headers, 'Printful').catch(() => null);
+      if (!detail) continue;
+      const p = detail.sync_product ?? s;
+
+      /**
+       * Printful's `thumbnail_url` points at the store it was synced FROM —
+       * here `https://<your-old-site>/wp-content/uploads/…`, the old WordPress
+       * install. That path does not exist on this server, so taking it would
+       * import five products whose every image 404s, which looks like a broken
+       * import rather than a wrong image source.
+       *
+       * Printful's own CDN always has the artwork, so prefer it: the variant's
+       * rendered preview first (that is the actual design), then the blank
+       * product shot, and only then the thumbnail — and never a thumbnail
+       * hosted anywhere but Printful.
+       */
+      const firstVariant = detail.sync_variants?.[0];
+      const previewOf = (type: string) =>
+        firstVariant?.files?.find((f) => f.type === type && f.preview_url)?.preview_url ?? null;
+      // 'preview' is the mockup; 'default' is the bare artwork. Prefer the mockup.
+      const cdnThumb = p.thumbnail_url?.includes('files.cdn.printful.com') ? p.thumbnail_url : null;
+
+      out.push({
+        sourceId: String(p.id),
+        name: p.name,
+        image: previewOf('preview') ?? previewOf('default') ?? firstVariant?.product?.image ?? cdnThumb ?? null,
+        variants: await Promise.all((detail.sync_variants ?? [])
+          .map(async (v) => {
+            const price = money(v.retail_price);
+            if (price === null) return null;
+            /**
+             * PER-COLOUR image. The distinction matters and is easy to get
+             * wrong: `files` holds one entry per PLACEMENT — default, back,
+             * left, right — and those are the DESIGN ARTWORK, byte-identical
+             * across every colourway. Taking files[0] gave all 17 variants of
+             * this store just 5 distinct pictures between them, so picking a
+             * colour changed nothing.
+             *
+             * The `preview` entry is the generated MOCKUP: the design rendered
+             * on that specific colour, and genuinely different per variant
+             * (verified: 4 colours -> 4 distinct preview URLs). `product.image`
+             * is the blank garment in that colour — also per-colour, and the
+             * right fallback when no mockup has been generated.
+             */
+            const preview = (v.files ?? []).find((f) => f.type === 'preview' && f.preview_url)?.preview_url ?? null;
+            const blank = v.product?.image ?? null;
+            const image = preview ?? blank ?? (v.files ?? []).find((f) => f.preview_url)?.preview_url ?? null;
+            // The blank shot is worth keeping as a second angle, but only when
+            // it is not already the main image.
+            const shots = blank && blank !== image ? [{ url: blank, alt: `${v.color ?? ''}`.trim() }] : [];
+            return {
+              sourceId: String(v.id),
+              sku: v.sku ?? null,
+              price,
+              color: v.color ?? null,
+              size: v.size ?? null,
+              inventory: POD_INVENTORY,
+              stockStatus: POD_STOCK,
+              image,
+              images: shots,
+              colorCodes: await colorsFor(v.variant_id),
+            };
+          }))
+          .then((vs) => vs.filter((v): v is NormalizedVariant => v !== null)),
+      });
+    }
+    return out;
+  },
+};
+
+// ── Printify ──────────────────────────────────────────────────────────────
+// Prices are ALREADY in minor units here, unlike Printful's decimal strings —
+// the exact kind of per-provider detail an adapter exists to absorb.
+const printify: CatalogProvider = {
+  id: 'printify',
+  label: 'Printify',
+  async fetch(credential) {
+    const [token, explicitShopId] = credential.split('|');
+    const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+    // Resolve the shop id from the token when it wasn't pasted — Printify's
+    // token can enumerate its own shops, exactly as Printful auto-resolves its
+    // store id (printfulLink.storeId). Making the operator hand-copy a numeric
+    // shop id was the whole reason "Printify sync" looked dead: a valid token
+    // with no id 422'd before it ever called the API.
+    let shopId = explicitShopId;
+    if (!shopId) {
+      const shops = await json<{ id: number | string; title?: string }[]>(
+        'https://api.printify.com/v1/shops.json',
+        headers,
+        'Printify',
+      );
+      const first = Array.isArray(shops) ? shops[0] : null;
+      if (!first?.id) {
+        throw new ValidationError('That Printify token has no shops — create a shop in Printify, then sync again.');
+      }
+      shopId = String(first.id);
+    }
+    // Printify returns products 50-per-page inside a `{ data, last_page, … }`
+    // envelope. The shared json() helper already unwraps `.data` to the array —
+    // which also throws away `last_page`, so page COUNT is invisible here. Walk
+    // pages until one comes back short of a full 50 (a full page means another
+    // may follow). Without this the sync stopped at the first 50 and a 75-item
+    // shop silently lost 25 — the missing products all sat on page 2.
+    type PfyProduct = { id: number | string; title: string; images?: { src: string }[]; external?: { id?: string } | null; variants?: { id: number; sku?: string | null; price?: number; title?: string; is_enabled?: boolean }[] };
+    const PAGE = 50;
+    const all: PfyProduct[] = [];
+    for (let pageNum = 1; pageNum <= 20; pageNum += 1) {
+      // 20-page ceiling (1000 products) is a runaway stop, not an expected limit.
+      const batch = await json<PfyProduct[]>(
+        `https://api.printify.com/v1/shops/${encodeURIComponent(shopId)}/products.json?limit=${PAGE}&page=${pageNum}`,
+        headers,
+        'Printify',
+      );
+      const arr = Array.isArray(batch) ? batch : [];
+      all.push(...arr);
+      if (arr.length < PAGE) break; // short page = last page
+    }
+    // PUBLISHED ONLY. Printify's `external` is set once a product is published
+    // to this store (external.handle is the store URL); a draft has
+    // `external: null`. Without this filter the sync pulled every draft and the
+    // upsert marked it status:'active', so unpublished Printify products went
+    // live on the storefront — which is exactly how a draft ended up public.
+    return all.filter((p) => p.external && p.external.id).map((p) => ({
+      sourceId: String(p.id),
+      name: p.title,
+      image: p.images?.[0]?.src ?? null,
+      variants: (p.variants ?? [])
+        .filter((v) => v.is_enabled !== false)
+        .map((v) => ({
+          sourceId: String(v.id),
+          sku: v.sku ?? null,
+          price: typeof v.price === 'number' ? v.price : 0,
+          // Printify puts the option combination in the variant title.
+          color: null,
+          size: v.title ?? null,
+          inventory: POD_INVENTORY,
+          stockStatus: POD_STOCK,
+          image: null,
+          images: [],
+          colorCodes: [],
+        }))
+        .filter((v) => v.price > 0),
+    }));
+  },
+};
+
+/** Add a provider here and it appears in the admin automatically. */
+export const CATALOG_PROVIDERS: CatalogProvider[] = [printful, printify];
+
+export const catalogSyncService = {
+  /** Every provider that can sync, and whether its credential exists. */
+  async providers(): Promise<{ id: string; label: string; connected: boolean }[]> {
+    return Promise.all(
+      CATALOG_PROVIDERS.map(async (p) => ({
+        id: p.id,
+        label: p.label,
+        connected: (await connectionService.credentialFor(p.id)) !== null,
+      })),
+    );
+  },
+
+  /**
+   * Pull one provider's catalog and upsert it.
+   *
+   * Matching is on the provider's own ids, so re-running is safe — that is the
+   * whole point of a sync. A re-sync updates name, image, price and stock ONLY:
+   * description, categories, tags and status are edited here, and overwriting
+   * them would punish anyone who improved a product page.
+   */
+  async run(providerId: string): Promise<SyncResult> {
+    const provider = CATALOG_PROVIDERS.find((p) => p.id === providerId);
+    if (!provider) {
+      throw new ValidationError(`Unknown catalog provider "${providerId}". Available: ${CATALOG_PROVIDERS.map((p) => p.id).join(', ')}.`);
+    }
+    const credential = await connectionService.credentialFor(provider.id);
+    if (!credential) throw new ValidationError(`${provider.label} is not connected. Add it in Connections first.`);
+
+    const products = await provider.fetch(credential);
+    const result: SyncResult = { provider: provider.id, created: 0, updated: 0, variants: 0, skipped: [] };
+
+    for (const p of products) {
+      if (p.variants.length === 0) {
+        // Almost always a product with no retail price set at the provider.
+        // Named with a reason rather than created at zero: a catalog quietly
+        // full of free items is worse than a short list of what did not come.
+        result.skipped.push({ name: p.name, reason: `no variant has a usable price in ${provider.label}` });
+        continue;
+      }
+
+      const existing = await db.product.findFirst({ where: { sourceId: p.sourceId, vendorId: null }, select: { id: true } });
+      if (existing) {
+        await db.product.update({
+          where: { id: existing.id },
+          data: {
+            name: p.name,
+            ...(p.image ? { image: p.image } : {}),
+            // WHICH fulfilment provider prints this. Without it an order line
+            // knows a provider's variant id but not whose it is, so nothing can
+            // route the order. Re-set on every sync, so products created before
+            // this existed heal themselves on the next run.
+            //
+            // NOT sourceVendorId — that is a foreign key to the marketplace
+            // `vendors` table, and writing a provider name into it fails with a
+            // constraint violation.
+            fulfillmentProvider: provider.id,
+          },
+        });
+        for (const v of p.variants) {
+          const found = await db.productVariant.findFirst({
+            where: { productId: existing.id, sourceId: v.sourceId },
+            select: { id: true, stockStatus: true, inventory: true, image: true },
+          });
+          if (found) {
+            // Images and price are the provider's to own. `inventory` is NOT
+            // overwritten when the merchant has taken the variant off the
+            // provider's stock model — re-syncing must not undo a deliberate
+            // "only 3 of these" or an out-of-stock switch.
+            // 999999 is the old print-on-demand sentinel. Rows carrying it were
+            // never a merchant's real count, so a re-sync moves them onto the
+            // status model rather than leaving a fake number in the admin.
+            const legacySentinel = found.stockStatus === 'tracked' && found.inventory === 999_999;
+            // Provider stock is adopted while the merchant has not overridden
+            // it. Once they set their own status or count, re-syncing leaves it
+            // alone — undoing a deliberate "only 3 of these" would be worse
+            // than a stale number.
+            const providerOwnsStock = legacySentinel || found.stockStatus === v.stockStatus;
+            await db.productVariant.update({
+              where: { id: found.id },
+              data: {
+                price: v.price,
+                // Images are set ONLY when the variant has none.
+                //
+                // The provider's single rendered preview must not overwrite the
+                // photographs the merchant actually chose. Printful pushes the
+                // mockups it was told to publish INTO the store rather than
+                // exposing them for pulling, so those sets are richer than
+                // anything a re-sync can fetch — clobbering them would silently
+                // undo the whole gallery on the next sync.
+                ...(v.image && !found.image ? { image: v.image, images: v.images } : {}),
+                ...(v.colorCodes.length ? { colorCodes: v.colorCodes } : {}),
+                ...(providerOwnsStock ? { stockStatus: v.stockStatus, inventory: v.inventory } : {}),
+              },
+            });
+          } else {
+            await db.productVariant.create({ data: { ...v, productId: existing.id } });
+          }
+          result.variants++;
+        }
+        result.updated++;
+      } else {
+        await db.product.create({
+          data: {
+            name: p.name,
+            slug: `${slugify(p.name)}-${p.sourceId}`,
+            status: 'active',
+            sourceId: p.sourceId,
+            fulfillmentProvider: provider.id,
+            ...(p.image ? { image: p.image } : {}),
+            variants: { create: p.variants },
+          },
+        });
+        result.variants += p.variants.length;
+        result.created++;
+      }
+    }
+
+    /**
+     * Fill in the photography Printful will not hand over.
+     *
+     * Its sync API returns ONE rendered preview per variant — the selected
+     * mockups are pushed to a connected store, never exposed for pulling — so
+     * without this a newly synced colourway arrives with a single angle. The
+     * generator renders the rest from the same artwork.
+     *
+     * Deliberately best-effort: mockup generation is slow and rate-limited, and
+     * a catalogue sync that fails because a picture did not render would be a
+     * worse trade than a product that starts with one image and gains the rest
+     * on the next run. Only variants with NO image are touched.
+     */
+    if (provider.id === 'printful') {
+      try {
+        const { printfulMockups } = await import('./printfulMockups.js');
+        for (const p of await printfulMockups.productsNeedingMockups()) {
+          await printfulMockups.generate(p.id, { onlyMissing: true });
+        }
+      } catch {
+        // Reported by the next run's missing-count rather than failing this one.
+      }
+    }
+    return result;
+  },
+};

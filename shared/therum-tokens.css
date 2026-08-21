@@ -1,0 +1,561 @@
+/* Therum design tokens — single source of truth for admin + builder (@import'd
+   by both).
+
+   THE REAL 1.9.44 VARIABLES (below, unprefixed) are copied directly from the
+   canonical repo (github.com/TherumCs/Therum-Os-Unlocked)'s
+   mu-plugins/assets/therum-shell.css :root block — same names, same values,
+   no reinterpretation. Treat this block as raw input only: it exists so the
+   --th-* semantic layer below has real, sourced values to alias onto, not
+   because component code should ever reference it directly.
+
+   ALL COMPONENT CSS — shell/chrome included — reads --th-* and nothing else.
+   (An earlier version of this file told new shell code to use --ac/--sf/--tx
+   etc. directly; a 2026-07-07 design-system audit found ~90 places in
+   globals.css that had done exactly that, which is precisely what breaks a
+   second theme: overriding --th-accent alone wouldn't touch any of them,
+   since --th-accent only ever aliased --ac, never the other direction. A
+   theme swap has to mean "replace the values inside the real-1.9.44 block
+   below, done" — anything reaching past --th-* for its values defeats that.)
+
+   Sourced from therum-themes.php's default_state() ('studio' palette, the
+   real shipped default) — not a screenshot of a personally customized
+   install (explicitly out of scope as a design reference). */
+:root {
+  --ac: #e83b3b;
+  --ac-h: #c92e2e;
+  --ac-s: rgba(232, 59, 59, 0.08);
+  /* Buttons are blue on the real 1.9.44, independent of --ac (which stays
+     red for brand-accent spots — logo, avatar, active nav). Sourced from
+     theme-00's registered accent/accentHover, the only confirmed blue in
+     the codebase. */
+  --ac-btn: #3858e9;
+  --ac-btn-h: #2e45c5;
+  --sf: #ffffff;
+  --sf2: #f5f5f5;
+  --bd: rgba(0, 0, 0, 0.08);
+  --bd2: rgba(0, 0, 0, 0.16);
+  --bg: #fafafa;
+  --tx: #0a0a0a;
+  --tx2: #666666;
+  --tx3: #999999;
+  --ok: #10b981;
+  --wrn: #f59e0b;
+  --err: #ef4444;
+  --f: -apple-system, BlinkMacSystemFont, 'Inter', 'Helvetica Neue', Arial, sans-serif;
+  --e: 0.15s ease;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-pill: 999px;
+  --row-pad: 16px;
+  --nav-pad-y: 10px;
+  --nav-pad-x: 20px;
+  --sidebar-w: 256px;
+  --topbar-h: 72px;
+
+  /* Sidebar is a dark rail against the light main canvas — confirmed
+     against a live 1.9.44 install, not the base stylesheet's own
+     fallback (which reads --bg/--sf and would be light if --sb-bg were
+     unset). Values match theme-00's documented dark-sidebar spec, the
+     closest sourced values available for this exact look.
+
+     Dark mode INVERTS this pair rather than darkening both halves: a light
+     rail against a dark canvas. See the dark block below. */
+  --sb-bg: #16181e;
+  --sb-tx: #c7ccd6;
+  --sb-tx2: rgba(255, 255, 255, 0.68);
+  --sb-tx3: rgba(255, 255, 255, 0.42);
+  --sb-bd: rgba(255, 255, 255, 0.08);
+  --sb-active-bg: rgba(255, 255, 255, 0.07);
+
+  /* Raised fills ON the sidebar (search box, hover, small buttons). These
+     were 13 hardcoded rgba(255,255,255,x) values in globals.css, which is
+     white-on-dark by assumption — every one of them turned invisible the
+     moment the rail became light. Naming the role instead of the colour is
+     what lets the rail flip. */
+  --sb-wash-1: rgba(255, 255, 255, 0.04);
+  --sb-wash-2: rgba(255, 255, 255, 0.06);
+  --sb-wash-3: rgba(255, 255, 255, 0.09);
+  --sb-wash-4: rgba(255, 255, 255, 0.12);
+
+  /* ---- --th-* aliases onto the real values above ---- */
+  /* The accent before Accent-intensity is applied. Intensity has to derive
+     the final accent FROM something, and deriving it from --th-accent itself
+     is a self-referential custom property — a cycle, which makes --th-accent
+     compute to the guaranteed-invalid value (empty) on every element under
+     the shell. That poisoned every color-mix() built on it: background
+     patterns computed to `none`, accent gradients vanished. A separate base
+     breaks the cycle. Custom accents are written here (see
+     appearanceInlineVars) so intensity still applies to them. */
+  --th-accent-base: var(--ac);
+  --th-accent: var(--th-accent-base);
+  --th-accent-hover: var(--ac-h);
+  --th-accent-tint: var(--ac-s);
+  --th-accent-border: rgba(232, 59, 59, 0.24);
+  /* Accent used as TEXT, as opposed to as a fill. Identical to --th-accent in
+     light mode; dark mode lightens it, because the brand red reads at 3.6:1
+     on a dark card — below AA — while still being the right colour for a
+     filled button. Replaces --th-accent-on-dark, which named this exact idea
+     but was never referenced by a single rule. */
+  --th-accent-text: var(--ac);
+  /* Buttons are blue independent of --ac (see the real-values block above) —
+     component CSS needs its own semantic name for that, not a reason to
+     reach for --ac-btn directly. */
+  --th-accent-btn: var(--ac-btn);
+  --th-accent-btn-hover: var(--ac-btn-h);
+  /* Sidebar is the dark rail (--sb-*), NOT the light page surface (--bg/--bd/
+     --tx) — these five aliased the wrong source variables before the
+     2026-07-07 audit (silently correct only because nothing actually
+     consumed them; every real sidebar rule reached past them for --sb-* raw,
+     which is the exact bypass the header comment above now forbids). */
+  --th-sidebar-bg: var(--sb-bg);
+  --th-sidebar-line: var(--sb-bd);
+  --th-sidebar-ink: var(--sb-tx);
+  --th-sidebar-ink-2: var(--sb-tx2);
+  --th-sidebar-ink-3: var(--sb-tx3);
+  --th-sidebar-active-bg: var(--sb-active-bg);
+  --th-sidebar-wash-1: var(--sb-wash-1);
+  --th-sidebar-wash-2: var(--sb-wash-2);
+  --th-sidebar-wash-3: var(--sb-wash-3);
+  --th-sidebar-wash-4: var(--sb-wash-4);
+  --th-ink: var(--tx);            /* text / primary */
+  --th-ink-2: var(--tx2);         /* text-2 */
+  --th-muted: var(--tx3);         /* text-3 */
+  --th-line: var(--bd);           /* border */
+  --th-line-2: var(--bd2);
+  --th-bg: var(--bg);             /* surface-2, used as app/page background */
+  --th-surface: var(--sf);
+  --th-surface-2: var(--sf2);
+  /* Text/icon color for anything sitting on a filled, saturated surface —
+     an accent button, an active pill, a dock icon — regardless of which
+     saturated color that surface is (accent red, accent-btn blue, near-black
+     ink all qualify). A 2026-07-07 audit found 14 literal #fff for exactly
+     this role scattered across globals.css with no shared name. */
+  --th-text-inverse: #fff;
+  /* A stable, always-dark neutral fill for "selected/active" chips and
+     buttons (list-view toggle, active filter pill, the card grid's Edit
+     link) — deliberately NOT --th-ink. --th-ink correctly flips light<->dark
+     for its real job (body text needs to invert against the page background)
+     but these 3 sites were borrowing it as a *fill* color, which broke the
+     instant dark mode flipped --th-ink to near-white: white text on a
+     near-white pill, confirmed live via computed styles
+     (rgb(241,245,249) bg / rgb(255,255,255) text — unreadable). References
+     the raw --tx primitive directly (never touched by any color-mode or
+     contrast override in this file) so it just stays dark in every mode
+     without needing its own override block. */
+  --th-emphasis-bg: var(--tx);
+
+  /* semantic status — 1.9.44's --ok/--wrn/--err */
+  --th-success-bg: #dcfce7;
+  --th-success-text: var(--ok);
+  --th-warning-bg: #fef3c7;
+  --th-warning-text: var(--wrn);
+  --th-danger-bg: #fee2e2;
+  --th-danger-text: var(--err);
+  /* Status colour used as TEXT ON its own pastel chip, as opposed to as a
+     saturated dot fill (which is what --th-*-text stays for). The pill rules
+     used --th-*-text on --th-*-bg, which measured 1.93:1 for pending and
+     2.31:1 for active — the label was the least readable thing on the row.
+     Splitting the two roles is what lets the chip darken without turning
+     every status dot muddy. */
+  --th-success-ink: #065f46;
+  --th-warning-ink: #92400e;
+  --th-danger-ink: #991b1b;
+
+  /* type — display: Inter Tight, body: system stack, mono: JetBrains Mono */
+  --th-font-display: 'Inter Tight', -apple-system, BlinkMacSystemFont, sans-serif;
+  --th-font-body: var(--f);
+  --th-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+
+  /* type scale — real sizes: xs/sm/md/lg/xl/xxl = 12/14/16/20/28/40 */
+  --th-fs-2xs: 11px;   /* dense table meta — below the real scale's floor, kept for density */
+  --th-fs-xs: 12px;
+  --th-fs-sm: 14px;
+  --th-fs-md: 16px;
+  --th-fs-lg: 20px;
+  --th-fs-xl: 28px;
+  --th-fs-2xl: 40px;
+
+  /* Spacing scale — named by literal px value, not a sequential index, so a
+     value is legible at the call site without cross-referencing this file.
+     The original 8-step scale (4/8/12/16/24/32/48/64) had zero real
+     consumers as of the 2026-07-07 audit — component CSS across globals.css
+     + styles.css had drifted to 26 distinct ad hoc values instead (10px
+     alone appeared 38 times, more than any single value in the old scale).
+     This scale replaces it outright with the steps that audit's real
+     frequency data actually showed in use, filling the gaps in the original
+     4/8/12/16/24/32/48/64 spine rather than inventing new numbers.
+
+     Deliberately reused for width/height (icon/dot/avatar sizing), not a
+     separate --th-size-* axis — the same "how many px" rhythm applies to
+     both roles, and a parallel scale with identical numbers under different
+     names would just be redundant naming. NOT applied to every width/height
+     in the codebase, though: form-control content widths, modal/window
+     max/min-width, and anything inside an @media condition (CSS can't
+     reference a custom property there at all) are left as their own
+     contextual literals — those aren't a repeatable "pick a size" decision
+     the way an icon or a status dot is. Geometrically-interlocking values
+     (the toggle switch's track/thumb math, see its own comment below) are
+     also left alone on purpose — rounding one number there desyncs the
+     other three. */
+  --th-space-2: 2px;
+  --th-space-4: 4px;
+  --th-space-6: 6px;
+  --th-space-8: 8px;
+  --th-space-10: 10px;
+  --th-space-12: 12px;
+  --th-space-14: 14px;
+  --th-space-16: 16px;
+  --th-space-20: 20px;
+  --th-space-24: 24px;
+  --th-space-28: 28px;
+  --th-space-32: 32px;
+  --th-space-40: 40px;
+  --th-space-48: 48px;
+  --th-space-64: 64px;
+  --th-space-80: 80px;
+
+  /* radius — real values are --radius-sm/md/lg/pill (6/10/14/999) above;
+     these --th-r-* names predate that and are kept for existing callers
+     rather than renamed everywhere at once. */
+  --th-r-sm: var(--radius-sm);
+  --th-r: var(--radius-md);
+  --th-r-lg: var(--radius-lg);
+  --th-r-pill: var(--radius-pill);
+
+  --th-transition: var(--e);
+
+  --th-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04);
+  --th-shadow-md: 0 4px 12px rgba(0, 0, 0, 0.06);
+  --th-shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.1);
+
+  /* shell layout constants — real names are --sidebar-w/--topbar-h above */
+  --th-sidebar-w: var(--sidebar-w);
+  --th-topbar-h: var(--topbar-h);
+}
+
+/* High-contrast option. */
+[data-contrast='high'] {
+  --th-ink: #000000;
+  --th-accent: #b91c1c;
+  --th-accent-hover: #7f1d1d;
+  --th-muted: #3f3f3f;
+  --th-line: #94a3b8;
+}
+
+/* Density — 3 presets scaling the row/control padding scale used throughout
+   the admin chrome (sidebar nav rows, table cells, card padding). 'comfortable'
+   is the existing baseline (unchanged values); compact/breathing are real,
+   distinct scales, not a cosmetic tweak of one value. */
+:root, [data-density='comfortable'] {
+  --th-density-row-y: 8px;
+  --th-density-row-x: 10px;
+  --th-density-card-pad: 16px;
+  --th-density-table-pad: 11px 14px;
+}
+[data-density='compact'] {
+  --th-density-row-y: 5px;
+  --th-density-row-x: 8px;
+  --th-density-card-pad: 11px;
+  --th-density-table-pad: 7px 10px;
+}
+[data-density='breathing'] {
+  --th-density-row-y: 12px;
+  --th-density-row-x: 14px;
+  --th-density-card-pad: 22px;
+  --th-density-table-pad: 15px 18px;
+}
+
+/* Card style — flat/shadow. 'shadow' matches the existing baseline
+   (--th-shadow-sm, opaque surface); flat is the real alternative. Glass was
+   removed 2026-07-30 and belongs to the theme store. */
+:root, [data-card-style='shadow'] {
+  --th-card-shadow: var(--th-shadow-sm);
+  --th-card-bg: var(--th-surface);
+  --th-card-border: transparent;
+  --th-card-backdrop: none;
+}
+[data-card-style='flat'] {
+  --th-card-shadow: none;
+  --th-card-bg: var(--th-surface);
+  --th-card-border: 1px solid var(--th-line);
+  --th-card-backdrop: none;
+}
+
+/* Color mode — dark is a real alternate palette (not just an inverted
+   filter), scoped to the authenticated app shell only; the login screen has
+   its own independent, already-designed branding and isn't affected. */
+/* ALSO matched when the attribute is on a DESCENDANT.
+   CSS custom properties inherit downward, and the admin sets data-color-mode
+   on #th-shell — which is <body>'s child. So <body> kept the LIGHT --th-bg and
+   painted a pale frame around dark content: the page read as half-themed, a
+   light shell with a dark middle. Selecting the ancestor too hands the same
+   tokens to <html> and <body>, so the whole document flips together. */
+html:has([data-color-mode='dark']),
+body:has([data-color-mode='dark']),
+[data-color-mode='dark'] {
+  --th-ink: #f1f5f9;
+  --th-ink-2: #cbd5e1;
+  --th-muted: #94a3b8;
+  --th-line: #334155;
+  --th-bg: #0f172a;
+  --th-surface: #1e293b;
+  --th-surface-2: #243447;
+  --th-card-bg: #1e293b;
+  --th-accent: #e83b3b;
+  --th-accent-hover: #c92e2e;
+  --th-accent-tint: rgba(232, 59, 59, 0.18);
+  --th-accent-border: rgba(232, 59, 59, 0.32);
+  --th-accent-text: #ff8585;
+
+  /* Status pills kept their light-mode pastels here — #dcfce7 behind #10b981
+     measured 2.31:1 on a dark page, and the pending pill 1.93:1. Tinted
+     fills with light text instead. */
+  --th-success-bg: rgba(16, 185, 129, 0.18);
+  --th-success-text: #6ee7b7;
+  --th-warning-bg: rgba(245, 158, 11, 0.18);
+  --th-warning-text: #fcd34d;
+  --th-danger-bg: rgba(239, 68, 68, 0.18);
+  --th-danger-text: #fca5a5;
+  --th-success-ink: #6ee7b7;
+  --th-warning-ink: #fcd34d;
+  --th-danger-ink: #fca5a5;
+
+  /* THE RAIL INVERTS. Dark mode is the inverse of light, not light with the
+     brightness turned down: light mode is a dark rail on a light canvas, so
+     dark mode is a light rail on a dark canvas. Before this, the dark block
+     never touched --sb-*, so the rail stayed #16181e in both modes and
+     switching to dark only changed the middle of the screen.
+
+     Overriding the --sb-* primitives rather than the --th-sidebar-* aliases
+     is deliberate: the sidebar rules in globals.css reach for the raw
+     primitives in places, so setting the aliases alone would leave those
+     rules on the light-mode value. */
+  --sb-bg: #eef0f4;
+  --sb-tx: #1e293b;
+  --sb-tx2: rgba(15, 23, 42, 0.72);
+  --sb-tx3: rgba(15, 23, 42, 0.5);
+  --sb-bd: rgba(15, 23, 42, 0.1);
+  --sb-active-bg: rgba(15, 23, 42, 0.08);
+  --sb-wash-1: rgba(15, 23, 42, 0.04);
+  --sb-wash-2: rgba(15, 23, 42, 0.06);
+  --sb-wash-3: rgba(15, 23, 42, 0.09);
+  --sb-wash-4: rgba(15, 23, 42, 0.12);
+}
+/* 'system' isn't its own palette — it's "dark, only if the OS prefers dark."
+   Without this block it would silently render as light regardless of the
+   OS setting, which isn't what "system" means. */
+@media (prefers-color-scheme: dark) {
+  [data-color-mode='system'] {
+    --th-ink: #f1f5f9;
+    --th-ink-2: #cbd5e1;
+    --th-muted: #94a3b8;
+    --th-line: #334155;
+    --th-bg: #0f172a;
+    --th-surface: #1e293b;
+    --th-surface-2: #243447;
+    --th-card-bg: #1e293b;
+    /* Same accent as the explicit-dark block above. These were #5b7cfa
+       (blue) here and #e83b3b (red) there, so "Dark" and "Match system on a
+       dark Mac" rendered as two different themes. */
+    --th-accent: #e83b3b;
+    --th-accent-hover: #c92e2e;
+    --th-accent-tint: rgba(232, 59, 59, 0.18);
+    --th-accent-border: rgba(232, 59, 59, 0.32);
+    --th-accent-text: #ff8585;
+
+    --th-success-bg: rgba(16, 185, 129, 0.18);
+    --th-success-text: #6ee7b7;
+    --th-warning-bg: rgba(245, 158, 11, 0.18);
+    --th-warning-text: #fcd34d;
+    --th-danger-bg: rgba(239, 68, 68, 0.18);
+    --th-danger-text: #fca5a5;
+    --th-success-ink: #6ee7b7;
+    --th-warning-ink: #fcd34d;
+    --th-danger-ink: #fca5a5;
+
+    /* The rail inverts here too — see the explicit-dark block. */
+    --sb-bg: #eef0f4;
+    --sb-tx: #1e293b;
+    --sb-tx2: rgba(15, 23, 42, 0.72);
+    --sb-tx3: rgba(15, 23, 42, 0.5);
+    --sb-bd: rgba(15, 23, 42, 0.1);
+    --sb-active-bg: rgba(15, 23, 42, 0.08);
+    --sb-wash-1: rgba(15, 23, 42, 0.04);
+    --sb-wash-2: rgba(15, 23, 42, 0.06);
+    --sb-wash-3: rgba(15, 23, 42, 0.09);
+    --sb-wash-4: rgba(15, 23, 42, 0.12);
+  }
+}
+
+*:focus-visible {
+  outline: 2px solid var(--th-accent);
+  outline-offset: 2px;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   Quick Controls (feature-inventory section 05, "Chrome & Customization
+   Studio" minus the Themes/preset-shelf half — see CHANGELOG). Two kinds of
+   override here:
+   1. Where a shared primitive already exists (radius, shadow, transition,
+      type scale) these override THAT primitive directly, so every existing
+      consumer picks it up automatically with zero changes elsewhere — the
+      same trick the 2026-07-07 design-system pass documented for dark mode.
+   2. Genuinely new concepts get a new token here + a real consuming rule,
+      either right below or in globals.css where the selector is component-
+      specific (dashboard grid gap, hover-lift amount).
+   ════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Appearance > Intensity — scales the accent tint/border alpha used by
+     active-state chips, focus glows, etc. Precomputed per tier rather than
+     a color-mix()/calc()-on-alpha formula (broader browser-support margin,
+     and simpler to reason about) — matches --ac's own hue; a custom accent
+     color picked above will still tint correctly since --th-accent-tint's
+     hue always follows --th-accent, only the alpha tier changes here.
+  */
+  --th-accent-tint: rgba(232, 59, 59, 0.08);
+  --th-accent-border: rgba(232, 59, 59, 0.24);
+
+  /* Layout — content-max-width defaults to none (uncapped), matching every
+     page's actual current rendering exactly; the constrained tiers below
+     are the opt-in, not the other way, so shipping this can't silently
+     shrink existing pages the moment the migration runs. */
+  --th-content-max-width: none;
+  --th-card-grid-gap: var(--th-space-16);
+
+  /* Surfaces — two independent background layers composed by #th-shell:
+     the wash (Background) and the texture (Background pattern). */
+  --th-app-bg-image: none;
+  --th-app-bg-size: auto;
+  --th-bg-pattern: none;
+  --th-bg-pattern-size: auto;
+
+  /* Typography */
+  --th-letter-spacing: normal;
+  --th-line-height: 1.6;
+
+  /* Motion */
+  --th-hover-lift: -2px;
+
+  /* Content defaults */
+  --th-card-meta-pad: var(--th-space-16);
+}
+
+[data-intensity='subtle'] { --th-accent-tint: rgba(232, 59, 59, 0.04); --th-accent-border: rgba(232, 59, 59, 0.14); }
+[data-intensity='vivid']  { --th-accent-tint: rgba(232, 59, 59, 0.16); --th-accent-border: rgba(232, 59, 59, 0.4); }
+
+/* Shapes > Corner radius — overrides the REAL primitives (--radius-sm/md/lg
+   above), not the --th-r-* aliases, so every existing consumer of either
+   name picks this up with no changes elsewhere. */
+[data-corner-radius='sharp'] { --radius-sm: 2px; --radius-md: 4px; --radius-lg: 6px; }
+[data-corner-radius='round'] { --radius-sm: 10px; --radius-md: 16px; --radius-lg: 22px; }
+
+/* Shapes > Border weight — new primitive; see globals.css for the
+   representative selectors (card/input/button borders) that consume it.
+   Not swept across every 1px border in the app (same "below the spacing
+   scale floor, left as literal" reasoning as the earlier design-system
+   pass) — the visible, high-traffic controls/surfaces are real, not every
+   hairline divider. */
+:root { --th-border-width: 1px; }
+[data-border-weight='thin']  { --th-border-width: 0.5px; }
+[data-border-weight='thick'] { --th-border-width: 2px; }
+
+/* Typography > Base size — overrides the real type-scale primitives, same
+   "flip the primitive" trick as corner radius above. */
+[data-base-size='sm'] {
+  --th-fs-2xs: 10px; --th-fs-xs: 11px; --th-fs-sm: 13px; --th-fs-md: 15px; --th-fs-lg: 18px; --th-fs-xl: 25px; --th-fs-2xl: 36px;
+}
+[data-base-size='lg'] {
+  --th-fs-2xs: 12px; --th-fs-xs: 13px; --th-fs-sm: 15px; --th-fs-md: 17px; --th-fs-lg: 22px; --th-fs-xl: 31px; --th-fs-2xl: 44px;
+}
+
+[data-letter-spacing='tight'] { --th-letter-spacing: -0.01em; }
+[data-letter-spacing='wide']  { --th-letter-spacing: 0.02em; }
+[data-line-height='compact']  { --th-line-height: 1.4; }
+[data-line-height='relaxed']  { --th-line-height: 1.8; }
+/* Applied at body level only — the real, honest scope of this control.
+   Elements that already set their own explicit line-height/letter-spacing
+   (headings, labels, pills — most of globals.css) won't inherit this; a
+   full sweep of every text rule in the app was out of scope for this pass. */
+body { letter-spacing: var(--th-letter-spacing); line-height: var(--th-line-height); }
+
+/* Motion > Transition speed — overrides the real primitive (--e), which
+   --th-transition already aliases and ~30 existing rules already consume. */
+[data-transition-speed='fast'] { --e: 0.08s ease; }
+[data-transition-speed='slow'] { --e: 0.3s ease; }
+
+/* Motion > Motion on/off — the standard reduced-motion override, applied as
+   a real toggle rather than only respecting the OS-level media query. */
+[data-motion='off'] *, [data-motion='off'] *::before, [data-motion='off'] *::after {
+  transition-duration: 0s !important;
+  animation-duration: 0s !important;
+  animation-iteration-count: 1 !important;
+}
+
+/* Motion > Hover lift — the amount a handful of existing :hover rules
+   (dock icons, cards) already translateY() by; off sets it to 0 instead of
+   removing those rules' transforms entirely, so the transition itself
+   still fires (just to a 0px destination) rather than snapping. */
+[data-hover-lift='off'] { --th-hover-lift: 0px; }
+
+
+/* Accessibility > Underline links */
+[data-underline-links='on'] a { text-decoration: underline; }
+
+/* Accessibility > Always-visible focus rings — additive to the existing
+   :focus-visible rule above (keyboard-only in most browsers by default);
+   this also shows the ring on plain :focus (any input method). */
+[data-always-focus='on'] *:focus {
+  outline: 2px solid var(--th-accent);
+  outline-offset: 2px;
+}
+
+/* Accessibility > Larger click targets — representative interactive
+   controls, not a blanket rule (would break icon-button geometry that's
+   deliberately fixed-size elsewhere in globals.css). */
+[data-larger-targets='on'] button,
+[data-larger-targets='on'] .th-btn,
+[data-larger-targets='on'] .settings-select,
+[data-larger-targets='on'] .settings-text-input,
+[data-larger-targets='on'] .th-lp-pill,
+[data-larger-targets='on'] .th-lp-view-btn {
+  min-height: 44px;
+  padding-top: var(--th-space-12);
+  padding-bottom: var(--th-space-12);
+}
+
+/* Advanced > Debug overlays — a real, visible effect: outlines the major
+   layout regions with labeled colors. */
+[data-debug-overlays='on'] #th-sb { outline: 2px dashed #e8483d; outline-offset: -2px; }
+[data-debug-overlays='on'] #th-top { outline: 2px dashed #5b7cfa; outline-offset: -2px; }
+[data-debug-overlays='on'] #th-content { outline: 2px dashed #5fb88a; outline-offset: -2px; }
+
+/* Layout > Content width — consumed by #th-content's own max-width in
+   globals.css. 'full' (uncapped) is the default, set above — these are
+   the two opt-in constrained tiers. */
+[data-content-width='normal'] { --th-content-max-width: 1400px; }
+[data-content-width='narrow'] { --th-content-max-width: 1000px; }
+
+/* Layout > Card-grid gap — consumed by .th-bento in globals.css. */
+[data-card-grid-gap='compact']   { --th-card-grid-gap: var(--th-space-10); }
+[data-card-grid-gap='spacious']  { --th-card-grid-gap: var(--th-space-24); }
+
+
+/* Surfaces > Shadow style — overrides --th-card-shadow directly, which
+   every card-style variant below already builds from, so no changes needed
+   at any consuming selector. 'none'/'pronounced' take precedence over
+   whichever cardStyle is active; 'subtle' (the default) leaves cardStyle's
+   own existing shadow choice alone. */
+[data-shadow-style='none'] { --th-card-shadow: none !important; }
+[data-shadow-style='pronounced'] { --th-card-shadow: var(--th-shadow-lg) !important; }
+
+/* Surfaces > Background — consumed by #th-shell in globals.css. */
+[data-background='subtle-gradient'] {
+  --th-app-bg-image: radial-gradient(ellipse at top left, color-mix(in srgb, var(--th-accent) 4%, transparent) 0%, transparent 55%);
+}
+
+
+/* Content defaults > Card layout — consumed by .th-lp-card-meta in
+   globals.css. */
+[data-card-layout='compact'] { --th-card-meta-pad: var(--th-space-12); }

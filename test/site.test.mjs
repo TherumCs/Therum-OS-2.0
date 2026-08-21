@@ -1,0 +1,397 @@
+// Base Theme — public site frontend: homepage modes, page/blog/work routing,
+// drafts never leak, SEO head injection, themed 404, nav assembly.
+import { test, before, after, describe } from 'node:test';
+import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
+import { readdir, readFile } from 'node:fs/promises';
+import { buildServer } from '../dist/server.js';
+import { settingsService } from '../dist/services/settings.service.js';
+import { closeQueues } from '../dist/lib/queue.js';
+import { db, disconnectDb } from '../dist/lib/db.js';
+
+/**
+ * A REAL signed admin session.
+ *
+ * This used to be the string 'whatever', and it worked — because the gate
+ * tested only that a cookie by that name existed. Same defect, same shape, as
+ * the wc-auth fixture in counter.test.mjs: a fake credential proves nothing
+ * except that the code accepts fakes.
+ */
+function signSession(role = 'admin') {
+  const b64 = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
+  const now = Math.floor(Date.now() / 1000);
+  const data = `${b64({ alg: 'HS256', typ: 'JWT' })}.${b64({ sub: 'test-admin', role, iat: now, exp: now + 3600 })}`;
+  return `${data}.${createHmac('sha256', process.env.JWT_SECRET).update(data).digest('base64url')}`;
+}
+
+let app;
+let savedSite;
+
+before(async () => {
+  app = await buildServer();
+  const row = await db.setting.findUnique({ where: { key: 'site' } });
+  savedSite = row?.value ?? null; // restore the operator's real settings after
+  await db.setting.upsert({ where: { key: 'site' }, update: { value: { siteName: 'basetest Site', tagline: 'Testing the base theme', homepageSlug: null } }, create: { key: 'site', value: { siteName: 'basetest Site', tagline: 'Testing the base theme', homepageSlug: null } } });
+  // A run that dies before its cleanup must not break the next one. The IPC
+  // crash that ate a previous run left these rows behind and every test in the
+  // file then failed on a duplicate slug — which reads like a broken feature.
+  await db.content.deleteMany({ where: { slug: { startsWith: 'basetest-' } } }).catch(() => {});
+  await db.content.createMany({
+    data: [
+      { type: 'page', title: 'basetest About', slug: 'basetest-about', status: 'published', body: '<p>about body</p>', bodyFormat: 'html' },
+      { type: 'page', title: 'basetest Hidden', slug: 'basetest-hidden', status: 'draft', body: '<p>secret</p>', bodyFormat: 'html' },
+      { type: 'post', title: 'basetest Post', slug: 'basetest-post', status: 'published', body: '<p>post body</p>', bodyFormat: 'html', publishedAt: new Date(), excerpt: 'A test post' },
+      { type: 'case_study', title: 'basetest Case', slug: 'basetest-case', status: 'published', body: '<p>case body</p>', bodyFormat: 'html', publishedAt: new Date() },
+    ],
+  });
+});
+
+after(async () => {
+  await db.content.deleteMany({ where: { slug: { startsWith: 'basetest-' } } });
+  if (savedSite) await db.setting.update({ where: { key: 'site' }, data: { value: savedSite } });
+  else await db.setting.deleteMany({ where: { key: 'site' } });
+  await app.close();
+  await closeQueues();
+  await disconnectDb();
+});
+
+test('/ landing mode: site name, tagline, published work+posts listed', async () => {
+  const res = await app.inject({ method: 'GET', url: '/' });
+  assert.equal(res.statusCode, 200);
+  assert.match(res.headers['content-type'], /text\/html/);
+  assert.match(res.body, /basetest Site/);
+  assert.match(res.body, /Testing the base theme/);
+  assert.match(res.body, /basetest Post/);
+  assert.match(res.body, /basetest Case/);
+  assert.doesNotMatch(res.body, /basetest Hidden/, 'drafts never on the landing');
+});
+
+test('/ homepage mode: configured page renders at bare / with its SEO head', async () => {
+  await db.setting.update({ where: { key: 'site' }, data: { value: { siteName: 'basetest Site', tagline: '', homepageSlug: 'basetest-about' } } });
+  const res = await app.inject({ method: 'GET', url: '/' });
+  assert.match(res.body, /about body/);
+  assert.match(res.body, /link rel="canonical"/, 'CMS metaTags injected');
+  assert.match(res.body, /application\/ld\+json/, 'JSON-LD injected');
+  await db.setting.update({ where: { key: 'site' }, data: { value: { siteName: 'basetest Site', tagline: 'Testing the base theme', homepageSlug: null } } });
+});
+
+test('pages at /:slug; drafts and wrong types 404 themed', async () => {
+  const page = await app.inject({ method: 'GET', url: '/basetest-about' });
+  assert.equal(page.statusCode, 200);
+  assert.match(page.body, /about body/);
+
+  const draft = await app.inject({ method: 'GET', url: '/basetest-hidden' });
+  assert.equal(draft.statusCode, 404, 'draft page never public');
+  assert.match(draft.body, /Page not found/, 'themed 404');
+
+  const wrongType = await app.inject({ method: 'GET', url: '/basetest-post' });
+  assert.equal(wrongType.statusCode, 404, 'posts do not render at page URLs');
+});
+
+test('/blog index + /blog/:slug article with date meta', async () => {
+  const idx = await app.inject({ method: 'GET', url: '/blog' });
+  assert.equal(idx.statusCode, 200);
+  assert.match(idx.body, /basetest Post/);
+  assert.match(idx.body, /A test post/);
+
+  const post = await app.inject({ method: 'GET', url: '/blog/basetest-post' });
+  assert.equal(post.statusCode, 200);
+  assert.match(post.body, /post body/);
+  assert.match(post.body, /page-meta/, 'publish date shown on posts');
+});
+
+test('/work index + /work/:slug case study', async () => {
+  const idx = await app.inject({ method: 'GET', url: '/work' });
+  assert.match(idx.body, /basetest Case/);
+  const cs = await app.inject({ method: 'GET', url: '/work/basetest-case' });
+  assert.equal(cs.statusCode, 200);
+  assert.match(cs.body, /case body/);
+});
+
+test('nav: published pages linked, Blog/Work appear, storefront routes still win over /:slug', async () => {
+  const res = await app.inject({ method: 'GET', url: '/basetest-about' });
+  assert.match(res.body, /href="\/blog"/);
+  assert.match(res.body, /href="\/work"/);
+
+  const shop = await app.inject({ method: 'GET', url: '/shop' });
+  assert.equal(shop.statusCode, 200, '/shop not shadowed by /:slug');
+  assert.match(shop.body, /Shop/);
+
+  // Browsers ask for a favicon on every page load, so it is served rather than
+  // 404'd. Any OTHER asset-ish path still gets a plain 404 — never a themed
+  // HTML page, which is what /:slug would otherwise hand back.
+  const icon = await app.inject({ method: 'GET', url: '/favicon.ico' });
+  assert.equal(icon.statusCode, 200, 'favicon is served');
+  assert.match(icon.headers['content-type'] ?? '', /image\//, 'favicon is an image');
+
+  const asset = await app.inject({ method: 'GET', url: '/nothing-here.png' });
+  assert.equal(asset.statusCode, 404);
+  assert.doesNotMatch(asset.headers['content-type'] ?? '', /text\/html/, 'asset 404s stay JSON');
+});
+
+test('site settings API: authenticated read, gated write', async () => {
+  const noAuth = await app.inject({ method: 'GET', url: '/api/settings/site' });
+  assert.equal(noAuth.statusCode, 401);
+});
+
+test('custom menu (Settings → Site) overrides the auto-built nav', async () => {
+  const prev = await db.setting.findUnique({ where: { key: 'site' } });
+  await db.setting.update({ where: { key: 'site' }, data: { value: { ...(prev.value), menu: [{ label: 'Custom Home', href: '/' }, { label: 'Deals', href: '/shop?tag=deals' }] } } });
+  try {
+    const res = await app.inject({ method: 'GET', url: '/' });
+    assert.match(res.body, /Custom Home/);
+    assert.match(res.body, /Deals/);
+    assert.doesNotMatch(res.body, /href="\/blog"/, 'auto nav fully replaced');
+  } finally {
+    await db.setting.update({ where: { key: 'site' }, data: { value: { ...(prev.value), menu: null } } });
+  }
+});
+
+describe('maintenance / coming soon', () => {
+  // Restored through the SERVICE, not over HTTP — HTTP is what this feature
+  // blocks, and a cleanup that has to get past the gate it just enabled fails
+  // exactly when the gate works. Leaving it on would hide the site.
+  let app;
+  before(async () => {
+    app = await buildServer();
+    // The notify limiter is real (10/hour/IP) and every test here submits from
+    // 127.0.0.1, so a previous run — or a manual curl — leaves it spent and the
+    // idempotency test fails with a 429 that has nothing to do with the
+    // behaviour under test. Cleared per file, the way the cart limiters are.
+    const { redis } = await import('../dist/lib/redis.js');
+    await redis.del('ratelimit:notify:127.0.0.1');
+  });
+  after(async () => {
+    await settingsService.setMaintenance({ mode: 'off' });
+    await app.close();
+  });
+
+  const get = (url, headers = {}) => app.inject({ method: 'GET', url, headers });
+
+  test('off means the site is simply public', async () => {
+    await settingsService.setMaintenance({ mode: 'off' });
+    assert.equal((await get('/')).statusCode, 200);
+  });
+
+  test('maintenance answers 503 with Retry-After, and says noindex', async () => {
+    await settingsService.setMaintenance({ mode: 'maintenance', heading: 'Back soon', retryAfterMinutes: 30 });
+    const r = await get('/');
+    // 503 + Retry-After is what keeps existing pages in the index; a 200 here
+    // would let crawlers replace real pages with the holding text.
+    assert.equal(r.statusCode, 503);
+    assert.equal(r.headers['retry-after'], '1800');
+    assert.match(r.body, /Back soon/);
+    assert.match(r.body, /noindex/);
+  });
+
+  test('coming soon answers 200 and is indexable — it IS the site', async () => {
+    await settingsService.setMaintenance({ mode: 'coming-soon', heading: 'Coming soon' });
+    const r = await get('/');
+    assert.equal(r.statusCode, 200);
+    assert.ok(!r.body.includes('noindex'), 'a launch teaser must not tell crawlers to skip it');
+  });
+
+  test('the admin, API and store bridges stay reachable while hidden', async () => {
+    await settingsService.setMaintenance({ mode: 'maintenance' });
+    // Not 503: you must be able to turn it back off, and a partner sync must
+    // not break because of a marketing decision.
+    assert.notEqual((await get('/tos-admin/login')).statusCode, 503);
+    assert.notEqual((await get('/api/connections')).statusCode, 503);
+    assert.equal((await get('/wp-json/')).statusCode, 200);
+  });
+
+  test('a signed-in admin still sees the real site', async () => {
+    await settingsService.setMaintenance({ mode: 'maintenance' });
+    const r = await get('/', { cookie: `th_session=${signSession()}` });
+    assert.equal(r.statusCode, 200, 'you cannot verify a fix you cannot look at');
+  });
+
+  test('every HTML escaper covers the single quote', async () => {
+    /**
+     * The browser copies of esc() escaped [&<>"] while the server's escaped
+     * [&<>"'] — divergent duplicates of a security primitive, where the weaker
+     * one is XSS-exploitable the moment its output lands in a single-quoted
+     * attribute. There were SIX copies; a grep for one declaration form found
+     * five, and the sixth was on the checkout path.
+     *
+     * This asserts on the SOURCE because the copies live inside browser
+     * runtime strings that never execute server-side, so no unit call can
+     * reach them.
+     */
+    const dir = new URL('../src/', import.meta.url);
+    const files = await readdir(new URL('site/', dir));
+    const offenders = [];
+    for (const name of files.filter((f) => f.endsWith('.ts'))) {
+      const src = await readFile(new URL(`site/${name}`, dir), 'utf8');
+      // Any character class that escapes < but not ' is the weak variant.
+      for (const m of src.matchAll(/replace\(\/\[([^\]]*)\]\/g/g)) {
+        const cls = m[1];
+        if (cls.includes('<') && !cls.includes("'")) offenders.push(`site/${name}: [${cls}]`);
+      }
+    }
+    assert.deepEqual(offenders, [], 'an HTML escaper is missing the single quote');
+  });
+
+  test('a cookie that only LOOKS like a session does not lift the gate', async () => {
+    // The site is pre-launch, so this page is the one thing holding an
+    // unfinished store back. Guessing the cookie name must not be enough.
+    await settingsService.setMaintenance({ mode: 'maintenance' });
+    const forged = await get('/', { cookie: 'th_session=whatever' });
+    assert.equal(forged.statusCode, 503, 'an unverifiable cookie bypassed maintenance');
+  });
+
+  // helmet's global default is script-src 'self', which blocks inline scripts.
+  // This page ships its countdown and its email form inline, so without the
+  // page CSP it renders perfectly and does nothing — the countdown sits at
+  // "--" forever. That is exactly how it first shipped.
+  test('the page sets the CSP its own inline JS needs', async () => {
+    await settingsService.setMaintenance({ mode: 'coming-soon' });
+    const soon = await get('/');
+    assert.match(soon.headers['content-security-policy'] ?? '', /script-src[^;]*'unsafe-inline'/,
+      'the countdown and email form can actually run');
+
+    await settingsService.setMaintenance({ mode: 'maintenance' });
+    const down = await get('/');
+    assert.match(down.headers['content-security-policy'] ?? '', /script-src[^;]*'unsafe-inline'/);
+  });
+
+  test('coming soon: countdown, email capture and Instagram come from settings', async () => {
+    await settingsService.setMaintenance({
+      mode: 'coming-soon',
+      heading: 'Everybody has a side.',
+      countdownTo: '2027-01-01T00:00:00.000Z',
+      countdownLabel: 'Doors open in',
+      instagram: 'examplestore',
+      emailCapture: true,
+    });
+    const r = await get('/');
+    assert.match(r.body, /Everybody has a side/);
+    assert.match(r.body, /data-countdown-to="2027-01-01/, 'the target is rendered for the script');
+    assert.match(r.body, /Doors open in/);
+    assert.match(r.body, /instagram\.com\/examplestore/);
+    assert.match(r.body, /<form[^>]*data-notify/, 'the form element itself');
+    // Rendered hidden, revealed by script: digits frozen at "--" because JS
+    // failed look broken in a way no countdown at all does not.
+    assert.match(r.body, /class="cd"[^>]*hidden/);
+
+    // Off must REMOVE them, not hide them.
+    await settingsService.setMaintenance({ emailCapture: false, instagram: '' });
+    const bare = await get('/');
+    // Matched as an ELEMENT: the string "data-notify" also appears in the
+    // inline script that looks the form up, so a bare substring check passes
+    // whether or not the form was rendered.
+    assert.doesNotMatch(bare.body, /<form[^>]*data-notify/, 'no form when capture is off');
+    assert.doesNotMatch(bare.body, /href="https:\/\/instagram\.com/, 'no Instagram link without a handle');
+  });
+
+  test('the notify endpoint is idempotent, normalised and validated', async () => {
+    const email = `notify-test-${Date.now()}@example.local`;
+    try {
+      assert.equal((await app.inject({ method: 'POST', url: '/api/shop/notify', payload: { email } })).statusCode, 201);
+      // A second submit is a thank-you, not a duplicate-key error — and the
+      // response must not reveal whether the address was already on the list.
+      assert.equal((await app.inject({ method: 'POST', url: '/api/shop/notify', payload: { email } })).statusCode, 201);
+      assert.equal(await db.emailSignup.count({ where: { email } }), 1, 'stored once');
+
+      assert.equal((await app.inject({ method: 'POST', url: '/api/shop/notify', payload: { email: 'nope' } })).statusCode, 422);
+
+      await app.inject({ method: 'POST', url: '/api/shop/notify', payload: { email: `  ${email.toUpperCase()} ` } });
+      assert.equal(await db.emailSignup.count({ where: { email } }), 1, 'case and whitespace normalised, not duplicated');
+    } finally {
+      await db.emailSignup.deleteMany({ where: { email: { contains: 'notify-test-' } } }).catch(() => {});
+    }
+  });
+
+  test('turning it off takes effect immediately, not after a cache TTL', async () => {
+    await settingsService.setMaintenance({ mode: 'maintenance' });
+    assert.equal((await get('/')).statusCode, 503);
+    await settingsService.setMaintenance({ mode: 'off' });
+    assert.equal((await get('/')).statusCode, 200);
+  });
+});
+
+describe('page titles can be hidden', () => {
+  let app;
+  before(async () => { app = await buildServer(); });
+  after(async () => {
+    await settingsService.setSite({ showPageTitles: true });
+    await app.close();
+  });
+  const h1 = (body) => (body.match(/<h1 class="page-title">([^<]*)/) || [])[1] ?? null;
+
+  test('site setting hides section headings across the store', async () => {
+    await settingsService.setSite({ showPageTitles: true });
+    for (const url of ['/shop', '/cart', '/checkout']) {
+      assert.ok(h1((await app.inject({ method: 'GET', url })).body), `${url} should have a heading when on`);
+    }
+    await settingsService.setSite({ showPageTitles: false });
+    for (const url of ['/shop', '/cart', '/checkout']) {
+      assert.equal(h1((await app.inject({ method: 'GET', url })).body), null, `${url} should have none when off`);
+    }
+  });
+
+  test('error headings are NOT hidden — the heading IS the message', async () => {
+    // Hiding these would leave a blank page instead of a tidier one.
+    await settingsService.setSite({ showPageTitles: false });
+    const r = await app.inject({ method: 'GET', url: '/product/definitely-not-a-real-slug' });
+    assert.match(r.body, /Product not found/);
+  });
+});
+
+describe('imported runtime strings stay valid', () => {
+  // A backtick inside these template literals CLOSES the string and takes the
+  // whole server down with an esbuild parse error. It happened twice, both
+  // times from a comment quoting a CSS property. Cheap to check, expensive to
+  // debug: the symptom is the site refusing to boot.
+  test('no stray backticks inside the injected runtimes', async () => {
+    const { readFileSync } = await import('node:fs');
+    // EVERY file in src/site, not a hand-kept list — the list is what let it
+    // happen a fourth time, in productGrid.ts and storefrontHtml.ts, both of
+    // which were carrying injected runtimes and neither of which was named.
+    const { readdirSync } = await import('node:fs');
+    const files = readdirSync('src/site').filter((f) => f.endsWith('.ts')).map((f) => `src/site/${f}`);
+    assert.ok(files.length >= 8, 'expected to find the site runtimes');
+    for (const f of files) {
+      const src = readFileSync(f, 'utf8');
+      for (const m of src.matchAll(/(?:export )?const [A-Z_]+ = `([\s\S]*?)\n`;/g)) {
+        assert.equal(m[1].includes('`'), false, `${f} has a backtick inside a runtime template literal`);
+      }
+    }
+  });
+});
+
+describe('push-mode cart is UNDER the page', () => {
+  // Reported as broken twice, both times as "it is still an overlay". In push
+  // mode the page has to be the top layer with the cart uncovered behind it;
+  // the ported theme parks its sidebar at z-index 1400, which is the overlay
+  // order and reads as exactly the bug. These assertions are on the RULES, not
+  // on a rendered transform — the shift itself is written inline at runtime.
+  test('the drawer is stacked below the shell, and the scrim is off', async () => {
+    const { HEADER_CART_CSS } = await import('../dist/site/headerCart.js');
+    assert.match(HEADER_CART_CSS, /#th-shell\{position:relative;z-index:2/,
+      'the page shell must outrank the drawer');
+    assert.match(HEADER_CART_CSS, /body\.th-cart-open \.c-shop-sidebar\{z-index:1\}/,
+      'push mode must pull the theme sidebar below the shell');
+    assert.match(HEADER_CART_CSS, /body\.th-cart-open \.c-shop-sidebar__shadow\{display:none\}/,
+      'the overlay scrim has no place in push mode');
+  });
+
+  test('the ground colour is a hex the merchant chose, and the ink follows it', async () => {
+    const { headerCartRuntime, HEADER_CART_DEFAULTS } = await import('../dist/site/headerCart.js');
+    const js = headerCartRuntime({ ...HEADER_CART_DEFAULTS, cartSidebarGround: '#faf1e0' });
+    assert.match(js, /var GROUND = "#faf1e0"/);
+    // A light ground with white type is an unreadable cart, so the ink is
+    // derived rather than fixed.
+    assert.match(js, /--th-cart-ink/);
+    assert.match(js, /0\.2126/, 'ink should be chosen by relative luminance');
+  });
+
+  test('the ground rejects anything that is not a hex colour', async () => {
+    const { CounterSettingsInput } = await import('../dist/schemas/settings.schema.js');
+    // It is written straight into a custom property: a loose value here is a
+    // style-injection hole on every page of the storefront.
+    assert.throws(() => CounterSettingsInput.parse({ cartSidebarGround: 'red;}body{display:none' }));
+    assert.throws(() => CounterSettingsInput.parse({ cartSidebarGround: 'url(https://x/y)' }));
+    assert.ok(CounterSettingsInput.parse({ cartSidebarGround: '#0A0A0A' }));
+  });
+});

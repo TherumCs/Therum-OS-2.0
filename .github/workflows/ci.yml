@@ -1,0 +1,112 @@
+name: CI
+
+# The 500+ test suite, the type check, the storefront runtime gate and the
+# dependency audit all ran only when a human remembered — this makes red block
+# a merge instead. Postgres + Redis are service containers, mirroring
+# docker-compose.yml, so the same integration tests run here as locally.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: therum
+          POSTGRES_PASSWORD: therum
+          POSTGRES_DB: therum_cms
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U therum" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 5s
+          --health-timeout 5s --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://therum:therum@localhost:5432/therum_cms
+      REDIS_URL: redis://localhost:6379
+      # CI-only, not a real secret; must clear the 32-char floor and dodge the
+      # placeholder denylist in src/lib/env.ts.
+      JWT_SECRET: ci-suite-signing-key-not-used-anywhere-real-000
+      CREDENTIAL_KEY: ci-suite-credential-key-not-used-anywhere-real00
+      LOG_LEVEL: fatal
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Build
+        run: npm run build
+      - name: Storefront runtime gate (node --check on shipped browser JS)
+        run: npm run test:runtime
+      - name: Prisma migrate
+        run: npx prisma migrate deploy
+      - name: Prisma generate
+        run: npm run prisma:generate
+      # Reports but does not yet BLOCK: the suite shares one database and
+      # documents residue between runs (see the test audit) — it must be made
+      # fresh-DB-isolated before red here can gate a merge without false
+      # failures. Everything above this line is deterministic and blocks.
+      - name: Tests (with coverage)
+        run: npm run test:coverage
+        continue-on-error: true
+      - name: Dependency audit (high+)
+        run: npm audit --omit=dev --audit-level=high
+
+  admin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: admin/package-lock.json
+      - run: npm ci
+        working-directory: admin
+      - name: Typecheck admin
+        run: npx tsc --noEmit -p tsconfig.json
+        working-directory: admin
+
+  builder:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: builder/package-lock.json
+      - run: npm ci
+        working-directory: builder
+      - name: Typecheck builder
+        run: npx tsc --noEmit
+        working-directory: builder
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Lint Markdown
+        uses: DavidAnson/markdownlint-cli2-action@v16
+        with:
+          globs: '**/*.md'
+        continue-on-error: true
+      - name: Check links
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --no-progress --max-concurrency 4 './**/*.md'
+          fail: false

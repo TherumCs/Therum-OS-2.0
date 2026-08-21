@@ -1,0 +1,2346 @@
+@import '../../shared/therum-tokens.css';
+
+:root {
+  /* One height and one radius for every control in a list toolbar — filter
+     chips, sort, search, Cols, view switch. Change them here, once. */
+  --th-ctl-h: 34px;
+  --th-ctl-r: var(--radius-md, 10px);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; font-family: var(--th-font-body); color: var(--th-ink); background: var(--th-bg); }
+a { color: inherit; text-decoration: none; }
+h1, h2, h3 { font-family: var(--th-font-display); font-weight: 700; }
+h1 { font-size: var(--th-fs-xl); margin: 0 0 var(--th-space-16); letter-spacing: -0.01em; }
+
+/* ── Shell — real 1.9.44 structure: #th-sb is fixed, #th-main is offset by
+   its width via margin-left (not a CSS grid — matches the source exactly,
+   which matters for the sidebar's own internal position:fixed rules). ── */
+/* Explicit background here, not just inherited from <body> — `data-color-
+   mode`/`data-density`/etc. all live on this element (see app/(app)/
+   layout.tsx), not on <html>/<body> (root layout.tsx is shared with /login,
+   which deliberately keeps its own independent branding untouched by these
+   overrides — see the color-mode block's own comment below). --th-bg
+   resolves correctly here since this element is IN scope for the
+   [data-color-mode='dark'] override; <body>'s own background: var(--th-bg)
+   is not (body is an ancestor of this element, not a descendant), so it
+   silently stayed light-mode-colored regardless of the toggle. Confirmed
+   live: before this line, #th-main/#th-content have no background of their
+   own, so dark mode's entire main content area showed light gray through. */
+/* TWO settings paint here — Surfaces > Background (a wash) and Surfaces >
+   Background pattern (a texture) — so they are composed as two layers rather
+   than each declaring `background-image` on #th-shell. They did the latter at
+   equal specificity, which meant whichever rule sat later in this file won
+   outright and the other setting did nothing at all. */
+#th-shell {
+  position: relative;
+  min-height: 100vh;
+  background-color: var(--th-bg);
+  background-image: var(--th-app-bg-image), var(--th-bg-pattern);
+  background-size: var(--th-app-bg-size), var(--th-bg-pattern-size);
+  background-repeat: repeat, repeat;
+}
+
+/* Sidebar is a dark rail (confirmed against a live 1.9.44 install) — every
+   rule below intentionally uses the dark-scoped --th-sidebar-* tokens, not
+   the generic --th-ink/--th-line ones the light main canvas uses. */
+#th-sb {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: var(--th-sidebar-w);
+  background: var(--th-sidebar-bg);
+  border-right: 1px solid var(--th-sidebar-line);
+  display: flex;
+  flex-direction: column;
+  z-index: 100;
+}
+
+.th-sb-header { display: flex; align-items: center; gap: var(--th-space-10); padding: var(--th-space-16); border-bottom: 1px solid var(--th-sidebar-line); }
+.th-logo { width: var(--th-space-32); height: var(--th-space-32); border-radius: 7px; background: var(--th-accent); color: var(--th-text-inverse); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; }
+.th-site-info { min-width: 0; }
+.th-site-name { font-family: var(--th-font-display); font-size: 13px; font-weight: 600; color: var(--th-sidebar-ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.th-site-host { font-size: 11px; color: var(--th-sidebar-ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Pixel-exact copy of therum-shell.css's .th-sb-search* rules (padding,
+   gap, border-radius, box-shadow structure, transitions all matched) —
+   only the colors are adapted, swapping the source's light --th-ink/-surface/
+   -line tokens for the dark --th-sidebar-* ones since this sidebar is a dark
+   rail. */
+.th-sb-search { padding: var(--th-space-14) var(--th-space-14) var(--th-space-12); }
+.th-sb-search-box {
+  display: flex;
+  align-items: center;
+  gap: var(--th-space-10);
+  padding: var(--th-space-10) var(--th-space-12) var(--th-space-10) var(--th-space-14);
+  background: var(--th-sidebar-wash-2);
+  border: 1px solid var(--th-sidebar-line);
+  border-radius: var(--th-r-pill);
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.25s ease;
+  cursor: text;
+  box-shadow: inset 0 1px 0 var(--th-sidebar-wash-1);
+  overflow: hidden;
+}
+.th-sb-search-box:hover { border-color: var(--th-sidebar-ink-2); background: var(--th-sidebar-wash-3); }
+.th-sb-search-box:focus-within {
+  border-color: var(--th-accent);
+  background: var(--th-sidebar-wash-3);
+  box-shadow: inset 0 1px 0 var(--th-sidebar-wash-1), 0 0 0 3px rgba(232, 59, 59, 0.16), 0 4px 14px rgba(232, 59, 59, 0.12);
+}
+.th-sb-search-box svg { color: var(--th-sidebar-ink-3); flex-shrink: 0; width: var(--th-space-14); height: var(--th-space-14); transition: color 0.2s ease, transform 0.25s ease; }
+.th-sb-search-box:focus-within svg { color: var(--th-accent-text); transform: scale(1.05); }
+.th-sb-search-box input {
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: var(--th-font-body);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--th-sidebar-ink);
+  flex: 1;
+  min-width: 0;
+  letter-spacing: -0.005em;
+  line-height: 1.2;
+}
+.th-sb-search-box input::placeholder { color: var(--th-sidebar-ink-3); font-weight: 400; }
+.th-sb-search-kbd {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: var(--th-space-4) var(--th-space-8);
+  background: #e8e8ea;
+  color: #1a1a1a;
+  border: 1px solid var(--th-sidebar-line);
+  border-radius: 5px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: var(--th-font-body);
+  letter-spacing: 0.02em;
+  flex-shrink: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  box-shadow: 0 1px 0 var(--th-sidebar-wash-1);
+}
+.th-sb-search-box:focus-within .th-sb-search-kbd { opacity: 0; transform: scale(0.9); }
+
+.th-sb-nav { flex: 1; min-height: 0; overflow-y: auto; padding: var(--th-space-8); display: flex; flex-direction: column; }
+.th-sb-item {
+  display: flex;
+  align-items: center;
+  gap: var(--th-space-10);
+  padding: var(--th-space-10) var(--th-space-20);
+  border-radius: var(--th-r);
+  font-size: 14px;
+  color: var(--th-sidebar-ink-2);
+}
+.th-sb-item svg { flex-shrink: 0; color: var(--th-sidebar-ink-3); }
+.th-sb-item:hover { background: var(--th-sidebar-wash-2); color: var(--th-sidebar-ink); }
+.th-sb-item.active { background: var(--th-sidebar-active-bg); color: var(--th-sidebar-ink); font-weight: 600; border-radius: 0; }
+.th-sb-item.active svg { color: var(--th-sidebar-ink); }
+
+/* Active-item highlight styles (Quick Controls → Sidebar highlight). Default
+   'band' above is a straight fill (no curve). 'indicator' is a side accent
+   line with highlighted text; 'underline' underlines the label instead. */
+[data-sidebar-highlight='indicator'] .th-sb-item.active { background: transparent; color: var(--th-accent-text); box-shadow: inset 3px 0 0 0 var(--th-accent); }
+[data-sidebar-highlight='indicator'] .th-sb-item.active svg { color: var(--th-accent-text); }
+[data-sidebar-highlight='underline'] .th-sb-item.active { background: transparent; color: var(--th-sidebar-ink); text-decoration: underline; text-decoration-color: var(--th-accent); text-decoration-thickness: 2px; text-underline-offset: 4px; }
+[data-sidebar-highlight='underline'] .th-sb-item.active svg { color: var(--th-sidebar-ink); }
+.th-sb-section { margin-top: var(--th-space-16); display: flex; flex-direction: column; gap: var(--th-space-2); }
+.th-sb-section-label { display: flex; align-items: center; padding: 0 var(--th-space-20); margin-bottom: var(--th-space-4); }
+.th-sb-section-name { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: var(--th-sidebar-ink-3); }
+.th-sb-section-items { display: flex; flex-direction: column; }
+.th-sb-itemwrap { display: flex; align-items: center; gap: var(--th-space-2); }
+.th-sb-itemwrap .th-sb-item { flex: 1; min-width: 0; }
+
+/* Edit-sidebar mode — real functionality (reorder/rename/delete/add-section),
+   toggled by #th-edit-sb-btn in Sidebar.tsx via client-side React state
+   rather than the dashboard's checkbox-hack, since Sidebar.tsx is already a
+   client component (no Server Component constraint to work around here). */
+.th-sb-section-toggle { display: flex; align-items: center; gap: var(--th-space-6); cursor: pointer; flex: 1; min-width: 0; }
+.th-sb-section-label .chev { display: flex; color: var(--th-sidebar-ink-3); transition: transform 0.15s ease; flex-shrink: 0; }
+.th-sb-section-label .chev.collapsed { transform: rotate(-90deg); }
+.th-sb-arrows { display: flex; gap: var(--th-space-2); margin-right: var(--th-space-4); flex-shrink: 0; }
+.th-sb-arrow { width: var(--th-space-20); height: var(--th-space-20); display: flex; align-items: center; justify-content: center; border: 1px solid var(--th-sidebar-line); background: var(--th-sidebar-wash-2); border-radius: 4px; color: var(--th-sidebar-ink-2); font-size: 10px; line-height: 1; cursor: pointer; flex-shrink: 0; padding: 0; }
+.th-sb-arrow:disabled { opacity: 0.35; cursor: default; }
+.th-sb-arrow:not(:disabled):hover { color: var(--th-sidebar-ink); border-color: var(--th-sidebar-ink-2); }
+.th-sb-section-rename, .th-sb-section-x { width: var(--th-space-20); height: var(--th-space-20); display: flex; align-items: center; justify-content: center; background: transparent; border: none; color: var(--th-sidebar-ink-3); flex-shrink: 0; cursor: pointer; margin-left: var(--th-space-2); padding: 0; }
+.th-sb-section-rename:hover { color: var(--th-sidebar-ink); }
+.th-sb-section-x:hover { color: var(--th-danger-text); }
+.th-sb-section-rename-input { flex: 1; min-width: 0; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; background: var(--th-sidebar-wash-3); border: 1px solid var(--th-accent); border-radius: 4px; padding: var(--th-space-2) var(--th-space-6); color: var(--th-sidebar-ink); font-family: inherit; }
+
+.th-add-section { display: flex; align-items: center; gap: var(--th-space-8); margin: var(--th-space-8) var(--th-space-8) 0; padding: var(--th-space-10) var(--th-space-20); border-radius: var(--th-r); border: 1px dashed var(--th-sidebar-line); background: transparent; color: var(--th-sidebar-ink-3); font-size: 13px; cursor: pointer; }
+.th-add-section:hover { color: var(--th-sidebar-ink); border-color: var(--th-sidebar-ink-2); }
+
+.th-sb-edit-toggle { display: flex; align-items: center; gap: var(--th-space-4); padding: var(--th-space-8) var(--th-space-14); border-top: 1px solid var(--th-sidebar-line); }
+.th-sb-edit-btn { display: flex; align-items: center; gap: var(--th-space-6); padding: var(--th-space-6) var(--th-space-8); border-radius: var(--th-r-sm); border: 1px solid var(--th-sidebar-line); background: var(--th-sidebar-wash-2); color: var(--th-sidebar-ink-2); font-size: 12px; cursor: pointer; flex: 1; min-width: 0; }
+.th-sb-edit-btn:hover { background: var(--th-sidebar-wash-4); color: var(--th-sidebar-ink); }
+.th-sb-view-site { justify-content: flex-end; flex: 0 0 auto; }
+.th-sb-edit-bar { display: flex; align-items: center; gap: var(--th-space-8); padding: var(--th-space-8) var(--th-space-14); border-top: 1px solid var(--th-sidebar-line); background: var(--th-sidebar-wash-1); }
+.th-sb-reset, .th-sb-done { flex: 1; display: flex; align-items: center; justify-content: center; gap: var(--th-space-6); padding: var(--th-space-8) var(--th-space-10); border-radius: var(--th-r-sm); font-size: 12px; font-weight: 600; cursor: pointer; font-family: inherit; }
+.th-sb-reset { background: var(--th-sidebar-wash-2); border: 1px solid var(--th-sidebar-line); color: var(--th-sidebar-ink-2); }
+.th-sb-reset:hover { border-color: var(--th-sidebar-ink-2); color: var(--th-sidebar-ink); }
+.th-sb-done { background: var(--th-accent-btn); border: 1px solid var(--th-accent-btn); color: var(--th-text-inverse); }
+.th-sb-done:hover { filter: brightness(1.08); }
+.th-sb-reset:disabled, .th-sb-done:disabled { opacity: 0.6; cursor: default; }
+
+.th-sb-footer { display: flex; align-items: center; gap: var(--th-space-6); padding: var(--th-space-10) var(--th-space-14); font-size: 11px; color: var(--th-sidebar-ink-3); border-top: 1px solid var(--th-sidebar-line); }
+.th-sb-footer .ok-dot { width: var(--th-space-6); height: var(--th-space-6); border-radius: 999px; background: var(--th-success-text); flex-shrink: 0; }
+.th-sb-footer .spacer { flex: 1; }
+
+/* ── Main column + topbar ── */
+#th-main { margin-left: var(--th-sidebar-w); display: flex; flex-direction: column; min-height: 100vh; min-width: 0; }
+
+#th-top {
+  height: var(--th-topbar-h);
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--th-space-12);
+  background: var(--th-surface);
+  border-bottom: 1px solid var(--th-line);
+  padding: 0 var(--th-space-20);
+}
+@media (max-width: 900px) {
+  #th-top { padding: 0 var(--th-space-16); }
+}
+/* Opt-in "sticky" topbar — the inset, rounded, floats-and-sticks-on-scroll
+   look this used to be unconditionally. Not wired to a real setting yet
+   (no customization-settings system exists to host that toggle) — same
+   deliberate stop-point as this file's high-contrast mode: the CSS capability
+   exists now, a real Appearance-page control to flip [data-topbar-style] is
+   later work, not built here. */
+[data-topbar-style='sticky'] #th-top {
+  border-radius: var(--th-r-lg);
+  margin: var(--th-space-12) var(--th-space-48) 0;
+  position: sticky;
+  top: 0;
+  z-index: 90;
+}
+@media (max-width: 900px) {
+  [data-topbar-style='sticky'] #th-top { margin: var(--th-space-8) var(--th-space-16) 0; }
+}
+.th-top-title { font-size: 14px; font-weight: 600; color: var(--th-ink); }
+.th-top-actions { display: flex; align-items: center; gap: var(--th-space-8); margin-left: auto; }
+.th-top-btn { width: var(--th-space-32); height: var(--th-space-32); flex-shrink: 0; display: flex; align-items: center; justify-content: center; background: transparent; border: 1px solid var(--th-line); border-radius: var(--th-r-sm); color: var(--th-ink-2); cursor: pointer; }
+.th-top-btn svg { width: var(--th-space-16); height: var(--th-space-16); flex-shrink: 0; }
+.th-top-btn:hover { color: var(--th-ink); border-color: var(--th-ink-2); }
+.th-top-avatar { width: var(--th-space-32); height: var(--th-space-32); border-radius: var(--th-r-pill); background: var(--th-accent); color: var(--th-text-inverse); border: none; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 12px; cursor: pointer; }
+.th-top-menu { position: absolute; top: calc(100% + 6px); right: 0; background: var(--th-surface); border: 1px solid var(--th-line); border-radius: var(--th-r); box-shadow: var(--th-shadow-md); min-width: 160px; padding: var(--th-space-6); z-index: 20; display: flex; flex-direction: column; gap: var(--th-space-2); }
+.th-top-menu a, .th-top-menu button { display: flex; align-items: center; gap: var(--th-space-8); padding: var(--th-space-8) var(--th-space-10); border-radius: 6px; font-size: 13px; color: var(--th-ink); background: transparent; border: none; text-align: left; cursor: pointer; width: 100%; }
+.th-top-menu a:hover, .th-top-menu button:hover { background: var(--th-bg); }
+
+/* The one place page padding lives: every route gets the dashboard's
+   32/64/80 rhythm without needing its own wrapper (pages were rendering
+   flush against the sidebar; .th-dash used to carry this padding alone). */
+#th-content { flex: 1; min-width: 0; max-width: var(--th-content-max-width); margin: 0 auto; width: 100%; padding: var(--th-space-32) var(--th-space-64) var(--th-space-80); box-sizing: border-box; }
+/* Page entry motion lives with .th-page-enter (see PageMotion.tsx and the
+   block near the end of this file). The rule that used to sit here keyed off
+   [data-page-transitions='on'] — plural, and a value we never write — so it
+   matched nothing and no page has ever animated in. */
+
+/* Sidebar style variants (Appearance setting) — 'default' is the existing
+   baseline above; these two are real structural differences, not a re-skin
+   of the same layout. */
+[data-sidebar-style='pills'] .th-sb-item { border-radius: var(--th-r-pill); padding-left: var(--th-space-16); padding-right: var(--th-space-16); }
+[data-sidebar-style='minimal'] .th-sb-item { background: transparent; }
+[data-sidebar-style='minimal'] .th-sb-item:hover { background: transparent; color: var(--th-ink); }
+[data-sidebar-style='minimal'] .th-sb-item.active { background: transparent; color: var(--th-accent-text); border-left: 2px solid var(--th-accent); padding-left: var(--th-space-8); }
+
+table { width: 100%; border-collapse: collapse; background: var(--th-card-bg); border-radius: var(--th-r-lg); overflow: hidden; box-shadow: var(--th-card-shadow); border: var(--th-card-border); backdrop-filter: var(--th-card-backdrop); }
+th, td { text-align: left; padding: var(--th-density-table-pad); font-size: var(--th-fs-sm); border-bottom: 1px solid var(--th-bg); }
+/* --th-surface-2, not a literal: #f8fafc stayed near-white in dark mode, so
+   every table kept a bright header strip across dark pages. */
+th { background: var(--th-surface-2); font-size: var(--th-fs-2xs); text-transform: uppercase; letter-spacing: 0.4px; color: var(--th-muted); }
+td .sub { color: var(--th-muted); font-size: var(--th-fs-2xs); }
+.muted { color: var(--th-muted); }
+
+.pill { display: inline-block; padding: var(--th-space-2) var(--th-space-8); border-radius: 999px; font-size: var(--th-fs-2xs); font-weight: 600; background: var(--th-bg); color: var(--th-ink-2); }
+.pill-active, .pill-paid, .pill-processing, .pill-delivered, .pill-ok { background: var(--th-success-bg); color: var(--th-success-ink); }
+.pill-pending { background: var(--th-warning-bg); color: var(--th-warning-ink); }
+.pill-failed, .pill-cancelled, .pill-archived, .pill-unhealthy { background: var(--th-danger-bg); color: var(--th-danger-ink); }
+
+.row-form { display: flex; gap: var(--th-space-8); margin-bottom: var(--th-space-16); }
+.row-form input { padding: var(--th-space-8) var(--th-space-10); border: 1px solid var(--th-line); border-radius: var(--th-r); font-size: var(--th-fs-sm); }
+button { padding: var(--th-space-8) var(--th-space-14); border: var(--th-border-width) solid var(--th-accent-btn); background: var(--th-accent-btn); color: var(--th-text-inverse); border-radius: var(--th-r); font-size: var(--th-fs-xs); font-weight: 600; cursor: pointer; }
+button:hover { background: var(--th-accent-btn-hover); border-color: var(--th-accent-btn-hover); }
+/* Every other disabled control in this file (.chip, .th-sb-reset/-done, the
+   switch) uses an opacity dip — this is the default, unclassed button (the
+   one a plain <button> gets with no .ghost/.th-btn/etc class, which several
+   Settings pages' inline actions actually are) and had none at all, relying
+   entirely on inconsistent browser default disabled rendering. */
+button:disabled { opacity: 0.5; cursor: default; }
+
+/* Bare form controls inside the content area match the internal chrome —
+   pages were shipping native UA inputs/selects wherever nobody added a
+   settings-* class (Milieus/Cluster editors, filters, etc). Scoped to
+   #th-content (the sidebar/topbar style their own controls) and wrapped in
+   :where() so this contributes ZERO specificity — any component class
+   (.settings-select, .th-search, …) still wins without !important. The bare
+   selector version of this rule shipped first and silently repainted the
+   sidebar search white: :not([attr]) chains carry the attribute selectors'
+   specificity and beat every single-class rule in the file.
+   #th-content is ALSO wrapped in :where() — an id selector contributes
+   (1,0,0) on its own, so with a bare `#th-content` prefix this rule still
+   outranked every component class and the "contributes ZERO" claim above was
+   only true of the right-hand side. That is what re-boxed .th-lp-sort-select
+   inside its own wrapper (a bordered select inside a bordered control). */
+:where(#th-content) :where(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']):not([type='submit']):not([type='button']), select, textarea) {
+  padding: var(--th-space-8) var(--th-space-10);
+  border: var(--th-border-width) solid var(--th-line);
+  border-radius: var(--th-r);
+  font-size: var(--th-fs-sm);
+  font-family: var(--th-font-body);
+  background: var(--th-surface);
+  color: var(--th-ink);
+  box-sizing: border-box;
+}
+#th-content :where(textarea) { resize: vertical; min-height: 80px; }
+button.ghost { background: var(--th-surface); color: var(--th-ink-2); border-color: var(--th-line); }
+button.ghost:hover { background: var(--th-surface-2); border-color: var(--th-line-2); }
+.notice { background: var(--th-warning-bg); color: var(--th-warning-ink); padding: var(--th-space-12) var(--th-space-14); border-radius: var(--th-r); font-size: var(--th-fs-sm); margin-bottom: var(--th-space-14); }
+.cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px,1fr)); gap: var(--th-space-14); margin-bottom: var(--th-space-8); }
+.card { background: var(--th-card-bg); border-radius: var(--th-r-lg); padding: var(--th-density-card-pad); box-shadow: var(--th-card-shadow); border: var(--th-card-border); backdrop-filter: var(--th-card-backdrop); }
+.card .n { font-size: 28px; font-weight: 700; }
+.card .l { color: var(--th-muted); font-size: var(--th-fs-xs); text-transform: uppercase; letter-spacing: 0.4px; }
+.actions { display: flex; gap: var(--th-space-6); }
+.actions form { display: inline; }
+
+/* ── Dashboard — real 1.9.44 classes (.th-dash / .th-bento / .th-card),
+   not the generic .card used by other pages (Products/Orders etc keep using
+   that one; the dashboard's cards are visually distinct — bigger, bento-
+   scaled). A 12-column grid where xs/sm/md/lg cards span 3/6/9/12 columns
+   (25/50/75/100%), with the stat number, padding, and label all scaling up
+   per size tier — that dramatic per-size scaling is what makes it read as
+   "bento" rather than a flat grid of same-size tiles. ── */
+/* Padding moved to #th-content (shared by every page) — keeping it here too
+   would double it on the dashboard. */
+.th-dash { max-width: none; margin: 0; padding: 0; width: 100%; min-width: 0; box-sizing: border-box; }
+
+/* Bento corner-resize grip (replaces the xs/sm/md/lg chip row). Sits in the
+   card's bottom-right corner; drag snaps the card to the nearest size tier. */
+.dash-card { position: relative; }
+.dash-card-resize {
+  position: absolute;
+  right: var(--th-space-4);
+  bottom: var(--th-space-4);
+  width: 14px;
+  height: 14px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-right: 2px solid var(--th-line);
+  border-bottom: 2px solid var(--th-line);
+  border-radius: 0 0 var(--th-r-sm, 4px) 0;
+  cursor: nwse-resize;
+  opacity: 0;
+  transition: opacity var(--th-transition);
+}
+.dash-card:hover .dash-card-resize,
+.dash-card-resize:focus-visible { opacity: 1; }
+.dash-card-resize:hover { border-color: var(--th-accent); background: transparent; }
+/* In Edit layout mode the grip is the point of the mode, so it stops hiding:
+   always on, larger, and accent-coloured. A 14px hover-only target was easy
+   to miss entirely and read as "resizing doesn't work". */
+#th-edit-toggle:checked ~ .th-bento .dash-card-resize {
+  opacity: 1;
+  width: 20px;
+  height: 20px;
+  border-color: var(--th-accent);
+  border-width: 3px;
+}
+#th-edit-toggle:checked ~ .th-bento .dash-card { outline: 1px dashed var(--th-line); outline-offset: 2px; }
+/* Selecting text kills a corner drag halfway through — while resizing is the
+   advertised interaction, the cards aren't text to be selected. */
+#th-edit-toggle:checked ~ .th-bento { user-select: none; }
+/* Below 900px the bento grid collapses to fixed spans (span 4 !important),
+   so drag-resize can't work there — hide the grip instead of offering a
+   dead control on touch layouts. */
+@media (max-width: 900px) {
+  .dash-card-resize { display: none; }
+}
+.th-dash-greet { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--th-muted); margin-bottom: var(--th-space-6); }
+.th-dash-title { font-size: 30px; font-weight: 700; color: var(--th-ink); letter-spacing: -0.5px; margin: 0 0 var(--th-space-6); }
+.th-dash-sub { font-size: 14px; color: var(--th-ink-2); margin: 0 0 var(--th-space-24); }
+
+.th-dash-actions { display: flex; align-items: center; gap: var(--th-space-8); flex-wrap: wrap; margin-bottom: var(--th-space-32); }
+.th-dash-actions-spacer { flex: 1; }
+
+/* .th-btn was referenced by page.tsx's action links from the start but never
+   actually defined — they were rendering as bare `a{color:inherit}` text
+   with zero button chrome. Values copied verbatim from therum-shell.css. */
+.th-btn { display: inline-flex; align-items: center; gap: var(--th-space-6); padding: var(--th-space-8) var(--th-space-14); background: var(--th-surface); border: 1px solid var(--th-line); border-radius: 8px; font-family: var(--th-font-body); font-size: 13px; font-weight: 500; color: var(--th-ink); text-decoration: none; cursor: pointer; transition: all var(--th-transition); }
+.th-btn:hover { border-color: var(--th-ink-2); }
+.th-btn-primary { background: var(--th-accent-btn); border-color: var(--th-accent-btn); color: var(--th-text-inverse); }
+.th-btn-primary:hover { color: var(--th-text-inverse); opacity: 0.9; }
+
+/* Real 1.9.44 toggles this via a `body.th-edit-layout` class (JS-driven drag
+   editor, which 2.0 doesn't have — reorder/resize here is arrows + chips
+   instead). #th-edit-toggle is a hidden checkbox standing in for that class
+   so the "Edit layout" affordance still requires no client JS bundle. */
+#th-edit-toggle { display: none; }
+.th-edit-bar { display: none; align-items: center; gap: var(--th-space-10); padding: var(--th-space-10) var(--th-space-16); margin-bottom: var(--th-space-16); background: rgba(37, 99, 235, 0.08); border: 1px solid var(--th-accent); border-radius: var(--th-r); color: var(--th-ink-2); font-size: 13px; position: sticky; top: var(--th-topbar-h); z-index: 50; }
+#th-edit-toggle:checked ~ .th-edit-bar { display: flex; }
+.th-edit-bar-text strong { color: var(--th-ink); }
+.th-edit-bar-actions { display: flex; gap: var(--th-space-8); margin-left: auto; }
+/* Preset row wraps onto its own line under the description + actions. */
+.th-edit-bar { flex-wrap: wrap; }
+.th-dash-presets { display: flex; align-items: center; gap: var(--th-space-6); flex-basis: 100%; }
+.th-dash-presets-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em; color: var(--th-muted); margin-right: var(--th-space-4); }
+.th-dash-preset {
+  padding: var(--th-space-4) var(--th-space-10);
+  border: 1px solid var(--th-line); border-radius: 999px;
+  background: var(--th-surface); color: var(--th-ink-2);
+  font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.th-dash-preset:hover { border-color: var(--th-ink-2); color: var(--th-ink); }
+.th-dash-preset.active { background: var(--th-emphasis-bg); color: var(--th-text-inverse); border-color: var(--th-emphasis-bg); }
+
+.th-bento { display: grid; grid-template-columns: repeat(12, 1fr); grid-auto-rows: minmax(120px, auto); grid-auto-flow: dense; gap: var(--th-card-grid-gap); }
+.th-card.dash-card { min-width: 0; border-radius: var(--th-r-lg); background: var(--th-surface); border: var(--th-border-width) solid var(--th-line); box-shadow: var(--th-shadow-sm); position: relative; overflow: hidden; }
+/* Uniform per-tier padding, one clean value each — a +4px step per size
+   (20/24/28/32), not the original 18/20, 22/24, 26/28, 30/34 pairs. Both
+   halves of each pair were within 1-2px of each other and of a real scale
+   step; picking the rounding that lands every tier on a single value reads
+   as a deliberate progression instead of four near-misses. */
+.th-card.dash-card[data-size='xs'] { padding: var(--th-space-20); }
+.th-card.dash-card[data-size='sm'] { padding: var(--th-space-24); }
+.th-card.dash-card[data-size='md'] { padding: var(--th-space-28); }
+.th-card.dash-card[data-size='lg'] { padding: var(--th-space-32); }
+.th-card-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; margin-bottom: var(--th-space-10); gap: var(--th-space-4) var(--th-space-8); min-width: 0; }
+.th-card-label { margin: 0; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--th-muted); white-space: nowrap; }
+.th-card-link { font-size: 12px; color: var(--th-accent-text); white-space: nowrap; }
+.th-card-link:hover { text-decoration: underline; }
+.dash-card-controls { display: flex; gap: var(--th-space-4); opacity: 0.35; transition: opacity var(--th-transition); }
+#th-edit-toggle:checked ~ .th-bento .dash-card-controls,
+.th-card.dash-card:hover .dash-card-controls { opacity: 1; }
+.chip { padding: var(--th-space-2) var(--th-space-6); font-size: 10px; font-weight: 600; text-transform: uppercase; border: 1px solid var(--th-line); background: var(--th-surface); color: var(--th-muted); border-radius: 5px; line-height: 1.6; }
+.chip:hover:not(:disabled) { background: var(--th-bg); color: var(--th-ink-2); }
+.chip:disabled { opacity: 0.3; cursor: not-allowed; }
+.chip-active { background: var(--th-accent); border-color: var(--th-accent); color: var(--th-text-inverse); }
+.dash-breakdown { display: flex; gap: var(--th-space-6); flex-wrap: wrap; margin-top: var(--th-space-8); }
+.dash-list { list-style: none; margin: var(--th-space-10) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--th-space-6); font-size: var(--th-fs-sm); }
+.dash-list li { display: flex; justify-content: space-between; gap: var(--th-space-10); }
+.dash-list li .muted { flex-shrink: 0; }
+
+/* Stat number scales dramatically with card size, matching 1.9.44's
+   .th-card[data-size="…"] .th-stat-val rules exactly. */
+.th-card.dash-card[data-size='xs'] .th-stat-val { font-size: 32px; }
+.th-card.dash-card[data-size='sm'] .th-stat-val { font-size: 44px; }
+.th-card.dash-card[data-size='md'] .th-stat-val { font-size: 56px; }
+.th-card.dash-card[data-size='lg'] .th-stat-val { font-size: 72px; letter-spacing: -2px; }
+.th-stat-val { font-weight: 700; color: var(--th-ink); }
+.th-stat-sub { color: var(--th-muted); font-size: var(--th-fs-2xs); }
+
+@media (max-width: 900px) {
+  .th-bento { grid-template-columns: repeat(4, 1fr); }
+  .th-card.dash-card[data-size='sm'], .th-card.dash-card[data-size='md'], .th-card.dash-card[data-size='lg'] { grid-column: span 4 !important; }
+}
+.row-between { display: flex; justify-content: space-between; align-items: center; }
+.field-label { font-size: var(--th-fs-xs); color: var(--th-muted); margin-bottom: var(--th-space-6); }
+
+/* Settings hub — left rail of registered sections + content pane. Real
+   1.9.44 shows a "SEARCH SETTINGS…" filter over the rail once there are
+   enough sections to need it (16 of them) — that point is now. */
+.settings-shell { display: grid; grid-template-columns: 260px 1fr; gap: var(--th-space-24); align-items: start; }
+.settings-search { display: flex; align-items: center; gap: var(--th-space-8); padding: var(--th-space-8) var(--th-space-10); margin-bottom: var(--th-space-10); background: var(--th-bg); border: 1px solid var(--th-line); border-radius: var(--th-r); color: var(--th-muted); }
+/* The input's own outline:none had no replacement — a keyboard user tabbing
+   here got no focus indicator at all. Same fix as .th-sb-search-box's own
+   :focus-within treatment elsewhere in this file: ring the wrapper, since
+   ringing the bare input directly would look visually disconnected from its
+   icon/pill chrome. */
+.settings-search:focus-within { border-color: var(--th-accent); }
+.settings-search svg { flex-shrink: 0; }
+/* padding: 0 for the same reason as .th-lp-search-input — wrapper pads. */
+.settings-search input { flex: 1; min-width: 0; border: none; outline: none; background: transparent; font-size: var(--th-fs-xs); color: var(--th-ink); text-transform: uppercase; letter-spacing: 0.04em; padding: 0; }
+.settings-search input::placeholder { color: var(--th-muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.settings-rail { display: flex; flex-direction: column; gap: var(--th-space-2); }
+.settings-rail-item { padding: var(--th-space-10) var(--th-space-10); border-radius: var(--th-r); display: flex; align-items: flex-start; gap: var(--th-space-10); }
+.settings-rail-item svg { flex-shrink: 0; margin-top: 1px; color: var(--th-ink-2); }
+.settings-rail-item.active svg { color: var(--th-accent-text); }
+.settings-rail-item:hover { background: var(--th-bg); }
+.settings-rail-item.active { background: var(--th-accent-tint); }
+.settings-rail-text { display: flex; flex-direction: column; gap: var(--th-space-2); min-width: 0; }
+/* Explicit ink, not inherited: the rail sits on the page background, and
+   an inherited colour left these near-black on the dark background. */
+.settings-rail-label { font-size: var(--th-fs-sm); font-weight: 600; color: var(--th-ink); }
+.settings-rail-item.active .settings-rail-label { color: var(--th-accent-text); }
+.settings-rail-desc { font-size: var(--th-fs-2xs); color: var(--th-muted); }
+.settings-rail-empty { padding: var(--th-space-10); font-size: var(--th-fs-xs); color: var(--th-muted); }
+.settings-content { background: var(--th-card-bg); border-radius: var(--th-r-lg); padding: var(--th-space-24) var(--th-space-24); box-shadow: var(--th-card-shadow); border: var(--th-card-border); }
+.settings-form { display: flex; flex-direction: column; gap: var(--th-space-16); margin-top: var(--th-space-6); }
+.settings-field { max-width: 480px; }
+.settings-radio-group { display: flex; gap: var(--th-space-8); flex-wrap: wrap; }
+.settings-radio { display: flex; align-items: center; gap: var(--th-space-6); padding: var(--th-space-8) var(--th-space-12); border: 1px solid var(--th-line); border-radius: var(--th-r); font-size: var(--th-fs-sm); cursor: pointer; }
+.settings-radio:has(input:checked) { border-color: var(--th-accent); background: var(--th-accent-tint); color: var(--th-accent-text); font-weight: 600; }
+.field-help { font-size: var(--th-fs-2xs); color: var(--th-muted); margin: var(--th-space-6) 0 0; line-height: 1.5; }
+.settings-select { padding: var(--th-space-8) var(--th-space-10); border: var(--th-border-width) solid var(--th-line); border-radius: var(--th-r); font-size: var(--th-fs-sm); background: var(--th-surface); color: var(--th-ink); min-width: 220px; }
+.settings-text-input { padding: var(--th-space-8) var(--th-space-10); border: var(--th-border-width) solid var(--th-line); border-radius: var(--th-r); font-size: var(--th-fs-sm); background: var(--th-surface); color: var(--th-ink); width: 100%; max-width: 360px; }
+.settings-text-input-narrow { max-width: 90px; }
+input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: var(--th-space-32); padding: var(--th-space-4); cursor: pointer; }
+
+/* Toggle switch — 1.9.44's boolean settings fields. Track/thumb dimensions
+   deliberately left as literals, not the sizing scale below — 38x22 track,
+   16px thumb at inset 3/3, translateX(16) when checked is exact interlocking
+   geometry (22 - 3 - 3 = 16; 3 + 16(inset) + 16(translate) + 3 = 38), not a
+   free "pick a size" choice like the icon/dot/avatar sizes elsewhere in this
+   file. Rounding any one of these numbers desyncs the other three. */
+.th-switch { position: relative; display: inline-block; width: 38px; height: 22px; flex-shrink: 0; }
+.th-switch input { opacity: 0; width: 0; height: 0; }
+.th-switch-track { position: absolute; inset: 0; background: var(--th-line); border-radius: 999px; transition: background var(--th-transition); cursor: pointer; }
+/* --th-text-inverse, not --th-surface — the thumb needs to read against its
+   OWN track (a mid-tone off, or accent-btn blue on), not against the page.
+   --th-surface correctly flips dark in dark mode (right for an actual
+   surface); on this thumb that flip meant a dark-navy circle on a track
+   that's also dark-ish, 2.61:1 contrast, confirmed live. --th-text-inverse
+   is #fff in every mode, which is also #fff is what --th-surface already
+   equalled in light mode — so this changes nothing there, only dark mode. */
+.th-switch-track::before { content: ''; position: absolute; width: 16px; height: 16px; left: 3px; top: 3px; background: var(--th-text-inverse); border-radius: 50%; transition: transform var(--th-transition); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); }
+.th-switch input:checked + .th-switch-track { background: var(--th-accent-btn); }
+.th-switch input:checked + .th-switch-track::before { transform: translateX(16px); }
+.th-switch input:disabled + .th-switch-track { opacity: 0.6; cursor: default; }
+.settings-toggle-row { display: flex; align-items: center; justify-content: space-between; gap: var(--th-space-16); padding: var(--th-space-10) 0; border-bottom: 1px solid var(--th-line); max-width: 560px; }
+.settings-toggle-row:last-child { border-bottom: none; }
+.settings-toggle-row-text { display: flex; flex-direction: column; gap: var(--th-space-2); }
+.settings-toggle-row-label { font-size: var(--th-fs-sm); font-weight: 600; }
+.settings-toggle-row-desc { font-size: var(--th-fs-2xs); color: var(--th-muted); }
+.settings-group { margin-bottom: var(--th-space-28); }
+.settings-group:last-child { margin-bottom: 0; }
+.settings-group-title { font-size: var(--th-fs-md); font-weight: 700; margin: 0 0 var(--th-space-4); }
+.settings-group-desc { font-size: var(--th-fs-xs); color: var(--th-muted); margin: 0 0 var(--th-space-14); max-width: 640px; line-height: 1.5; }
+.settings-empty-state { padding: var(--th-space-24); text-align: center; color: var(--th-muted); font-size: var(--th-fs-sm); border: 1px dashed var(--th-line); border-radius: var(--th-r); }
+
+/* Onboarding wizard — step progress dots (admin/app/(app)/onboarding). */
+.onboarding-steps { display: flex; gap: var(--th-space-20); }
+.onboarding-step { display: flex; align-items: center; gap: var(--th-space-6); font-size: var(--th-fs-xs); color: var(--th-muted); }
+.onboarding-step-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--th-line); }
+.onboarding-step.active { color: var(--th-ink); font-weight: 600; }
+.onboarding-step.active .onboarding-step-dot { background: var(--th-accent); }
+.onboarding-step.done { color: var(--th-ink-2); }
+.onboarding-step.done .onboarding-step-dot { background: var(--th-success-text); }
+
+/* List page — the generic Pages/Posts/Media shell, ported from 1.9.44's
+   Therum_List_Page::render() (therum-list-page.php): header with a meta
+   pill + title + action buttons, a toolbar (filter pills, search, sort,
+   style, view toggle), then a card grid or table. */
+.th-lp-header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--th-space-16); margin-bottom: var(--th-space-20); }
+.th-lp-meta { display: flex; align-items: center; gap: var(--th-space-6); font-size: var(--th-fs-2xs); text-transform: uppercase; letter-spacing: 0.06em; color: var(--th-muted); font-weight: 600; margin-bottom: var(--th-space-8); }
+.th-lp-meta-dot { width: var(--th-space-6); height: var(--th-space-6); border-radius: 999px; background: var(--th-accent); }
+.th-lp-title { font-size: 28px; font-weight: 700; margin: 0 0 var(--th-space-4); letter-spacing: -0.01em; }
+.th-lp-sub { font-size: var(--th-fs-sm); color: var(--th-ink-2); margin: 0; }
+.th-lp-actions { display: flex; gap: var(--th-space-8); flex-shrink: 0; }
+
+/* ── List toolbar: ONE control language ───────────────────────────────────
+   Every control in this bar — filter chip, sort, search, Cols, view switch —
+   is the same height, the same radius, the same border and the same surface.
+   It used to be five: pill radius on the filters, rounded-rect elsewhere, and
+   five different paddings (6/12, 8/12, 8/10, 6/12, 6/10) so nothing lined up.
+   Sort and search were also boxes wrapping another bordered box, which read
+   as a control inside a control. Change heights or radii HERE, once. */
+.th-lp-toolbar { display: flex; align-items: center; gap: var(--th-space-8); flex-wrap: wrap; margin-bottom: var(--th-space-16); }
+.th-lp-pills { display: flex; gap: var(--th-space-6); flex-wrap: wrap; }
+
+.th-lp-pill,
+.th-lp-search,
+.th-lp-sort,
+.th-density-control,
+.th-lp-view-btn,
+.th-lp-style-btn {
+  height: var(--th-ctl-h);
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--th-line);
+  border-radius: var(--th-ctl-r);
+  background: var(--th-surface);
+  font-size: 13px;
+  transition: border-color var(--th-transition), background var(--th-transition);
+}
+
+.th-lp-pill { gap: var(--th-space-6); padding: 0 var(--th-space-12); color: var(--th-ink-2); font-weight: 500; cursor: pointer; }
+.th-lp-pill:hover { border-color: var(--th-ink-2); }
+.th-lp-pill.active { background: var(--th-emphasis-bg); color: var(--th-text-inverse); border-color: var(--th-emphasis-bg); }
+.th-lp-pill-count { font-size: 11px; opacity: 0.7; font-variant-numeric: tabular-nums; }
+
+/* Every inset label in the bar (SORT, COLS) reads identically. */
+.th-lp-sort-label, .th-density-label {
+  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+  color: var(--th-muted); white-space: nowrap;
+}
+.th-lp-search { gap: var(--th-space-8); padding: 0 var(--th-space-10); color: var(--th-muted); min-width: 200px; }
+/* Same outline:none-with-no-replacement gap as .settings-search above. */
+.th-lp-search:focus-within { border-color: var(--th-accent); }
+/* padding: 0 — the wrapper carries the padding; without this the global
+   #th-content :where(input) rule pads the inner input a second time. */
+.th-lp-search-input { border: none; outline: none; background: transparent; font-size: 13px; color: var(--th-ink); flex: 1; min-width: 0; padding: 0; }
+.th-lp-sort { position: relative; gap: var(--th-space-8); padding: 0 var(--th-space-4) 0 var(--th-space-10); color: var(--th-ink-2); cursor: pointer; }
+.th-lp-sort:hover { border-color: var(--th-ink-2); }
+/* Square: side equals the shared control height, so the switch is a row of
+   even tiles rather than three differently-proportioned buttons. */
+.th-lp-style-btn, .th-lp-view-btn { justify-content: center; width: var(--th-ctl-h); padding: 0; color: var(--th-ink-2); cursor: pointer; }
+.th-lp-style-btn:hover, .th-lp-view-btn:hover:not(.active) { border-color: var(--th-ink-2); }
+.th-lp-views { display: flex; gap: var(--th-space-4); }
+.th-lp-view-btn.active { background: var(--th-emphasis-bg); color: var(--th-text-inverse); border-color: var(--th-emphasis-bg); }
+
+.th-lp-view-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: var(--th-space-16); }
+.th-lp-card { position: relative; background: var(--th-card-bg); border-radius: 14px; box-shadow: var(--th-card-shadow); overflow: hidden; display: flex; flex-direction: column; }
+.th-lp-card-thumb { position: relative; aspect-ratio: 4 / 3; background-size: cover; background-position: center; }
+.th-lp-card-kebab-wrap { position: absolute; top: 10px; right: 10px; z-index: 2; }
+.th-lp-kebab-btn { width: var(--th-space-28); height: var(--th-space-28); border-radius: 999px; background: rgba(255, 255, 255, 0.92); border: none; color: var(--th-ink-2); display: flex; align-items: center; justify-content: center; cursor: pointer; }
+.th-lp-card-meta { padding: var(--th-card-meta-pad) var(--th-card-meta-pad); display: flex; flex-direction: column; gap: var(--th-space-8); flex: 1; }
+.th-lp-card-title { font-size: 17px; font-weight: 700; margin: 0; }
+.th-lp-card-excerpt { font-size: 13px; color: var(--th-ink-2); margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.th-lp-card-pills { display: flex; gap: var(--th-space-6); flex-wrap: wrap; }
+.th-lp-card-pill { display: inline-flex; align-items: center; gap: var(--th-space-4); padding: var(--th-space-4) var(--th-space-10); border-radius: 999px; background: var(--th-bg); border: 1px solid var(--th-line); font-size: 11px; color: var(--th-ink-2); }
+.th-lp-card-pill-dot { width: var(--th-space-6); height: var(--th-space-6); border-radius: 999px; background: var(--th-success-text); }
+.th-lp-card-pill-dot.is-published { background: var(--th-success-text); }
+.th-lp-card-pill-dot.is-draft { background: var(--th-warning-text); }
+.th-lp-card-pill-dot.is-archived { background: var(--th-muted); }
+.th-lp-card-actions { display: flex; gap: var(--th-space-8); margin-top: auto; padding-top: var(--th-space-4); }
+.th-lp-card-actions a { flex: 1; text-align: center; padding: var(--th-space-8) 0; border-radius: var(--th-r); font-size: 13px; font-weight: 600; }
+.th-lp-card-actions a.th-lp-view-live { border: 1px solid var(--th-line); color: var(--th-ink); }
+.th-lp-card-actions a.th-lp-edit { background: var(--th-emphasis-bg); color: var(--th-text-inverse); }
+
+.th-lp-kebab-btn:hover { background: var(--th-surface); }
+/* The button is a flex container, so the icon's width="14" attribute is only a
+   base size — it was being shrunk to 0 and every kebab rendered as an empty
+   white disc. */
+.th-lp-kebab-btn svg { flex: 0 0 auto; }
+.th-lp-kebab-menu { position: absolute; top: 32px; right: 0; min-width: 150px; background: var(--th-card-bg); border: 1px solid var(--th-line); border-radius: var(--th-r); box-shadow: 0 10px 28px rgba(0, 0, 0, 0.18); overflow: hidden; z-index: 3; display: flex; flex-direction: column; padding: var(--th-space-4); }
+.th-lp-kebab-item { display: flex; align-items: center; width: 100%; padding: var(--th-space-8) var(--th-space-10); border-radius: calc(var(--th-r) - 4px); background: none; border: none; text-align: left; font-size: 13px; font-weight: 500; color: var(--th-ink); cursor: pointer; text-decoration: none; }
+.th-lp-kebab-item:hover { background: var(--th-bg); }
+.th-lp-kebab-item.danger { color: var(--th-danger-text); }
+.th-lp-kebab-item:disabled { opacity: 0.5; cursor: default; }
+
+.th-lp-empty { text-align: center; padding: var(--th-space-64) var(--th-space-20); color: var(--th-muted); }
+.th-lp-empty-title { font-weight: 600; color: var(--th-ink); margin-top: var(--th-space-10); }
+.th-lp-empty-sub { font-size: 13px; margin-top: var(--th-space-4); }
+
+/* Media table view */
+.th-lp-table td, .th-lp-table th { vertical-align: middle; }
+.th-media-file-cell { display: flex; align-items: center; gap: var(--th-space-10); }
+.th-media-thumb { width: var(--th-space-40); height: var(--th-space-40); border-radius: 6px; background: var(--th-bg); border: 1px solid var(--th-line); object-fit: cover; flex-shrink: 0; }
+.th-media-alt-input { width: 100%; min-width: 160px; border: 1px solid transparent; background: none; padding: var(--th-space-6) var(--th-space-8); border-radius: 6px; font-size: 13px; color: var(--th-ink); }
+.th-media-alt-input:hover { border-color: var(--th-line); }
+.th-media-alt-input:focus { outline: none; border-color: var(--th-accent); background: var(--th-bg); }
+.th-media-kebab-wrap { position: relative; display: inline-flex; }
+
+/* Media grid/masonry cards + density slider + view switch — matches
+   1.9.44's therum-list-media-patch.css (density 3-7, column-count masonry)
+   with one deliberate change: masonry tile height comes from each asset's
+   real width/height (--th-aspect, set inline in MediaCard.tsx) instead of
+   1.9.44's nth-child(3n/5n/7n/11n) pseudo-random aspect pattern — 2.0 tracks
+   real image dimensions on upload (see the sharp pipeline), 1.9.44 never
+   captured them, so faking variety isn't necessary here. */
+.th-lp-card-thumb-square { aspect-ratio: 1; }
+.th-lp-card-sub { font-size: 12px; color: var(--th-ink-2); margin-top: var(--th-space-2); }
+
+.th-density-control { gap: var(--th-space-8); padding: 0 var(--th-space-10); transition: opacity .2s, filter .2s, border-color var(--th-transition); }
+/* Masonry is column-based too, so Cols drives it as well — only the
+   table has no columns to adjust. */
+.th-density-control[data-view="table"] { opacity: 0.4; pointer-events: none; filter: grayscale(0.5); }
+.th-density-label { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--th-muted); }
+.th-density-slider { width: 72px; height: var(--th-space-4); background: var(--th-line); border-radius: 2px; outline: none; -webkit-appearance: none; appearance: none; cursor: pointer; }
+.th-density-slider::-webkit-slider-thumb { -webkit-appearance: none; width: var(--th-space-14); height: var(--th-space-14); background: var(--th-accent); border-radius: 50%; cursor: pointer; border: 2px solid var(--th-card-bg); }
+.th-density-slider::-moz-range-thumb { width: var(--th-space-14); height: var(--th-space-14); background: var(--th-accent); border-radius: 50%; cursor: pointer; border: 2px solid var(--th-card-bg); }
+/* outline:none on a range input needs a replacement on the thumb specifically
+   — a keyboard-focused ring around the (invisible) track wouldn't be visible
+   against it anyway. Can't combine -webkit-/-moz- pseudo-elements in one
+   selector list (an unsupported one invalidates the whole rule in some
+   browsers), so these stay separate. */
+.th-density-slider:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--th-accent-tint); }
+.th-density-slider:focus-visible::-moz-range-thumb { box-shadow: 0 0 0 3px var(--th-accent-tint); }
+.th-density-value { font-size: 12px; font-weight: 600; color: var(--th-ink); font-variant-numeric: tabular-nums; min-width: var(--th-space-10); text-align: right; }
+
+.th-lp-view { display: none; }
+.th-lp-view.active { display: block; }
+
+.th-lp-view-grid.active { display: grid; }
+.th-lp-view-grid[data-density="3"] { grid-template-columns: repeat(3, 1fr); }
+.th-lp-view-grid[data-density="4"] { grid-template-columns: repeat(4, 1fr); }
+.th-lp-view-grid[data-density="5"] { grid-template-columns: repeat(5, 1fr); }
+.th-lp-view-grid[data-density="6"] { grid-template-columns: repeat(6, 1fr); }
+.th-lp-view-grid[data-density="7"] { grid-template-columns: repeat(7, 1fr); }
+@media (max-width: 1100px) { .th-lp-view-grid[data-density="6"], .th-lp-view-grid[data-density="7"] { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 800px) { .th-lp-view-grid[data-density] { grid-template-columns: repeat(3, 1fr); } }
+
+.th-lp-view-masonry.active { display: block; column-count: 4; column-gap: var(--th-space-14); }
+.th-lp-view-masonry[data-density="3"] { column-count: 3; }
+.th-lp-view-masonry[data-density="4"] { column-count: 4; }
+.th-lp-view-masonry[data-density="5"] { column-count: 5; }
+.th-lp-view-masonry[data-density="6"] { column-count: 6; }
+.th-lp-view-masonry[data-density="7"] { column-count: 7; }
+@media (max-width: 1400px) { .th-lp-view-masonry[data-density="6"], .th-lp-view-masonry[data-density="7"] { column-count: 4; } }
+@media (max-width: 900px) { .th-lp-view-masonry[data-density] { column-count: 2; } }
+.th-lp-view-masonry .th-lp-card { display: inline-block; width: 100%; margin-bottom: var(--th-space-14); break-inside: avoid; }
+/* Masonry is the true-shape view: the tile is whatever shape the file is.
+   It used to force `aspect-ratio: var(--th-aspect)` off the stored
+   width/height, which lies whenever those are missing (falls back to 1 —
+   a square box that crops everything) or stale. Nothing is imposed here now;
+   the image below sizes itself and the tile follows. */
+.th-lp-view-masonry .th-lp-card-thumb { height: auto; aspect-ratio: auto; }
+
+/* ── Media tiles — artwork only ────────────────────────────────────────────
+   Grid and masonry tiles are the image itself: no caption box underneath,
+   no card chrome around it. The old cover-cropped thumb + meta box made a
+   media library read like a list of posts AND hid what each file actually
+   was (a wide banner showed as an unidentifiable centre slice). */
+.th-lp-card-media { background: none; box-shadow: none; border-radius: var(--th-r); overflow: visible; }
+.th-lp-card-media .th-lp-card-link {
+  display: block; position: relative; width: 100%; padding: 0;
+  border: none; background: none; cursor: zoom-in; border-radius: var(--th-r); overflow: hidden;
+}
+.th-lp-card-media .th-lp-card-thumb {
+  display: flex; align-items: center; justify-content: center;
+  /* A neutral field behind letterboxing, so a logo on transparency reads as
+     a logo rather than as a hole in the page. */
+  background: var(--th-surface-2, rgba(0, 0, 0, .04));
+  border: 1px solid var(--th-line);
+  border-radius: var(--th-r);
+  overflow: hidden;
+}
+/* contain, never cover — showing the whole file is the entire point. */
+.th-lp-card-media .th-lp-card-thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+/* The image renders at its own natural ratio and the tile takes that height —
+   no box to fit into, so nothing is cropped and nothing is letterboxed. This
+   is the point of masonry: the library shows the real shape of each file. */
+.th-lp-view-masonry .th-lp-card-thumb img { width: 100%; height: auto; object-fit: fill; }
+/* Files with no image to measure (video, audio, documents) still need a box. */
+.th-lp-view-masonry .th-lp-card-thumb:not(:has(img)) { aspect-ratio: 4 / 3; }
+/* Metro is a deliberate mosaic — its tiles are cropped by design. */
+.th-media-kind { font-size: 12px; font-weight: 700; letter-spacing: .08em; color: var(--th-ink-3); }
+/* Video tiles behave exactly like image tiles until hovered. */
+.th-lp-card-media .th-lp-card-thumb video { width: 100%; height: 100%; object-fit: contain; display: block; }
+.th-lp-view-masonry .th-lp-card-thumb video { width: 100%; height: auto; object-fit: fill; }
+/* Marks a tile that will move when pointed at — hidden the moment it does,
+   so the badge never sits on top of the thing it was advertising. */
+.th-media-motion {
+  position: absolute; top: var(--th-space-6); left: var(--th-space-6);
+  padding: 1px 6px; border-radius: 4px;
+  font-size: 9px; font-weight: 800; letter-spacing: .06em; line-height: 1.6;
+  color: #fff; background: rgba(0, 0, 0, .6); backdrop-filter: blur(4px);
+  pointer-events: none;
+}
+.th-lp-card-media .th-lp-card-thumb { position: relative; }
+
+/* Hover caption — the only text on a tile, and only while pointed at. */
+.th-media-caption {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  display: flex; flex-direction: column; gap: 1px;
+  padding: var(--th-space-14) var(--th-space-10) var(--th-space-8);
+  text-align: left; color: #fff;
+  background: linear-gradient(to top, rgba(0, 0, 0, .78), rgba(0, 0, 0, 0));
+  opacity: 0; transform: translateY(4px);
+  transition: opacity var(--th-transition), transform var(--th-transition);
+  pointer-events: none;
+}
+.th-lp-card-media:hover .th-media-caption,
+.th-lp-card-media .th-lp-card-link:focus-visible .th-media-caption { opacity: 1; transform: none; }
+.th-media-caption-name { font-size: 12px; font-weight: 600; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.th-media-caption-sub { font-size: 11px; opacity: .8; }
+/* Touch has no hover — never hide the name behind a state that can't happen. */
+@media (hover: none) {
+  .th-media-caption { opacity: 1; transform: none; }
+}
+
+/* ── Media lightbox ───────────────────────────────────────────────────────
+   Full-bleed viewer whose toolbar floats ON the image rather than beside it,
+   and whose edit actions each open their own screen in that same panel. */
+.th-lbx { position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center; justify-content: center; }
+.th-lbx-scrim { position: absolute; inset: 0; background: rgba(10, 10, 10, .94); cursor: zoom-out; }
+.th-lbx-top {
+  position: absolute; top: 0; left: 0; right: 0; z-index: 2;
+  display: flex; align-items: center; gap: var(--th-space-12);
+  padding: var(--th-space-12) var(--th-space-16); color: #fff;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, .55), rgba(0, 0, 0, 0));
+}
+.th-lbx-name { font-size: 13px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.th-lbx-count { font-size: 12px; opacity: .7; }
+.th-lbx-icon { background: none; border: none; color: #fff; font-size: 18px; line-height: 1; cursor: pointer; padding: var(--th-space-4); }
+.th-lbx-nav {
+  position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
+  width: 44px; height: 44px; border-radius: 999px; border: none;
+  background: rgba(255, 255, 255, .12); color: #fff; font-size: 26px; line-height: 1; cursor: pointer;
+}
+.th-lbx-nav:hover { background: rgba(255, 255, 255, .22); }
+.th-lbx-nav.prev { left: var(--th-space-16); }
+.th-lbx-nav.next { right: var(--th-space-16); }
+.th-lbx-stage {
+  position: relative; z-index: 1;
+  /* Explicit size, not just max-*: as a flex container with no width of its
+     own this collapsed to 0×0 and took the image with it. The image takes the
+     room it can here — the toolbar deliberately floats OVER its lower edge
+     (translucent, blurred) rather than sitting in a reserved strip beneath
+     it. Only the top bar is cleared. */
+  width: min(94vw, 1500px); height: calc(100vh - 96px);
+  display: flex; align-items: center; justify-content: center;
+}
+/* The frame shrink-wraps the media so the crop rect's percentages are
+   relative to the image, not to the letterboxing. It must NOT carry its own
+   max-width/height: sizing the child off a shrink-to-fit parent is circular
+   and collapses both to zero. The image is constrained in viewport units
+   instead, and the frame follows it. */
+.th-lbx-frame {
+  position: relative; display: flex;
+  /* Checkerboard so transparent artwork (logos, line art) is legible against
+     the dark scrim instead of vanishing into it. */
+  background-color: #6b6b6b;
+  background-image:
+    linear-gradient(45deg, #565656 25%, transparent 25%, transparent 75%, #565656 75%),
+    linear-gradient(45deg, #565656 25%, transparent 25%, transparent 75%, #565656 75%);
+  background-size: 22px 22px;
+  background-position: 0 0, 11px 11px;
+}
+.th-lbx-stage img, .th-lbx-stage video {
+  width: auto; height: auto;
+  max-width: min(94vw, 1500px); max-height: calc(100vh - 96px);
+  object-fit: contain; display: block;
+}
+.th-lbx-stage.cropping { cursor: crosshair; touch-action: none; }
+.th-lbx-stage.cropping img { user-select: none; -webkit-user-drag: none; }
+.th-lbx-crop { position: absolute; border: 2px solid #fff; box-shadow: 0 0 0 9999px rgba(0, 0, 0, .55); pointer-events: none; }
+.th-lbx-file { color: #fff; text-align: center; padding: var(--th-space-32, 32px); }
+.th-lbx-file-ext { font-size: 40px; font-weight: 800; letter-spacing: .06em; opacity: .5; }
+.th-lbx-file-name { font-size: 13px; margin-top: var(--th-space-8); }
+
+.th-lbx-bar {
+  position: absolute; z-index: 3;
+  /* Deliberately inside the image's lower edge, not below it. */
+  left: 50%; transform: translateX(-50%); bottom: 34px;
+  width: min(92vw, 900px);
+  display: flex; flex-direction: column; gap: var(--th-space-10);
+  padding: var(--th-space-12) var(--th-space-14);
+  border-radius: 14px; color: #fff;
+  background: rgba(24, 24, 24, .72);
+  border: 1px solid rgba(255, 255, 255, .14);
+  backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px);
+}
+/* The action row is a toolbar: one line, grouped by consequence (edit /
+   copy / destructive) with rules between the groups, icon-over-label buttons
+   so every target is the same size. It used to be a wrapping run of text
+   pills, which read as a paragraph of links and gave Delete the same visual
+   weight as Rename. */
+.th-lbx-tools { display: flex; align-items: stretch; gap: var(--th-space-4); min-width: 0; }
+.th-lbx-group { display: flex; align-items: stretch; gap: 2px; }
+.th-lbx-spacer { flex: 1; }
+.th-lbx-sep { width: 1px; align-self: stretch; margin: 0 var(--th-space-6); background: rgba(255, 255, 255, .16); }
+.th-lbx-file-id {
+  display: flex; flex-direction: column; justify-content: center; gap: 2px;
+  min-width: 0; max-width: 34%; padding-right: var(--th-space-4);
+}
+.th-lbx-file-title { font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.th-lbx-file-facts { display: flex; align-items: center; gap: var(--th-space-6); font-size: 11px; opacity: .6; white-space: nowrap; }
+/* Dot separators as elements, so they never end up orphaned on a wrap. */
+.th-lbx-file-facts i { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .7; }
+.th-lbx-badge {
+  padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 700;
+  letter-spacing: .04em; text-transform: uppercase;
+  background: rgba(255, 255, 255, .16); opacity: 1;
+}
+.th-lbx-btn {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  min-width: 62px; padding: var(--th-space-6) var(--th-space-8);
+  border-radius: 8px; border: 1px solid transparent;
+  background: transparent; color: #fff;
+  font-size: 10px; font-weight: 600; letter-spacing: .01em;
+  cursor: pointer; text-decoration: none;
+  transition: background var(--th-transition), border-color var(--th-transition);
+}
+.th-lbx-btn-icon { display: block; width: 18px; height: 18px; }
+.th-lbx-btn-icon svg { width: 100%; height: 100%; display: block; }
+.th-lbx-btn-label { line-height: 1; }
+.th-lbx-btn:hover:not(:disabled) { background: rgba(255, 255, 255, .14); border-color: rgba(255, 255, 255, .16); }
+.th-lbx-btn:active:not(:disabled) { background: rgba(255, 255, 255, .22); }
+.th-lbx-btn:disabled { opacity: .35; cursor: default; }
+.th-lbx-btn.danger { color: #ff9a9a; }
+.th-lbx-btn.danger:hover:not(:disabled) { background: rgba(255, 92, 92, .22); border-color: rgba(255, 92, 92, .35); }
+
+.th-lbx-chips { display: flex; flex-wrap: wrap; gap: var(--th-space-6); }
+.th-lbx-tool, .th-lbx-chip {
+  padding: var(--th-space-6) var(--th-space-12);
+  border-radius: 8px; border: 1px solid rgba(255, 255, 255, .18);
+  background: rgba(255, 255, 255, .08); color: #fff;
+  font-size: 12px; font-weight: 600; cursor: pointer; text-decoration: none;
+}
+.th-lbx-tool:hover:not(:disabled), .th-lbx-chip:hover { background: rgba(255, 255, 255, .18); }
+.th-lbx-tool:disabled { opacity: .4; cursor: default; }
+.th-lbx-tool.primary { background: var(--th-accent); border-color: var(--th-accent); }
+.th-lbx-tool.danger { color: #ff9a9a; }
+.th-lbx-chip.active { background: #fff; color: #111; border-color: #fff; }
+.th-lbx-screen { display: flex; flex-direction: column; gap: var(--th-space-10); }
+.th-lbx-screen-title { font-size: 12px; opacity: .8; }
+.th-lbx-screen-actions { display: flex; gap: var(--th-space-6); justify-content: flex-end; }
+.th-lbx-field { display: flex; flex-direction: column; gap: var(--th-space-4); font-size: 12px; }
+.th-lbx-field span { opacity: .75; }
+.th-lbx-field input {
+  padding: var(--th-space-8) var(--th-space-10);
+  border-radius: var(--th-r); border: 1px solid rgba(255, 255, 255, .22);
+  background: rgba(0, 0, 0, .35); color: #fff; font-size: 13px;
+}
+.th-lbx-error { font-size: 12px; color: #ff9a9a; }
+@media (max-width: 900px) {
+  /* Too narrow for one row — the filename is already in the top bar, so drop
+     it here and let the buttons scroll rather than wrap into a block. */
+  .th-lbx-file-id, .th-lbx-tools > .th-lbx-sep:first-of-type { display: none; }
+  .th-lbx-tools { overflow-x: auto; scrollbar-width: none; }
+  .th-lbx-tools::-webkit-scrollbar { display: none; }
+  .th-lbx-spacer { flex: 0 0 var(--th-space-8); }
+}
+@media (max-width: 700px) {
+  .th-lbx-nav { display: none; }
+  .th-lbx-bar { bottom: 0; width: 100vw; border-radius: 14px 14px 0 0; }
+}
+
+/* Bulk rename modal */
+.th-modal-backdrop { position: fixed; inset: 0; background: rgba(10, 10, 10, 0.45); display: flex; align-items: center; justify-content: center; z-index: 50; padding: var(--th-space-24); }
+.th-modal { width: 100%; max-width: 560px; max-height: 80vh; display: flex; flex-direction: column; background: var(--th-card-bg); border-radius: 14px; box-shadow: 0 24px 60px rgba(0, 0, 0, 0.35); overflow: hidden; }
+.th-modal-header { display: flex; align-items: center; justify-content: space-between; padding: var(--th-space-16) var(--th-space-20); border-bottom: 1px solid var(--th-line); flex-shrink: 0; }
+.th-modal-header h2 { font-size: 16px; font-weight: 700; margin: 0; }
+.th-modal-close { width: var(--th-space-28); height: var(--th-space-28); border-radius: 999px; border: none; background: var(--th-bg); color: var(--th-ink-2); cursor: pointer; }
+.th-modal-close:hover { background: var(--th-line); color: var(--th-ink); }
+.th-modal-body { padding: var(--th-space-16) var(--th-space-20); overflow-y: auto; flex: 1; }
+.th-modal-footer { display: flex; align-items: center; justify-content: space-between; gap: var(--th-space-10); padding: var(--th-space-14) var(--th-space-20); border-top: 1px solid var(--th-line); flex-shrink: 0; }
+
+.th-bulk-list { display: flex; flex-direction: column; gap: var(--th-space-8); }
+.th-bulk-row { display: grid; grid-template-columns: 18px minmax(0, 1fr) 16px minmax(0, 1fr) 20px; align-items: center; gap: var(--th-space-10); }
+.th-bulk-current { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.th-bulk-arrow { color: var(--th-muted); text-align: center; }
+.th-bulk-name-input { width: 100%; border: 1px solid var(--th-line); border-radius: 6px; padding: var(--th-space-6) var(--th-space-8); font-size: 13px; background: var(--th-bg); color: var(--th-ink); }
+.th-bulk-name-input:focus { outline: none; border-color: var(--th-accent); }
+.th-bulk-ok { color: var(--th-success-text); font-weight: 700; text-align: center; }
+.th-bulk-err { color: var(--th-danger-text); font-size: 11px; }
+
+/* Preview / View-live — reached via ?embed=1 (bare, no sidebar/topbar). */
+.th-preview-banner { display: flex; align-items: center; gap: var(--th-space-10); padding: var(--th-space-10) var(--th-space-20); background: var(--th-warning-bg); color: var(--th-warning-text); font-size: 13px; font-weight: 600; border-bottom: 1px solid var(--th-line); }
+.th-preview-banner.is-live { background: var(--th-success-bg); color: var(--th-success-text); }
+.th-preview-title { font-weight: 400; opacity: 0.75; }
+.th-preview-frame { padding: var(--th-space-24); }
+
+/* ── Desktop Mode — built natively (see DesktopShell.tsx): draggable/
+   resizable windows + a left-edge dock, admin chrome yielding while active. */
+/* #232733 is a one-off gradient-start with no other semantic match; the
+   60%-stop is exactly --sb-bg's value (not a coincidence — this is the same
+   dark rail color), so that half is tokenized. */
+#th-desktop { display: flex; height: 100vh; width: 100vw; overflow: hidden; background: radial-gradient(ellipse at 20% 0%, #232733 0%, var(--th-sidebar-bg) 60%); }
+.th-desktop-canvas { flex: 1; position: relative; overflow: hidden; }
+.th-desktop-version { position: fixed; bottom: 10px; right: 84px; font-size: 11px; color: rgba(255, 255, 255, 0.35); pointer-events: none; }
+
+.th-window {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  background: var(--th-surface);
+  border-radius: 10px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45), 0 2px 8px rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.15);
+  min-width: 360px;
+  min-height: 240px;
+}
+.th-window-titlebar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: var(--th-space-40);
+  padding: 0 var(--th-space-10) 0 var(--th-space-14);
+  background: var(--th-surface-2);
+  border-bottom: 1px solid var(--th-line);
+  cursor: grab;
+  flex-shrink: 0;
+  user-select: none;
+}
+.th-window-titlebar:active { cursor: grabbing; }
+.th-window-title { font-size: 12px; font-weight: 600; color: var(--th-ink); }
+.th-window-controls { display: flex; align-items: center; gap: var(--th-space-4); }
+.th-window-controls button {
+  width: var(--th-space-24);
+  height: var(--th-space-24);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--th-ink-2);
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0;
+}
+.th-window-controls button:hover { background: var(--th-line); color: var(--th-ink); }
+.th-window-frame { flex: 1; border: none; width: 100%; background: var(--th-bg); }
+.th-window-resize { position: absolute; right: 0; bottom: 0; width: var(--th-space-16); height: var(--th-space-16); cursor: nwse-resize; }
+.th-window-resize::after {
+  content: '';
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: var(--th-space-8);
+  height: var(--th-space-8);
+  border-right: 2px solid var(--th-muted);
+  border-bottom: 2px solid var(--th-muted);
+  opacity: 0.6;
+}
+
+.th-dock {
+  width: 68px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: var(--th-space-16) 0;
+  background: rgba(0, 0, 0, 0.35);
+  border-left: 1px solid rgba(255, 255, 255, 0.06);
+}
+.th-dock-items { display: flex; flex-direction: column; gap: var(--th-space-8); overflow-y: auto; }
+.th-dock-icon {
+  position: relative;
+  width: var(--th-space-48);
+  height: var(--th-space-48);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  color: rgba(255, 255, 255, 0.75);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+.th-dock-icon:hover { background: rgba(255, 255, 255, 0.14); transform: translateY(var(--th-hover-lift)); color: var(--th-text-inverse); }
+.th-dock-icon.active { background: var(--th-accent); border-color: var(--th-accent); color: var(--th-text-inverse); }
+/* --th-text-inverse, not --th-surface — same reasoning as the switch thumb
+   above: this dot sits on the dock's own permanently-dark chrome (not the
+   page), so it needs a color that stays bright regardless of --th-surface's
+   light/dark flip, or it goes dark-on-dark in dark mode. */
+.th-dock-dot { position: absolute; bottom: -5px; width: var(--th-space-4); height: var(--th-space-4); border-radius: 999px; background: var(--th-text-inverse); }
+.th-dock-footer { display: flex; flex-direction: column; align-items: center; gap: var(--th-space-10); }
+.th-dock-user {
+  width: var(--th-space-32);
+  height: var(--th-space-32);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--th-accent);
+  color: var(--th-text-inverse);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* A page rendered inside a Desktop Mode window (?embed=1) — bare, no shell
+   chrome, since the window is already the frame. */
+#th-embed-root { min-height: 100vh; background: var(--th-bg); }
+.settings-radio input { margin: 0; }
+
+/* List controls: sort picker, search clear, cursor pager (2026-07-27) —
+   sorting and paging didn't exist before; these match the pill/search styling
+   already established above. */
+/* Borderless inside its wrapper — the wrapper IS the control. Boxing this
+   too is what produced a bordered select sitting inside a bordered box. */
+.th-lp-sort-select {
+  appearance: none; height: 100%; padding: 0 var(--th-space-20) 0 0;
+  border: 0; outline: none;
+  background: transparent url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right var(--th-space-6) center;
+  color: var(--th-ink); font-size: 13px; font-weight: 500; cursor: pointer;
+}
+.th-lp-sort:hover, .th-lp-search:hover, .th-density-control:hover { border-color: var(--th-ink-2); }
+.th-lp-sort:focus-within, .th-lp-search:focus-within { border-color: var(--th-accent); }
+.th-lp-search { position: relative; }
+.th-lp-search-clear {
+  position: absolute; right: var(--th-space-6); top: 50%; transform: translateY(-50%);
+  border: 0; background: transparent; color: var(--th-ink-3); font-size: 16px; line-height: 1; cursor: pointer; padding: 0 4px;
+}
+.th-lp-search-clear:hover { color: var(--th-ink); }
+/* Dim the list while a filter/sort round-trip is in flight. */
+.th-lp-toolbar[data-pending="1"] { opacity: .6; }
+.th-lp-pager { display: flex; align-items: center; justify-content: center; gap: var(--th-space-12); margin-top: var(--th-space-20); }
+.th-lp-pager-note { font-size: 12px; color: var(--th-ink-3); }
+.th-lp-pager .th-btn[disabled] { opacity: .4; cursor: default; }
+
+/* Content-list layouts — the four Therum_List_Page / Therum_Card_Style views.
+   `.th-lp-list` itself had no rule at all, so every card stacked full-width
+   whatever the content type. Each variant below only changes geometry; the
+   card markup is the same in all four. */
+.th-lp-list { display: grid; gap: var(--th-space-14); margin-top: var(--th-space-16); }
+
+/* Card — the default: a comfortable multi-column deck. */
+.th-lp-list-card { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+
+/* Hero — one full-width card per row with a cinematic image band. */
+.th-lp-list-hero { grid-template-columns: 1fr; gap: var(--th-space-20); }
+.th-lp-list-hero .th-lp-card-thumb { aspect-ratio: 21 / 8; }
+.th-lp-list-hero .th-lp-card-title { font-size: 22px; }
+.th-lp-list-hero .th-lp-card-actions { max-width: 320px; }
+
+/* Grid — dense tiles: image, title, status. Everything else is noise here. */
+.th-lp-list-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: var(--th-space-10); }
+.th-lp-list-grid .th-lp-card-thumb { aspect-ratio: 1; }
+.th-lp-list-grid .th-lp-card-meta { padding: var(--th-space-10); gap: var(--th-space-6); }
+.th-lp-list-grid .th-lp-card-title { font-size: 14px; }
+.th-lp-list-grid .th-lp-card-pill:not(:first-child) { display: none; }
+.th-lp-list-grid .th-lp-card-actions a.th-lp-view-live { display: none; }
+.th-lp-list-grid .th-lp-card-actions a { padding: var(--th-space-6) 0; font-size: 12px; }
+
+/* List — a text row per item; no image band, actions pinned right. */
+.th-lp-list-list { grid-template-columns: 1fr; gap: var(--th-space-8); }
+.th-lp-list-list .th-lp-card { flex-direction: row; }
+.th-lp-list-list .th-lp-card-meta {
+  flex-direction: row; align-items: center; gap: var(--th-space-12);
+  padding: var(--th-space-10) var(--th-space-14);
+}
+.th-lp-list-list .th-lp-card-title {
+  font-size: 15px; flex: 1; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.th-lp-list-list .th-lp-card-kebab-wrap { position: static; flex: 0 0 auto; }
+.th-lp-list-list .th-lp-card-pills { flex: 0 0 auto; flex-wrap: nowrap; }
+.th-lp-list-list .th-lp-card-actions { margin-top: 0; padding-top: 0; flex: 0 0 auto; }
+.th-lp-list-list .th-lp-card-actions a { flex: 0 0 auto; padding: var(--th-space-6) var(--th-space-12); font-size: 12px; }
+/* The kebab sits inline in the title here rather than over an image, so it
+   needs the plain-surface treatment instead of the on-image one. */
+.th-lp-list-list .th-lp-kebab-btn { background: transparent; color: var(--th-ink-3); box-shadow: none; }
+.th-lp-list-list .th-lp-kebab-btn:hover { color: var(--th-ink); }
+
+@media (max-width: 720px) {
+  .th-lp-list-list .th-lp-card-meta { flex-wrap: wrap; }
+  .th-lp-list-list .th-lp-card-title { flex-basis: 100%; }
+}
+
+/* ── Appearance — grouped 3-column control board (2026-07-27) ──────────────
+   Same save-on-change model as the Settings domains, but 36 controls is too
+   many for a single stacked column, so the groups flow into a masonry-ish
+   3-up. Each group is a self-contained card; nothing here submits. */
+.th-ap-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--th-space-16);
+  align-items: start;
+}
+@media (max-width: 1500px) { .th-ap-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 1000px) { .th-ap-grid { grid-template-columns: minmax(0, 1fr); } }
+
+.th-ap-group {
+  background: var(--th-card-bg);
+  border: var(--th-card-border);
+  border-radius: var(--th-r-lg);
+  box-shadow: var(--th-card-shadow);
+  overflow: hidden;
+}
+.th-ap-group-head { padding: var(--th-space-14) var(--th-space-16) var(--th-space-10); border-bottom: 1px solid var(--th-line); }
+.th-ap-group-title { margin: 0; font-size: 13px; font-weight: 700; letter-spacing: .01em; }
+.th-ap-group-sub { margin: 2px 0 0; font-size: 12px; color: var(--th-ink-3); line-height: 1.4; }
+.th-ap-group-body { display: flex; flex-direction: column; }
+
+/* Label left, control right — the control column is allowed to shrink but
+   never to wrap mid-segment, which is what a fixed width would cause at the
+   narrow end of the 3-up. */
+.th-ap-row {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--th-space-12);
+  padding: var(--th-space-10) var(--th-space-16);
+  border-bottom: 1px solid var(--th-line);
+}
+.th-ap-row:last-child { border-bottom: 0; }
+.th-ap-row-text { min-width: 0; }
+.th-ap-row-label { font-size: 13px; font-weight: 500; color: var(--th-ink); }
+.th-ap-row-help { font-size: 11px; color: var(--th-ink-3); line-height: 1.4; margin-top: 1px; }
+.th-ap-row-error { font-size: 11px; color: var(--th-err, #ef4444); margin-top: 2px; }
+.th-ap-row-control { flex-shrink: 0; }
+
+/* Segmented control — one bordered track, buttons share it. */
+.th-seg { display: inline-flex; border: 1px solid var(--th-line); border-radius: var(--th-ctl-r); background: var(--th-surface); overflow: hidden; }
+.th-seg-btn {
+  border: 0; background: transparent; color: var(--th-ink-2);
+  padding: var(--th-space-6) var(--th-space-10);
+  font-size: 12px; font-weight: 500; cursor: pointer; white-space: nowrap;
+  border-right: 1px solid var(--th-line);
+}
+.th-seg-btn:last-child { border-right: 0; }
+.th-seg-btn:hover:not(.active):not(:disabled) { background: var(--th-bg); }
+.th-seg-btn.active { background: var(--th-emphasis-bg); color: var(--th-text-inverse); }
+.th-seg-btn:disabled { opacity: .5; cursor: default; }
+
+.th-ap-select { min-width: 150px; }
+.th-ap-color { display: inline-flex; align-items: center; gap: var(--th-space-8); }
+.th-ap-color-input { width: 30px; height: 30px; padding: 2px; border: 1px solid var(--th-line); border-radius: var(--th-r); background: var(--th-surface); cursor: pointer; }
+.th-ap-color-value { font-size: 11px; color: var(--th-ink-3); }
+.th-ap-reset { border: 0; background: none; color: var(--th-ink-3); font-size: 11px; text-decoration: underline; cursor: pointer; padding: 0; }
+.th-ap-reset:hover { color: var(--th-ink); }
+.th-ap-stepper { display: inline-flex; align-items: center; gap: var(--th-space-8); }
+.th-ap-stepper-value { font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; min-width: 24px; text-align: right; }
+
+/* ── Appearance fields ported from 1.9.44 (2026-07-27) ────────────────────
+   These 12 shipped as stored-and-validated only — the page saved them and
+   the API served them, but nothing consumed them, so every one was a control
+   that visibly did nothing. Each selector below is what makes its field real.
+   Attribute names come from appearanceDataAttrs(); baseline values emit no
+   attribute at all, so a rule here only ever fires on a non-default. */
+
+/* Sidebar layout — icons-only collapses the rail to its icon column; text-only
+   drops the icons. Both keep the accessible label in the DOM. */
+/* Folding reuses icons-only rather than duplicating it: the collapsed rail
+   IS the icons layout, the only difference is that fold is a per-user toggle
+   and layout is a site setting. */
+#th-shell[data-sidebar-layout='icons'] #th-sb,
+#th-shell[data-sidebar-folded='on'] #th-sb { width: 68px; }
+#th-shell[data-sidebar-layout='icons'] #th-main,
+#th-shell[data-sidebar-folded='on'] #th-main { margin-left: 68px; }
+#th-shell[data-sidebar-layout='icons'] .th-sb-item span,
+#th-shell[data-sidebar-layout='icons'] .th-sb-section-label,
+#th-shell[data-sidebar-layout='icons'] .th-sb-search-box,
+#th-shell[data-sidebar-layout='icons'] .th-sb-foot-text,
+#th-shell[data-sidebar-folded='on'] .th-sb-item span,
+#th-shell[data-sidebar-folded='on'] .th-sb-section-label,
+#th-shell[data-sidebar-folded='on'] .th-sb-search-box,
+#th-shell[data-sidebar-folded='on'] .th-site-info,
+#th-shell[data-sidebar-folded='on'] .th-sb-foot-text { display: none; }
+#th-shell[data-sidebar-layout='icons'] .th-sb-item,
+#th-shell[data-sidebar-folded='on'] .th-sb-item { justify-content: center; }
+
+/* The fold button. Hidden unless Appearance > Sidebar > Foldable is on —
+   that rule is above, next to the other sidebar-layout rules. */
+.th-sb-fold {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--th-space-24);
+  height: var(--th-space-24);
+  flex-shrink: 0;
+  border: 1px solid var(--th-sidebar-line);
+  border-radius: var(--th-r-sm);
+  background: var(--th-sidebar-wash-2);
+  color: var(--th-sidebar-ink-2);
+  cursor: pointer;
+  padding: 0;
+}
+.th-sb-fold:hover { background: var(--th-sidebar-wash-4); color: var(--th-sidebar-ink); }
+.th-sb-fold svg { transform: rotate(180deg); transition: transform var(--th-dur, .18s) var(--th-ease, ease); }
+#th-shell[data-sidebar-folded='on'] .th-sb-fold svg { transform: rotate(0deg); }
+#th-shell[data-sidebar-folded='on'] .th-sb-fold { margin-left: 0; }
+#th-shell[data-sidebar-layout='text'] .th-sb-item svg { display: none; }
+
+/* Foldable shows the collapse affordance; without it the control is hidden. */
+#th-shell:not([data-sidebar-foldable='on']) .th-sb-fold { display: none; }
+
+/* Background pattern — painted on the shell behind everything. */
+#th-shell[data-bg-image] { background-attachment: fixed; }
+#th-shell[data-bg-image='mesh'] {
+  --th-bg-pattern:
+    radial-gradient(at 20% 15%, color-mix(in srgb, var(--th-accent) 14%, transparent) 0, transparent 45%),
+    radial-gradient(at 82% 70%, color-mix(in srgb, var(--th-accent) 10%, transparent) 0, transparent 45%);
+}
+#th-shell[data-bg-image='grid'] {
+  --th-bg-pattern: linear-gradient(var(--th-line) 1px, transparent 1px), linear-gradient(90deg, var(--th-line) 1px, transparent 1px);
+  --th-bg-pattern-size: 32px 32px, 32px 32px;
+}
+#th-shell[data-bg-image='dots'] {
+  --th-bg-pattern: radial-gradient(var(--th-line) 1px, transparent 1px);
+  --th-bg-pattern-size: 20px 20px;
+}
+#th-shell[data-bg-image='noise'] {
+  --th-bg-pattern: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='.035'/%3E%3C/svg%3E");
+}
+
+/* Card template — the card's shape in content lists. `hero` is the baseline
+   and emits no attribute, so only the other six need rules. */
+#th-shell[data-card-template='list-1'] .th-lp-card,
+#th-shell[data-card-template='list-2'] .th-lp-card,
+#th-shell[data-card-template='list-3'] .th-lp-card { display: grid; grid-template-columns: 88px 1fr; align-items: center; gap: var(--th-space-12); }
+#th-shell[data-card-template='list-2'] .th-lp-card-thumb { aspect-ratio: 1; }
+#th-shell[data-card-template='list-3'] .th-lp-card { grid-template-columns: 140px 1fr; }
+#th-shell[data-card-template='detailed'] .th-lp-card-meta { padding-bottom: var(--th-space-16); border-top: 1px solid var(--th-line); }
+
+/* Card image — what fills a thumbnail with no cover image of its own. */
+/* Card image — what a card with no cover picture shows instead. Selected by
+   ContentCard, which writes .th-lp-card-thumb--<value>; these used to be
+   `:empty` rules that could never match, since the thumb always holds the
+   kebab menu. 'gradient' is the default and stays an inline style there. */
+.th-lp-card-thumb--featured { background: var(--th-bg); }
+.th-lp-card-thumb--stock { background: linear-gradient(135deg, #cbd5e1, #94a3b8); }
+.th-lp-card-thumb--wireframe {
+  background-color: var(--th-bg);
+  background-image:
+    linear-gradient(var(--th-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--th-line) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+.th-lp-card-thumb--pattern {
+  background-color: var(--th-bg);
+  background-image: radial-gradient(var(--th-line-2) 1.5px, transparent 1.5px);
+  background-size: 12px 12px;
+}
+
+/* Drag grips — hidden unless asked for, which is why the toggle exists. */
+/* Show grips — the dashboard's resize grip is normally hover-only; this
+   pins it visible without entering Edit layout mode. Targets
+   .dash-card-resize, the element that actually exists (the old rules named
+   .th-grip, which nothing renders). */
+#th-shell[data-show-grips='on'] .dash-card-resize { opacity: .6; }
+
+/* Desktop mode — bare screens, no sidebar or topbar. */
+#th-shell[data-desktop-mode='on'] #th-sb,
+#th-shell[data-desktop-mode='on'] #th-topbar { display: none; }
+#th-shell[data-desktop-mode='on'] #th-main { margin-left: 0; }
+
+
+/* Code editor theme — syntax colours for the custom-CSS and code fields. */
+#th-shell[data-code-theme='github'] .th-code { background: #f6f8fa; color: #24292f; }
+#th-shell[data-code-theme='monokai'] .th-code { background: #272822; color: #f8f8f2; }
+#th-shell[data-code-theme='solarized'] .th-code { background: #fdf6e3; color: #657b83; }
+#th-shell[data-code-theme='nord'] .th-code { background: #2e3440; color: #d8dee9; }
+
+/* Bento gap — appearanceInlineVars writes --th-bento-gap only when it is not
+   the 16px default. Falling back to --th-card-grid-gap rather than a literal
+   is what lets Card grid gap reach the dashboard: this rule sits later in the
+   file at equal specificity, so a literal here silently beat it. */
+.th-bento { gap: var(--th-bento-gap, var(--th-card-grid-gap)); }
+
+/* Sidebar styles 1.9.44 had that 2.0's 3-value enum never carried. */
+#th-shell[data-sidebar-style='floating'] #th-sb { margin: var(--th-space-10); height: calc(100vh - var(--th-space-20)); border-radius: var(--th-r-lg); }
+#th-shell[data-sidebar-style='solid'] #th-sb { background: #000; }
+#th-shell[data-sidebar-style='dividers'] .th-sb-item { border-bottom: 1px solid var(--th-sidebar-line); }
+
+/* Keyboard shortcuts off — hide the affordances that advertise them. The
+   ⌘K hint in the sidebar search is the only one that exists today; there is
+   no global key handler yet, so this hides the promise rather than gating a
+   behaviour that was never built. */
+#th-shell[data-shortcuts='off'] .th-sb-search-kbd { display: none; }
+
+/* ── Command palette (⌘K) ─────────────────────────────────────────────────
+   The sidebar advertised this shortcut from day one with nothing listening
+   for it, and the search box beside it had no handler either. */
+.th-cmdk { position: fixed; inset: 0; z-index: 1200; display: flex; align-items: flex-start; justify-content: center; padding-top: 12vh; }
+.th-cmdk-scrim { position: absolute; inset: 0; border: 0; padding: 0; background: rgba(10, 10, 10, .45); backdrop-filter: blur(2px); }
+.th-cmdk-panel {
+  position: relative; width: min(92vw, 620px); max-height: 70vh; display: flex; flex-direction: column;
+  background: var(--th-card-bg); border: 1px solid var(--th-line); border-radius: var(--th-r-lg);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, .3); overflow: hidden;
+}
+.th-cmdk-input {
+  border: 0; border-bottom: 1px solid var(--th-line); outline: none; background: transparent;
+  padding: var(--th-space-16); font-size: 15px; color: var(--th-ink);
+}
+.th-cmdk-list { overflow-y: auto; padding: var(--th-space-6); }
+.th-cmdk-group { font-size: 10px; text-transform: uppercase; letter-spacing: .07em; color: var(--th-muted); padding: var(--th-space-10) var(--th-space-10) var(--th-space-4); }
+.th-cmdk-item {
+  display: flex; align-items: baseline; gap: var(--th-space-10); width: 100%; text-align: left;
+  padding: var(--th-space-8) var(--th-space-10); border: 0; border-radius: var(--th-r);
+  background: none; color: var(--th-ink); font: inherit; font-size: 13px; cursor: pointer;
+}
+.th-cmdk-item.active { background: var(--th-accent-tint); }
+.th-cmdk-label { font-weight: 550; }
+.th-cmdk-hint { font-size: 11px; color: var(--th-ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.th-cmdk-empty { padding: var(--th-space-16); font-size: 13px; color: var(--th-muted); }
+.th-cmdk-foot { display: flex; gap: var(--th-space-14); padding: var(--th-space-8) var(--th-space-14); border-top: 1px solid var(--th-line); font-size: 11px; color: var(--th-muted); }
+
+/* ── Settings > About ─────────────────────────────────────────────────────
+   Was four unlabelled values in a 2-up grid. The screen's real job is telling
+   an operator what is deployed and whether the three separately-shipped
+   components agree, so it is laid out around that. */
+.th-about-hero { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--th-space-20); }
+.th-about-name { font-family: var(--th-font-display); font-size: var(--th-fs-lg); font-weight: 700; }
+.th-about-tagline { font-size: var(--th-fs-sm); color: var(--th-ink-2); line-height: 1.55; margin-top: var(--th-space-4); max-width: 46ch; }
+.th-about-version { display: flex; flex-direction: column; align-items: flex-end; gap: var(--th-space-6); flex-shrink: 0; }
+.th-about-version-num { font-size: var(--th-fs-lg); font-weight: 700; font-variant-numeric: tabular-nums; }
+.th-about-badge {
+  font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em;
+  padding: 3px var(--th-space-8); border-radius: 999px;
+  background: var(--th-bg); border: 1px solid var(--th-line); color: var(--th-ink-2);
+}
+.th-about-badge.is-prod { background: var(--th-accent); border-color: var(--th-accent); color: #fff; }
+.th-about-sub { font-size: var(--th-fs-2xs); color: var(--th-muted); margin: var(--th-space-4) 0 var(--th-space-12); }
+.th-about-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--th-space-16); margin-top: var(--th-space-10); }
+.th-about-row { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.th-about-label { font-size: var(--th-fs-2xs); text-transform: uppercase; letter-spacing: .06em; color: var(--th-muted); }
+.th-about-value { font-size: var(--th-fs-sm); overflow: hidden; text-overflow: ellipsis; }
+.th-about-note { font-size: 11px; color: var(--th-ink-3); }
+.th-about-sync { font-size: var(--th-fs-2xs); margin: var(--th-space-12) 0 0; }
+.th-about-sync.ok { color: var(--th-ink-3); }
+.th-about-sync.warn { color: var(--th-wrn, #f59e0b); font-weight: 600; }
+.th-about-credits { font-size: var(--th-fs-sm); color: var(--th-ink-2); line-height: 1.65; margin-top: var(--th-space-8); }
+
+/* ── Batched settings form: sticky save bar + wireframe option pickers ─────
+   The rest of the admin saves on change (settings/SettingsControls.tsx). A
+   page whose choices are visual and compared side by side should not publish
+   every option you pass through on the way to the one you want, so those pages
+   buffer their edits and this bar commits them. See app/(app)/SettingsForm.tsx. */
+.th-savebar { position: sticky; bottom: var(--th-space-16); margin-top: var(--th-space-24);
+  display: flex; align-items: center; gap: var(--th-space-10);
+  padding: var(--th-space-10) var(--th-space-12) var(--th-space-10) var(--th-space-16);
+  background: var(--th-surface); border: 1px solid var(--th-line); border-radius: var(--th-r-lg, 12px);
+  box-shadow: 0 6px 24px rgba(0,0,0,.12); z-index: 20; opacity: 1; }
+/* No entrance animation and no opacity toggle. Both previously left the bar
+   fully interactive at opacity 0 — a Save button that exists, reports unsaved
+   changes and cannot be seen or clicked. It is mounted only when needed, so
+   being plainly visible is the whole behaviour. */
+.th-savebar__msg { flex: 1; font-size: var(--th-fs-xs); color: var(--th-muted); }
+
+.th-picker { padding: var(--th-space-14) 0; border-bottom: 1px solid var(--th-line); }
+.th-picker:last-child { border-bottom: none; }
+.th-picker__head { display: flex; flex-direction: column; gap: var(--th-space-2); margin-bottom: var(--th-space-12); }
+.th-picker__label { font-size: var(--th-fs-sm); font-weight: 600; }
+.th-picker__desc { font-size: var(--th-fs-2xs); color: var(--th-muted); max-width: 62ch; }
+.th-picker__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(126px, 1fr)); gap: var(--th-space-10); }
+.th-opt { display: flex; flex-direction: column; gap: var(--th-space-4); padding: var(--th-space-8);
+  background: var(--th-surface); border: 1px solid var(--th-line); border-radius: 10px; cursor: pointer;
+  text-align: left; font: inherit; color: inherit; transition: border-color .12s ease, box-shadow .12s ease; }
+.th-opt:hover { border-color: var(--th-muted); }
+.th-opt.on { border-color: var(--th-accent-btn); box-shadow: 0 0 0 1px var(--th-accent-btn); }
+ /* The art sits on PAPER, not on a tinted block — a grey backing behind every
+    tile made "Bare" look exactly as boxed as "Boxed", which is the one
+    distinction that chooser exists to draw. */
+.th-opt__art { display: block; aspect-ratio: 4 / 5; background: var(--th-surface);
+  border-radius: 6px; overflow: hidden; padding: var(--th-space-8); }
+.th-opt__name { font-size: var(--th-fs-xs); font-weight: 600; }
+.th-opt__note { font-size: var(--th-fs-2xs); color: var(--th-muted); line-height: 1.35; }
+
+/* Wireframe motion. Each option that DESCRIBES a behaviour demonstrates it —
+   a "Fade" tile that never fades is a label with a picture next to it. Paused
+   until the tile is hovered or selected so a grid of six is not a fairground,
+   and dropped entirely under prefers-reduced-motion. */
+.th-opt__art .wf-fade { opacity: 0; }
+.th-opt:hover .th-opt__art .wf-fade,
+.th-opt.on .th-opt__art .wf-fade { animation: wfFade 2.4s ease-in-out infinite; }
+@keyframes wfFade { 0%,42% { opacity: 0 } 58%,92% { opacity: 1 } 100% { opacity: 0 } }
+
+.th-opt__art .wf-slide { transform: translateX(0); }
+.th-opt:hover .th-opt__art .wf-slide,
+.th-opt.on .th-opt__art .wf-slide { animation: wfSlide 3s ease-in-out infinite; }
+@keyframes wfSlide { 0%,26% { transform: translateX(0) } 40%,66% { transform: translateX(-100px) } 80%,100% { transform: translateX(0) } }
+
+.th-opt__art .wf-dot-1, .th-opt__art .wf-dot-2 { opacity: .45; }
+.th-opt:hover .th-opt__art .wf-dot-1, .th-opt.on .th-opt__art .wf-dot-1 { animation: wfDotA 3s ease-in-out infinite; }
+.th-opt:hover .th-opt__art .wf-dot-2, .th-opt.on .th-opt__art .wf-dot-2 { animation: wfDotB 3s ease-in-out infinite; }
+@keyframes wfDotA { 0%,26% { opacity: 1 } 40%,100% { opacity: .45 } }
+@keyframes wfDotB { 0%,26% { opacity: .45 } 40%,66% { opacity: 1 } 80%,100% { opacity: .45 } }
+
+.th-opt__art .wf-pulse { transform-origin: center; }
+.th-opt:hover .th-opt__art .wf-pulse,
+.th-opt.on .th-opt__art .wf-pulse { animation: wfPulse 1.9s ease-in-out infinite; }
+@keyframes wfPulse { 0%,100% { opacity: .92; transform: scale(1) } 50% { opacity: 1; transform: scale(1.08) } }
+
+.th-opt__art .wf-rise { opacity: 0; transform: translateY(6px); }
+.th-opt:hover .th-opt__art .wf-rise,
+.th-opt.on .th-opt__art .wf-rise { animation: wfRise 2.6s ease-in-out infinite; }
+@keyframes wfRise { 0%,34% { opacity: 0; transform: translateY(6px) } 50%,88% { opacity: 1; transform: translateY(0) } 100% { opacity: 0; transform: translateY(6px) } }
+
+/* The evolve card literally swaps faces, so its tile does too. */
+.th-opt__art .wf-face-a { opacity: 1; }
+.th-opt__art .wf-face-b { opacity: 0; }
+.th-opt:hover .th-opt__art .wf-face-a, .th-opt.on .th-opt__art .wf-face-a { animation: wfFaceA 3.6s ease-in-out infinite; }
+.th-opt:hover .th-opt__art .wf-face-b, .th-opt.on .th-opt__art .wf-face-b { animation: wfFaceB 3.6s ease-in-out infinite; }
+@keyframes wfFaceA { 0%,38% { opacity: 1 } 48%,88% { opacity: 0 } 98%,100% { opacity: 1 } }
+@keyframes wfFaceB { 0%,38% { opacity: 0 } 48%,88% { opacity: 1 } 98%,100% { opacity: 0 } }
+
+@media (prefers-reduced-motion: reduce) {
+  .th-opt__art * { animation: none !important; }
+  .th-opt__art .wf-fade, .th-opt__art .wf-rise, .th-opt__art .wf-face-b { opacity: 1; transform: none; }
+  .th-opt__art .wf-face-a { opacity: 0; }
+}
+
+/* Checkable option sets + preset numbers (app/(app)/FormControls.tsx). */
+.th-checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--th-space-6); }
+.th-check { display: flex; gap: var(--th-space-10); align-items: flex-start; padding: var(--th-space-10) var(--th-space-12);
+  border: 1px solid var(--th-line); border-radius: 9px; cursor: pointer; background: var(--th-surface); }
+.th-check:hover { border-color: var(--th-muted); }
+.th-check.on { border-color: var(--th-accent-btn); box-shadow: inset 0 0 0 1px var(--th-accent-btn); }
+.th-check input { margin-top: 2px; flex: 0 0 auto; }
+.th-check__text { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.th-check__name { font-size: var(--th-fs-xs); font-weight: 600; }
+.th-check__note { font-size: var(--th-fs-2xs); color: var(--th-muted); line-height: 1.35; }
+
+.th-presets { display: flex; align-items: center; gap: var(--th-space-6); flex-wrap: wrap; }
+.th-preset { min-width: 46px; padding: var(--th-space-8) var(--th-space-10); border: 1px solid var(--th-line);
+  border-radius: 8px; background: var(--th-surface); cursor: pointer; font: inherit; font-size: var(--th-fs-xs);
+  font-weight: 600; color: inherit; }
+.th-preset:hover { border-color: var(--th-muted); }
+.th-preset.on { background: var(--th-accent-btn); border-color: var(--th-accent-btn); color: var(--th-text-inverse); }
+.th-presets__custom { display: inline-flex; align-items: center; gap: var(--th-space-6); margin-left: var(--th-space-6);
+  padding-left: var(--th-space-12); border-left: 1px solid var(--th-line); }
+.th-presets__custom input { width: 84px; padding: var(--th-space-8) var(--th-space-10); border: 1px solid var(--th-line);
+  border-radius: 8px; background: var(--th-surface); color: var(--th-ink); font-size: var(--th-fs-sm); }
+.th-presets__suffix { font-size: var(--th-fs-2xs); color: var(--th-muted); }
+
+/* Hover-lift on the shell tiles, and the staggered reveal on its own tile. */
+.th-opt__art .wf-lift { transform-origin: center; }
+.th-opt:hover .th-opt__art .wf-lift, .th-opt.on .th-opt__art .wf-lift { animation: wfLift 2.4s ease-in-out infinite; }
+@keyframes wfLift { 0%,100% { transform: translateY(0) } 50% { transform: translateY(-4px) } }
+.th-opt__art [class^="wf-stagger-"] { opacity: 0; transform: translateY(7px); }
+.th-opt:hover .th-opt__art .wf-stagger-1, .th-opt.on .th-opt__art .wf-stagger-1 { animation: wfRise 2.8s ease-in-out infinite; }
+.th-opt:hover .th-opt__art .wf-stagger-2, .th-opt.on .th-opt__art .wf-stagger-2 { animation: wfRise 2.8s ease-in-out .14s infinite; }
+.th-opt:hover .th-opt__art .wf-stagger-3, .th-opt.on .th-opt__art .wf-stagger-3 { animation: wfRise 2.8s ease-in-out .28s infinite; }
+@media (prefers-reduced-motion: reduce) { .th-opt__art [class^="wf-stagger-"] { opacity: 1; transform: none; } }
+
+/* Immersive search tile: the page content clears out as the search arrives. */
+.th-opt__art .wf-clear { opacity: 1; }
+.th-opt:hover .th-opt__art .wf-clear, .th-opt.on .th-opt__art .wf-clear { animation: wfClear 2.4s ease-in-out infinite; }
+@keyframes wfClear { 0%,38% { opacity: 1; transform: scale(1) } 54%,92% { opacity: 0; transform: scale(.97) } 100% { opacity: 1; transform: scale(1) } }
+@media (prefers-reduced-motion: reduce) { .th-opt__art .wf-clear { opacity: .3; } }
+
+/* Section tabs (Promotions). Underline rather than pills — these switch a
+   whole panel, so they read as navigation, not as a filter chip. */
+.th-tabs { display: flex; gap: var(--th-space-4); border-bottom: 1px solid var(--th-line); }
+.th-tab { display: inline-flex; align-items: center; gap: var(--th-space-6); padding: var(--th-space-10) var(--th-space-14);
+  background: none; border: 0; border-bottom: 2px solid transparent; cursor: pointer; font: inherit;
+  font-size: var(--th-fs-sm); font-weight: 600; color: var(--th-muted); }
+.th-tab:hover { color: var(--th-ink); }
+.th-tab.on { color: var(--th-ink); border-bottom-color: var(--th-accent-btn); }
+.th-tab__count { min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--th-surface-2, #ececed);
+  color: var(--th-muted); font-size: var(--th-fs-2xs); display: inline-flex; align-items: center; justify-content: center; }
+.th-tab.on .th-tab__count { background: var(--th-accent-btn); color: var(--th-text-inverse); }
+
+/* Image zoom on the hover-style tiles. */
+.th-opt:hover .th-opt__art .wf-zoom, .th-opt.on .th-opt__art .wf-zoom { animation: wfZoom 2.6s ease-in-out infinite; }
+@keyframes wfZoom { 0%,100% { transform: scale(1) } 50% { transform: scale(1.12) } }
+
+/* Colour swatches (FormColor). The row stacks because a swatch strip next to a
+   label crushes on a narrow admin pane. */
+.settings-toggle-row--stack{flex-direction:column;align-items:stretch;gap:12px}
+.th-swatches{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.th-swatch{width:34px;height:34px;border-radius:8px;border:1px solid rgba(0,0,0,.18);
+  padding:0;cursor:pointer;position:relative;flex:0 0 auto}
+.th-swatch.is-on{box-shadow:0 0 0 2px #fff,0 0 0 4px #111}
+.th-swatch--custom{overflow:hidden;background:conic-gradient(#f00,#ff0,#0f0,#0ff,#00f,#f0f,#f00)}
+.th-swatch--custom input{position:absolute;inset:-4px;width:calc(100% + 8px);height:calc(100% + 8px);
+  opacity:0;cursor:pointer;border:0;padding:0}
+.th-swatch-hex{max-width:120px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;text-transform:lowercase}
+
+/* ── Product Catalog: category + tag managers ──────────────────────────
+   Each table row carries its own little form (rename, move, delete). They sit
+   on ONE line so a row reads as a row — without this the buttons wrap under
+   their inputs and a six-category tree becomes a page of stacked boxes. */
+.th-inline-form { display: flex; align-items: center; gap: 6px; flex-wrap: nowrap; }
+.th-inline-form input { min-width: 0; }
+.th-inline-form select { max-width: 190px; }
+.th-hint { font-size: var(--th-fs-sm); color: var(--th-muted); line-height: 1.5; max-width: 70ch; }
+.th-hint code { font-size: 0.92em; }
+/* Destructive actions read as destructive only on intent — a wall of red
+   buttons in a table trains you to ignore the colour. */
+.th-btn-danger { color: var(--th-danger, #c0392b); }
+.th-btn-danger:hover { background: var(--th-danger, #c0392b); color: #fff; border-color: var(--th-danger, #c0392b); }
+
+/* ══════════════════════════════════════════════════════════════════════
+   APPEARANCE — the settings that had no CSS behind them
+   ══════════════════════════════════════════════════════════════════════
+   Twenty-two of the forty appearance attributes were being written onto
+   #th-shell and then matched by nothing at all: corner radius, contrast, text
+   size, content width, shadows, motion, spacing, and the rest. The controls
+   saved, the attribute appeared in the DOM, and the page looked identical —
+   which is why it read as "none of Appearance works".
+
+   Everything below overrides TOKENS rather than styling components, so one
+   rule reaches every card, button and input that already uses the token.
+   Following the emitter's convention (see appearanceDataAttrs), defaults are
+   never emitted, so only the non-default values need a selector. */
+
+/* ── Shape ─────────────────────────────────────────────────────────── */
+#th-shell[data-corner-radius='sharp'] { --th-r: 0px; --radius-sm: 0px; --radius-md: 0px; --radius-lg: 0px; --radius-pill: 0px; }
+#th-shell[data-corner-radius='round'] { --th-r: 16px; --radius-sm: 10px; --radius-md: 16px; --radius-lg: 22px; }
+
+#th-shell[data-border-weight='thin']  { --th-bw: 0.5px; }
+#th-shell[data-border-weight='thick'] { --th-bw: 2px; }
+#th-shell[data-border-weight] :is(.th-card, .th-panel, table, input, select, textarea, .th-btn) { border-width: var(--th-bw); }
+
+/* ── Type ──────────────────────────────────────────────────────────── */
+#th-shell[data-base-size='sm'] { --th-fs-2xs: 10px; --th-fs-xs: 11px; --th-fs-sm: 13px; --th-fs-md: 14px; --th-fs-lg: 16px; font-size: 13px; }
+#th-shell[data-base-size='lg'] { --th-fs-2xs: 12px; --th-fs-xs: 13px; --th-fs-sm: 15px; --th-fs-md: 17px; --th-fs-lg: 20px; font-size: 16px; }
+
+#th-shell[data-letter-spacing='tight'] { letter-spacing: -0.01em; }
+#th-shell[data-letter-spacing='wide']  { letter-spacing: 0.02em; }
+
+#th-shell[data-line-height='compact'] { line-height: 1.35; }
+#th-shell[data-line-height='relaxed'] { line-height: 1.75; }
+
+#th-shell[data-underline-links='on'] a:not(.th-btn):not(.th-tab) { text-decoration: underline; text-underline-offset: 2px; }
+
+/* ── Colour ────────────────────────────────────────────────────────── */
+/* High contrast darkens text and firms up every hairline — the borders are
+   what actually make a dense admin readable, not the type colour. */
+#th-shell[data-contrast='high'] {
+  --th-ink: #000; --th-ink-2: #1a1a1a; --th-muted: #4a4a4a;
+  --th-line: rgba(0, 0, 0, 0.34);
+}
+#th-shell[data-color-mode='dark'][data-contrast='high'] {
+  --th-ink: #fff; --th-ink-2: #f0f0f0; --th-muted: #c4c4c4;
+  --th-line: rgba(255, 255, 255, 0.38);
+}
+/* Derived from --th-accent-base, never from --th-accent itself: a property
+   that reads its own name is a cycle, and a cycle makes the property invalid
+   (empty) rather than falling back. See the note in therum-tokens.css. */
+#th-shell[data-intensity='subtle'] { --th-accent: color-mix(in srgb, var(--th-accent-base) 62%, var(--th-muted)); }
+#th-shell[data-intensity='vivid']  { --th-accent: var(--th-accent-base); filter: saturate(1.18); }
+
+#th-shell[data-background='subtle-gradient'] {
+  --th-app-bg-image: linear-gradient(180deg, color-mix(in srgb, var(--th-accent) 5%, transparent), transparent 46%);
+  background-attachment: fixed;
+}
+
+/* ── Depth ─────────────────────────────────────────────────────────── */
+#th-shell[data-shadow-style='none']       { --th-shadow: none; }
+#th-shell[data-shadow-style='pronounced'] { --th-shadow: 0 10px 30px rgba(0,0,0,.16), 0 2px 6px rgba(0,0,0,.10); }
+#th-shell[data-shadow-style] :is(.th-card, .th-panel, .th-savebar) { box-shadow: var(--th-shadow); }
+
+#th-shell[data-card-style='flat']   :is(.th-card, .th-panel) { box-shadow: none; border: 1px solid var(--th-line); }
+#th-shell[data-card-style='shadow'] :is(.th-card, .th-panel) { box-shadow: var(--th-shadow, 0 1px 3px rgba(0,0,0,.08)); }
+/* ── Layout ────────────────────────────────────────────────────────── */
+#th-shell[data-content-width='normal'] main > * { max-width: 1180px; margin-inline: auto; }
+#th-shell[data-content-width='narrow'] main > * { max-width: 900px;  margin-inline: auto; }
+/* Expanded is wider than Full. Full is already uncapped, so the only width
+   left to reclaim on a large display is the 64px page gutter — which is why
+   this is a padding change rather than another max-width tier. */
+#th-shell[data-content-width='expanded'] #th-content {
+  padding-left: var(--th-space-24);
+  padding-right: var(--th-space-24);
+}
+
+/* The card grids that actually exist: list/media/content pages render
+   .th-lp-view-grid, the dashboard renders .th-bento. These two rules used to
+   target `.th-grid`, a class no component has ever rendered, so Card grid gap
+   was inert everywhere. Both now read --th-card-grid-gap, which
+   therum-tokens.css sets per value. */
+.th-lp-view-grid { gap: var(--th-card-grid-gap); }
+
+#th-shell[data-card-layout='compact'] :is(.th-card, .th-panel) { padding: var(--th-space-10); }
+
+/* Larger click targets — the whole point is the CONTROL height, so it drives
+   the token every control already derives from. */
+#th-shell[data-larger-targets='on'] { --th-ctl-h: 44px; }
+#th-shell[data-larger-targets='on'] :is(.th-btn, button, input, select) { min-height: var(--th-ctl-h); }
+
+#th-shell[data-always-focus='on'] :is(a, button, input, select, textarea):focus {
+  outline: 2px solid var(--th-accent-btn, #3858e9);
+  outline-offset: 2px;
+}
+
+/* A build-time aid, not a theme: outlines every layout box. */
+#th-shell[data-debug-overlays='on'] * { outline: 1px solid color-mix(in srgb, #e83b3b 35%, transparent); }
+
+/* ── Motion ────────────────────────────────────────────────────────────
+   One duration token drives everything, so "fast" or "slow" is a single
+   change rather than a hunt through every component. */
+#th-shell { --th-dur: 220ms; --th-ease: cubic-bezier(.32, .72, 0, 1); }
+#th-shell[data-transition-speed='fast'] { --th-dur: 120ms; }
+#th-shell[data-transition-speed='slow'] { --th-dur: 380ms; }
+
+/* The sidebar honours Motion and Transition speed like everything else. It
+   had no transitions at all, so nav items snapped between states while the
+   rest of the admin eased — and neither Appearance > Motion control had any
+   effect on the rail. Colour and background only: transitioning width or
+   padding here would fight the fold. */
+#th-shell #th-sb :is(.th-sb-item, .th-sb-arrow, .th-sb-edit-btn, .th-sb-fold, .th-sb-section-name) {
+  transition: background-color var(--th-dur) var(--th-ease), color var(--th-dur) var(--th-ease),
+    border-color var(--th-dur) var(--th-ease), opacity var(--th-dur) var(--th-ease);
+}
+#th-shell #th-sb .th-sb-item svg { transition: color var(--th-dur) var(--th-ease); }
+/* Folding is the one place a size change should animate — it is a deliberate,
+   user-initiated change of shape, not incidental movement. */
+#th-shell #th-sb { transition: width var(--th-dur) var(--th-ease); }
+#th-shell #th-main { transition: margin-left var(--th-dur) var(--th-ease); }
+/* Motion off means off — including the rail. */
+#th-shell[data-motion='off'] #th-sb,
+#th-shell[data-motion='off'] #th-main,
+#th-shell[data-motion='off'] #th-sb * { transition: none !important; }
+
+#th-shell :is(a, button, .th-btn, .th-card, .th-panel, .th-tab, input, select, .th-swatch) {
+  transition:
+    background-color var(--th-dur) var(--th-ease),
+    border-color var(--th-dur) var(--th-ease),
+    color var(--th-dur) var(--th-ease),
+    box-shadow var(--th-dur) var(--th-ease),
+    transform var(--th-dur) var(--th-ease),
+    opacity var(--th-dur) var(--th-ease);
+}
+
+#th-shell[data-hover-lift]:not([data-hover-lift='off']) :is(.th-card, .th-panel):hover,
+#th-shell:not([data-hover-lift]) :is(.th-card, .th-panel):hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 22px rgba(0, 0, 0, .12);
+}
+#th-shell[data-hover-lift='off'] :is(.th-card, .th-panel):hover { transform: none; }
+
+/* Motion off means OFF — including the view transitions below. Written with
+   !important because it has to beat every component's own transition, and a
+   person who turned motion off did not mean "mostly". */
+#th-shell[data-motion='off'],
+#th-shell[data-motion='off'] * {
+  transition: none !important;
+  animation: none !important;
+}
+/* ── Page transitions ──────────────────────────────────────────────────
+   The new screen animates IN on arrival. PageMotion.tsx adds .th-page-enter
+   after each navigation; these rules decide what that looks like.
+
+   This replaced a View Transition implementation. That API holds a snapshot of
+   the page while its callback is pending, and this admin's navigations are
+   server round-trips (~450ms measured), so every click froze the old screen
+   for the length of the fetch. Animating the arrival instead means the click
+   is never blocked — the thing Bam kept describing as "freezing".
+
+   Duration is --th-dur, so Appearance > Transition speed drives these the same
+   way it drives everything else. */
+#th-shell[data-page-transition='fade'] .th-page-enter { animation: th-page-fade var(--th-dur) var(--th-ease) both; }
+#th-shell[data-page-transition='slide'] .th-page-enter { animation: th-page-slide var(--th-dur) var(--th-ease) both; }
+#th-shell[data-page-transition='scale'] .th-page-enter { animation: th-page-scale var(--th-dur) var(--th-ease) both; }
+#th-shell[data-page-transition='morph'] .th-page-enter { animation: th-page-morph var(--th-dur) var(--th-ease) both; }
+/* Motion off, or no style chosen, means no animation at all — PageMotion also
+   refuses to add the class, so this is belt and braces. */
+#th-shell[data-motion='off'] .th-page-enter { animation: none !important; }
+
+@keyframes th-page-fade  { from { opacity: 0 } }
+@keyframes th-page-slide { from { opacity: 0; transform: translateX(10px) } }
+@keyframes th-page-scale { from { opacity: 0; transform: scale(.99) } }
+/* 'morph' is the default: a small rise, which reads as the content settling
+   into place rather than appearing from nowhere. */
+@keyframes th-page-morph { from { opacity: 0; transform: translateY(8px) } }
+
+@media (prefers-reduced-motion: reduce) {
+  .th-page-enter { animation: none !important; }
+}
+
+/* The old on/off rule this replaces, kept working for the fade case. */
+
+/* ── Product Studio — the three-column editor ──────────────────────────
+   Left: what the product IS. Centre: what the customer SEES. Right: whatever
+   is selected on the left. A product has three different kinds of thing to
+   edit, and one long column forces you past two of them to reach the third. */
+.th-studio__top { display: flex; align-items: flex-start; gap: 16px; flex-wrap: wrap; margin-bottom: var(--th-space-12); }
+.th-studio__title { display: flex; align-items: center; gap: var(--th-space-10); margin-top: 4px; }
+.th-studio__title h1 { margin: 0; }
+
+.th-studio__cols {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr) 320px;
+  gap: var(--th-space-16);
+  align-items: start;
+}
+/* Below a laptop there is no room for three: the preview keeps the width and
+   the two rails go under it rather than being crushed to uselessness. */
+@media (max-width: 1180px) {
+  .th-studio__cols { grid-template-columns: minmax(0, 1fr); }
+  .th-studio__stage { order: -1; }
+}
+
+.th-studio__rail {
+  display: flex; flex-direction: column; gap: var(--th-space-4);
+  border: 1px solid var(--th-line); border-radius: var(--th-r);
+  padding: var(--th-space-10); background: var(--th-surface);
+  position: sticky; top: var(--th-space-16);
+  max-height: calc(100vh - 140px); overflow: auto;
+}
+.th-studio__group { display: flex; flex-direction: column; gap: 2px; margin-top: var(--th-space-10); }
+.th-studio__group-head {
+  display: flex; align-items: center; justify-content: space-between;
+  font-size: var(--th-fs-2xs); font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: var(--th-muted); padding: var(--th-space-6) 2px;
+}
+.th-studio__item {
+  display: flex; flex-direction: column; gap: 2px; text-align: left;
+  padding: var(--th-space-8); border: 1px solid transparent; border-radius: 8px;
+  background: none; cursor: pointer; font: inherit; color: inherit; width: 100%;
+}
+.th-studio__item--row { flex-direction: row; justify-content: space-between; align-items: center; }
+.th-studio__item:hover, .th-studio__thumbrow:hover { background: var(--th-bg); }
+.th-studio__item.is-sel, .th-studio__thumbrow.is-sel {
+  background: color-mix(in srgb, var(--th-accent-btn, #3858e9) 10%, transparent);
+  border-color: color-mix(in srgb, var(--th-accent-btn, #3858e9) 40%, transparent);
+}
+.th-studio__thumbrow {
+  display: flex; align-items: center; gap: var(--th-space-8); width: 100%;
+  padding: var(--th-space-6); border: 1px solid transparent; border-radius: 8px;
+  background: none; cursor: pointer; font: inherit; color: inherit; text-align: left;
+}
+.th-studio__thumbrow img { width: 34px; height: 34px; object-fit: cover; border-radius: 6px; flex: 0 0 34px; }
+.th-studio__empty { padding: var(--th-space-6) 2px; }
+
+.th-studio__field { display: flex; flex-direction: column; gap: 4px; margin-bottom: var(--th-space-10); }
+.th-studio__field > span { font-size: var(--th-fs-2xs); font-weight: 600; color: var(--th-muted); }
+.th-studio__field input, .th-studio__field select, .th-studio__field textarea { width: 100%; }
+.th-studio__chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--th-space-10); }
+.th-studio__preview { width: 100%; border-radius: var(--th-r); border: 1px solid var(--th-line); }
+.th-studio__newvariant { display: flex; flex-direction: column; gap: 6px; }
+
+/* Centre stage */
+.th-studio__stage { display: flex; flex-direction: column; gap: var(--th-space-10); min-width: 0; }
+.th-studio__stagebar { display: flex; align-items: center; justify-content: space-between; gap: var(--th-space-10); }
+.th-studio__canvas {
+  border: 1px solid var(--th-line); border-radius: var(--th-r);
+  background: var(--th-bg); padding: var(--th-space-32);
+  display: grid; place-items: center; min-height: 420px;
+}
+.th-studio__note { text-align: center; }
+
+.th-pv-card { width: 260px; background: var(--th-surface); border: 1px solid var(--th-line); border-radius: var(--th-r); overflow: hidden; }
+.th-pv-card__media { aspect-ratio: 1; background: var(--th-bg); display: grid; place-items: center; }
+.th-pv-card__media img { width: 100%; height: 100%; object-fit: cover; }
+.th-pv-card__body { padding: var(--th-space-12); display: flex; flex-direction: column; gap: 3px; }
+.th-pv-card__name { font-weight: 600; }
+.th-pv-card__sub { font-size: var(--th-fs-2xs); color: var(--th-muted); }
+.th-pv-card__price { font-weight: 700; margin-top: var(--th-space-6); }
+
+.th-pv-page { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--th-space-20); width: 100%; max-width: 720px; }
+@media (max-width: 720px) { .th-pv-page { grid-template-columns: minmax(0, 1fr); } }
+.th-pv-page__media img { width: 100%; border-radius: var(--th-r); background: var(--th-bg); }
+.th-pv-page__strip { display: flex; gap: 6px; margin-top: 8px; }
+.th-pv-page__strip img { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; }
+.th-pv-page__info h2 { margin: 0 0 6px; }
+.th-pv-page__price { font-weight: 700; margin-bottom: var(--th-space-10); }
+.th-pv-page__variants { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: var(--th-space-10); }
+.th-pv-page__desc { font-size: var(--th-fs-sm); color: var(--th-ink-2); }
+
+.th-pv-chip {
+  display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 999px;
+  border: 1px solid var(--th-line); background: var(--th-surface);
+  font-size: var(--th-fs-2xs); cursor: pointer; font-family: inherit; color: inherit;
+}
+.th-pv-chip.on { background: var(--th-accent-btn, #3858e9); border-color: var(--th-accent-btn, #3858e9); color: #fff; }
+.th-btn--xs { padding: 2px 8px; font-size: var(--th-fs-2xs); }
+
+/* Destructive row actions. Muted until hovered — a row of red buttons reads as
+   an error state, and these sit next to Edit and View on every product. */
+.th-btn--danger { color: var(--th-danger-text); }
+.th-btn--danger:hover { background: var(--th-danger-bg, #fef2f2); border-color: var(--th-danger-text); }
+
+/* The row-action cluster holds forms now (Server Actions), and a bare form is
+   a block element — without this the buttons stack instead of sitting inline. */
+.th-rowactions form { display: inline-flex; margin: 0; }
+
+
+/* A tab is a tab. `.th-tab` sits on a <button>/<a>, and the global control
+   styling gave those a border-radius — so the 2px bottom border curved up at
+   both ends and read as half a button outline rather than an underline.
+   Squaring the corners and dropping any inherited background is the whole
+   fix; the rule lives here, after those, because that is what makes it win. */
+.th-tabs .th-tab,
+.th-studio__stagebar .th-tab {
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+  min-height: 0;
+  border-top: 0; border-left: 0; border-right: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;           /* sit ON the container's hairline */
+}
+.th-tabs .th-tab.on,
+.th-studio__stagebar .th-tab.on { border-bottom-color: var(--th-accent-btn, #3858e9); }
+.th-tabs .th-tab:focus-visible { outline: 2px solid var(--th-accent-btn, #3858e9); outline-offset: -2px; }
+.th-studio__save { font-size: var(--th-fs-2xs); font-weight: 600; padding: 3px 9px; border-radius: 999px; }
+.th-studio__save.is-busy { background: var(--th-bg); color: var(--th-muted); }
+.th-studio__save.is-ok { background: rgba(16,185,129,.12); color: #0f9d68; }
+/* Row actions sit quiet until the row is hovered — visible enough to find,
+   quiet enough not to compete with the data. */
+.th-rowactions { display: flex; gap: 6px; justify-content: flex-end; opacity: .25; transition: opacity var(--th-dur, 180ms) ease; }
+tr:hover .th-rowactions, tr:focus-within .th-rowactions { opacity: 1; }
+@media (hover: none) { .th-rowactions { opacity: 1; } }
+
+/* Order detail: items get the room, the money and the actions sit beside. */
+.th-order__cols { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: var(--th-space-20); align-items: start; margin-top: var(--th-space-12); }
+@media (max-width: 900px) { .th-order__cols { grid-template-columns: minmax(0, 1fr); } }
+.th-order__side { border: 1px solid var(--th-line); border-radius: var(--th-r); padding: var(--th-space-14); background: var(--th-surface); }
+.th-order__row { display: flex; justify-content: space-between; gap: var(--th-space-10); padding: 4px 0; font-size: var(--th-fs-sm); }
+.th-order__row--total { border-top: 1px solid var(--th-line); margin-top: 6px; padding-top: 8px; font-weight: 700; }
+
+/* Studio-app picker in the setup wizard. A row you press, not a checkbox in a
+   list — the description is what people are actually choosing between. */
+.th-onb-app { display: flex; align-items: flex-start; gap: var(--th-space-10); width: 100%; text-align: left;
+  padding: var(--th-space-12); border: 1px solid var(--th-line); border-radius: var(--th-r);
+  background: var(--th-surface); cursor: pointer; font: inherit; color: inherit; }
+.th-onb-app:hover { border-color: var(--th-accent-btn, #3858e9); }
+.th-onb-app.is-on { border-color: var(--th-accent-btn, #3858e9);
+  background: color-mix(in srgb, var(--th-accent-btn, #3858e9) 8%, transparent); }
+.th-onb-app__check { flex: 0 0 20px; width: 20px; height: 20px; border-radius: 6px; margin-top: 2px;
+  border: 1px solid var(--th-line); display: grid; place-items: center; font-size: 12px; }
+.th-onb-app.is-on .th-onb-app__check { background: var(--th-accent-btn, #3858e9); border-color: transparent; color: #fff; }
+
+/* ── Settings > Advisor — host scan findings ───────────────────────────
+   Severity is carried by a left border and a chip rather than by colouring
+   the whole row: a wall of red reads as "everything is broken" and stops
+   being information. */
+.th-adv { display: flex; flex-direction: column; gap: var(--th-space-16); }
+.th-adv__bar { display: flex; align-items: center; gap: var(--th-space-12); flex-wrap: wrap; }
+.th-adv__meta { font-size: var(--th-fs-xs); color: var(--th-muted); }
+.th-adv__idle, .th-adv__clean { font-size: var(--th-fs-sm); color: var(--th-ink-2); margin: 0; max-width: 60ch; }
+.th-adv__error { font-size: var(--th-fs-sm); color: var(--th-danger-ink); background: var(--th-danger-bg); padding: var(--th-space-10) var(--th-space-12); border-radius: var(--th-r-sm); margin: 0; }
+
+.th-adv__counts { display: flex; gap: var(--th-space-8); flex-wrap: wrap; }
+.th-adv__count { display: inline-flex; align-items: baseline; gap: var(--th-space-6); padding: var(--th-space-6) var(--th-space-10); border-radius: var(--th-r-sm); border: 1px solid var(--th-line); font-size: var(--th-fs-xs); color: var(--th-ink-2); }
+.th-adv__count strong { font-size: var(--th-fs-sm); color: var(--th-ink); }
+/* A zero count stays visible but recedes — the shape of the row should not
+   change between scans, or the eye has to re-find everything. */
+.th-adv__count[data-zero='true'] { opacity: .45; }
+.th-adv__count--critical strong, .th-adv__sev--critical { color: var(--th-danger-ink); }
+.th-adv__count--high strong, .th-adv__sev--high { color: var(--th-danger-ink); }
+.th-adv__count--medium strong, .th-adv__sev--medium { color: var(--th-warning-ink); }
+.th-adv__count--low strong, .th-adv__sev--low { color: var(--th-ink-2); }
+.th-adv__count--pass strong { color: var(--th-success-ink); }
+
+.th-adv__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--th-space-8); }
+.th-adv__item { border: 1px solid var(--th-line); border-left-width: 3px; border-radius: var(--th-r-sm); background: var(--th-surface); padding: var(--th-space-12); }
+.th-adv__item--critical, .th-adv__item--high { border-left-color: var(--th-danger-text); }
+.th-adv__item--medium { border-left-color: var(--th-warning-text); }
+.th-adv__item--low { border-left-color: var(--th-line-2); }
+
+.th-adv__head { display: flex; align-items: center; gap: var(--th-space-10); width: 100%; background: none; border: 0; padding: 0; cursor: pointer; text-align: left; font: inherit; color: inherit; }
+.th-adv__sev { font-size: var(--th-fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; flex-shrink: 0; }
+.th-adv__title { font-size: var(--th-fs-sm); font-weight: 600; color: var(--th-ink); flex: 1; min-width: 0; }
+.th-adv__axis { font-size: var(--th-fs-2xs); color: var(--th-muted); flex-shrink: 0; }
+.th-adv__detail { margin: var(--th-space-6) 0 0; font-size: var(--th-fs-xs); color: var(--th-ink-2); font-family: var(--th-font-mono); }
+
+.th-adv__body { margin-top: var(--th-space-12); padding-top: var(--th-space-12); border-top: 1px solid var(--th-line); }
+.th-adv__why { margin: 0 0 var(--th-space-10); font-size: var(--th-fs-sm); color: var(--th-ink-2); max-width: 70ch; }
+.th-adv__fixlabel { font-size: var(--th-fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--th-muted); margin-bottom: var(--th-space-6); }
+/* Fixes are commands and config blocks — they must wrap rather than scroll
+   sideways, or half the line is invisible on a narrow settings column. */
+.th-adv__fix { margin: 0; padding: var(--th-space-10) var(--th-space-12); background: var(--th-surface-2); border: 1px solid var(--th-line); border-radius: var(--th-r-sm); font-family: var(--th-font-mono); font-size: var(--th-fs-xs); color: var(--th-ink); white-space: pre-wrap; word-break: break-word; }
+
+.th-adv__skip { font-size: var(--th-fs-xs); color: var(--th-muted); }
+.th-adv__skip summary { cursor: pointer; }
+.th-adv__skip ul { margin: var(--th-space-8) 0 0; padding-left: var(--th-space-16); display: flex; flex-direction: column; gap: var(--th-space-4); }
+.th-adv__skip code { font-family: var(--th-font-mono); color: var(--th-ink-2); }
+
+/* ── Server panel ───────────────────────────────────────────────────────
+   Sibling of the Advisor above. Every row states three things before you can
+   press it: what it does, what it will run, and how disruptive it is — an
+   operator screen earns trust by being boring and explicit, not by hiding the
+   command behind a friendly label. */
+.th-srv { display: flex; flex-direction: column; gap: var(--th-space-24); }
+.th-srv__note { margin: 0; font-size: var(--th-fs-sm); color: var(--th-ink-2); background: var(--th-surface-2); border: 1px solid var(--th-line); border-radius: var(--th-r-sm); padding: var(--th-space-10) var(--th-space-12); max-width: 70ch; }
+.th-srv__group { display: flex; flex-direction: column; gap: var(--th-space-8); }
+.th-srv__grouptitle { margin: 0; font-size: var(--th-fs-md); font-weight: 600; }
+.th-srv__groupdesc { margin: 0 0 var(--th-space-6); font-size: var(--th-fs-sm); color: var(--th-muted); max-width: 70ch; }
+
+.th-srv__list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--th-space-12); }
+.th-srv__item { display: flex; flex-direction: column; gap: var(--th-space-8); padding: var(--th-space-14); border: 1px solid var(--th-line); border-radius: var(--th-r-md); background: var(--th-surface); }
+/* Unavailable is dimmed, never hidden: knowing an action exists and needs the
+   server is the useful half of the information while still local. */
+.th-srv__item[data-available='false'] { opacity: .55; }
+.th-srv__meta { display: flex; align-items: center; justify-content: space-between; gap: var(--th-space-8); }
+.th-srv__label { font-size: var(--th-fs-sm); font-weight: 600; }
+.th-srv__risk { font-size: var(--th-fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; padding: 2px var(--th-space-6); border-radius: var(--th-r-pill); border: 1px solid var(--th-line); color: var(--th-muted); white-space: nowrap; }
+.th-srv__risk--restart { color: var(--th-warn-ink, #a16207); }
+.th-srv__risk--sensitive { color: var(--th-danger, #c0392b); border-color: currentColor; }
+.th-srv__desc { margin: 0; font-size: var(--th-fs-xs); color: var(--th-ink-2); }
+.th-srv__cmd { display: block; font-family: var(--th-font-mono); font-size: var(--th-fs-2xs); color: var(--th-muted); background: var(--th-surface-2); border-radius: var(--th-r-sm); padding: var(--th-space-6) var(--th-space-8); white-space: pre-wrap; word-break: break-word; }
+.th-srv__item .th-btn { align-self: flex-start; }
+
+.th-srv__confirm { position: fixed; inset: 0; z-index: 60; display: grid; place-items: center; background: rgba(0,0,0,.45); padding: var(--th-space-16); }
+.th-srv__confirmbox { width: min(560px, 100%); background: var(--th-surface); border: 1px solid var(--th-line); border-radius: var(--th-r-lg); padding: var(--th-space-20); display: flex; flex-direction: column; gap: var(--th-space-10); max-height: 90vh; overflow: auto; }
+.th-srv__confirmbox h3 { margin: 0; font-size: var(--th-fs-md); }
+.th-srv__confirmbox p { margin: 0; font-size: var(--th-fs-sm); color: var(--th-ink-2); }
+.th-srv__confirmlabel { font-size: var(--th-fs-2xs); font-weight: 700; text-transform: uppercase; letter-spacing: .04em; color: var(--th-muted); }
+.th-srv__revert { font-family: var(--th-font-mono); font-size: var(--th-fs-xs); }
+.th-srv__confirmbtns { display: flex; gap: var(--th-space-8); justify-content: flex-end; margin-top: var(--th-space-6); }
+
+.th-srv__result { display: flex; flex-direction: column; gap: var(--th-space-8); }
+.th-srv__ms { font-weight: 400; font-size: var(--th-fs-xs); color: var(--th-muted); }
+/* Command output is the one place horizontal scroll beats wrapping — a wrapped
+   log line is harder to read than one you scroll to. */
+.th-srv__output { margin: 0; padding: var(--th-space-12); background: var(--th-surface-2); border: 1px solid var(--th-line); border-radius: var(--th-r-sm); font-family: var(--th-font-mono); font-size: var(--th-fs-xs); color: var(--th-ink); max-height: 420px; overflow: auto; }
+.th-srv__result[data-ok='false'] .th-srv__output { border-color: var(--th-danger, #c0392b); }
+
+.th-srv__log { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--th-space-4); }
+.th-srv__log li { display: flex; align-items: center; gap: var(--th-space-10); font-size: var(--th-fs-xs); padding: var(--th-space-6) 0; border-bottom: 1px solid var(--th-line); }
+.th-srv__logwhen { color: var(--th-muted); min-width: 15ch; }
+.th-srv__log code { font-family: var(--th-font-mono); color: var(--th-ink-2); flex: 1; }
+.th-srv__ok { color: var(--th-ok-ink, #15803d); font-weight: 600; }
+.th-srv__bad { color: var(--th-danger, #c0392b); font-weight: 600; }
+.th-srv__warn { color: var(--th-warn-ink, #a16207); font-weight: 600; }
+
+/* The console reads as a terminal on purpose — monospace, dark, scrollback —
+   because that is the mental model. What it is NOT is a shell, and the hint
+   line under it says so rather than letting the styling imply otherwise. */
+.th-srv__console { background: var(--th-surface-2); border: 1px solid var(--th-line); border-radius: var(--th-r-sm); padding: var(--th-space-12); min-height: 120px; max-height: 420px; overflow: auto; font-family: var(--th-font-mono); font-size: var(--th-fs-xs); display: flex; flex-direction: column; gap: var(--th-space-10); }
+.th-srv__consoleidle { margin: 0; color: var(--th-muted); }
+.th-srv__consoleidle code { background: var(--th-surface); padding: 1px 5px; border-radius: 4px; }
+.th-srv__consoleinput { color: var(--th-accent); font-weight: 600; }
+.th-srv__consoleline[data-ok='false'] .th-srv__consoleinput { color: var(--th-danger, #c0392b); }
+.th-srv__consoleout { margin: var(--th-space-4) 0 0; white-space: pre-wrap; word-break: break-word; color: var(--th-ink-2); }
+.th-srv__consolebar { display: flex; gap: var(--th-space-8); margin-top: var(--th-space-8); }
+.th-srv__consolebar input { flex: 1; font-family: var(--th-font-mono); font-size: var(--th-fs-xs); padding: var(--th-space-8) var(--th-space-10); border: 1px solid var(--th-line); border-radius: var(--th-r-sm); background: var(--th-surface); color: var(--th-ink); }
+
+/* Collapsed, the console is one line you type into; expanded it owns the top
+   of the page. Same posture as the Studio card on the dashboard — the input is
+   always live, so a command can be typed without opening anything first. */
+.th-srv__consolecard { border: 1px solid var(--th-line); border-radius: var(--th-r-md); background: var(--th-surface); padding: var(--th-space-14); gap: var(--th-space-10); }
+.th-srv__consolecard.is-expanded { border-color: var(--th-line-2, var(--th-line)); box-shadow: var(--th-shadow-soft, 0 1px 2px rgba(0,0,0,.04)); }
+.th-srv__consolehead { display: flex; align-items: center; justify-content: space-between; gap: var(--th-space-8); }
+.th-srv__toggle { background: none; border: 0; padding: 0; font-size: var(--th-fs-xs); font-weight: 600; color: var(--th-accent); cursor: pointer; font-family: inherit; }
+.th-srv__toggle:hover { text-decoration: underline; }
+.th-srv__consolecard .th-srv__consolebar { margin-top: 0; }
+
+/* ── Navigation feedback ───────────────────────────────────────────────
+   A click has to acknowledge itself immediately. Warm navigations on this
+   admin measure 740-1000ms and there is no loading.tsx, so without this the
+   old page simply sits there for a second — which is what "it looks like it
+   freezes" actually was, and is not something removing the View Transition
+   could fix on its own. */
+.th-navbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: var(--th-accent);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  /* Slow creep out, quick snap home. The long ease is what makes the bar
+     look like progress rather than a loading loop. */
+  transition: transform 900ms cubic-bezier(.15, .8, .3, 1), opacity 200ms ease;
+  opacity: 0;
+  z-index: 9999;
+  pointer-events: none;
+}
+.th-navbar.is-loading { opacity: 1; }
+/* Arrival: cover the remaining distance fast, then fade out. */
+.th-navbar.is-done { transition: transform 160ms ease-out, opacity 220ms ease 120ms; opacity: 0; }
+
+/* Optimistic active state — the rail responds on click, rather than a second
+   later when usePathname finally updates. React overwrites this on the next
+   render, which is the point: a failed navigation corrects itself. */
+.th-sb-item.is-pending { background: var(--th-sidebar-active-bg); color: var(--th-sidebar-ink); }
+.th-sb-item.is-pending svg { color: var(--th-sidebar-ink); }
+
+#th-shell[data-motion='off'] .th-navbar { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .th-navbar { transition: opacity 120ms ease; }
+}
+
+/* ── Studio assistant card ─────────────────────────────────────────────
+   A chat squeezed into a bento tile fights the grid at every size, so the
+   compact state is just an input plus a status line; the transcript expands
+   under it. Runs are server-side jobs, so collapsing this or navigating away
+   does not stop the work. */
+.th-agent { display: flex; flex-direction: column; gap: var(--th-space-10); min-width: 0; }
+.th-agent__idle { margin: 0; font-size: var(--th-fs-xs); }
+.th-agent__ask { display: flex; gap: var(--th-space-8); }
+.th-agent__input {
+  flex: 1; min-width: 0;
+  padding: var(--th-space-8) var(--th-space-10);
+  border: 1px solid var(--th-line); border-radius: var(--th-r-sm);
+  background: var(--th-bg); color: var(--th-ink);
+  font-family: inherit; font-size: var(--th-fs-xs);
+}
+.th-agent__input:focus { outline: none; border-color: var(--th-accent); }
+.th-agent__error { margin: 0; font-size: var(--th-fs-xs); color: var(--th-danger-ink); background: var(--th-danger-bg); padding: var(--th-space-8) var(--th-space-10); border-radius: var(--th-r-sm); }
+.th-agent__run { display: flex; flex-direction: column; gap: var(--th-space-8); min-width: 0; }
+.th-agent__meta { display: flex; align-items: center; gap: var(--th-space-8); flex-wrap: wrap; font-size: var(--th-fs-2xs); }
+.th-agent__status { text-transform: uppercase; letter-spacing: .04em; font-weight: 700; }
+.th-agent__status--running { color: var(--th-warning-ink); }
+.th-agent__status--done { color: var(--th-success-ink); }
+.th-agent__status--error, .th-agent__status--stopped { color: var(--th-danger-ink); }
+.th-agent__toggle { margin-left: auto; background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: var(--th-fs-2xs); color: var(--th-accent-text); text-decoration: underline; }
+
+.th-agent__steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--th-space-6); max-height: 340px; overflow-y: auto; }
+.th-agent__step { font-size: var(--th-fs-xs); color: var(--th-ink-2); border-left: 2px solid var(--th-line); padding-left: var(--th-space-8); }
+.th-agent__step p { margin: 0; }
+.th-agent__step--tool { border-left-color: var(--th-accent-border); }
+.th-agent__step.is-bad { border-left-color: var(--th-danger-text); }
+.th-agent__tool { font-family: var(--th-font-mono); font-size: var(--th-fs-2xs); color: var(--th-accent-text); }
+.th-agent__args { font-family: var(--th-font-mono); font-size: var(--th-fs-2xs); color: var(--th-muted); margin-left: var(--th-space-6); }
+/* Tool output and diffs must wrap, not scroll sideways — half a line off the
+   right edge of a dashboard tile is not reviewable. */
+.th-agent__result, .th-agent__diff {
+  margin: var(--th-space-4) 0 0; padding: var(--th-space-8);
+  background: var(--th-surface-2); border-radius: var(--th-r-sm);
+  font-family: var(--th-font-mono); font-size: var(--th-fs-2xs); color: var(--th-ink-2);
+  white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow-y: auto;
+}
+.th-agent__answer { font-size: var(--th-fs-sm); color: var(--th-ink); white-space: pre-wrap; }
+.th-agent__proposal { border: 1px solid var(--th-line); border-radius: var(--th-r-sm); padding: var(--th-space-10); display: flex; flex-direction: column; gap: var(--th-space-6); }
+.th-agent__warn { margin: 0; font-size: var(--th-fs-2xs); color: var(--th-warning-ink); }
+
+/* Variant row thumbnail — the colourway's own photo, or its colour chip when
+   the provider gave no image. */
+.th-studio__vthumb { width: 26px; height: 26px; border-radius: 6px; object-fit: cover; flex: 0 0 auto; border: 1px solid var(--th-line); }
+.th-studio__vthumb--none { display: inline-block; background: var(--th-line); }
+
+/* A variant's own photographs, in the inspector. */
+.th-studio__vgrid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin: 6px 0 10px; }
+.th-studio__vshot { position: relative; aspect-ratio: 1; border: 1px solid var(--th-line); border-radius: 6px; overflow: hidden; }
+.th-studio__vshot.is-main { border-color: var(--th-accent, #070707); border-width: 2px; }
+.th-studio__vshot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.th-studio__vshot-acts { position: absolute; top: 2px; right: 2px; display: flex; gap: 2px; opacity: 0; transition: opacity .12s; }
+.th-studio__vshot:hover .th-studio__vshot-acts { opacity: 1; }
+.th-studio__vshot-acts button { width: 20px; height: 20px; border: 0; border-radius: 4px; background: rgba(0,0,0,.72); color: #fff; font-size: 12px; line-height: 1; cursor: pointer; }
+
+/* ── Catalogue list ────────────────────────────────────────────────────────
+   The page used to stack a tab row, a permanent add form and a filter row
+   before a single product appeared. Title and primary action share a line,
+   the add form hides behind it, and the remaining controls get real spacing. */
+.th-pagehead { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 4px; }
+.th-pagehead h1 { margin: 0; }
+
+.th-quickadd { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 16px 0 4px; padding: 16px; border: 1px solid var(--th-line); border-radius: 12px; background: var(--th-surface); }
+.th-quickadd input { min-width: 200px; }
+
+.th-listbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 20px 0 16px; }
+.th-listbar > *:first-child { flex: 1 1 auto; min-width: 0; }
+
+.th-viewtoggle { display: inline-flex; border: 1px solid var(--th-line); border-radius: 10px; overflow: hidden; flex: 0 0 auto; }
+.th-viewtoggle a { display: flex; align-items: center; justify-content: center; width: 38px; height: 36px; font-size: 15px; color: var(--th-muted); text-decoration: none; }
+.th-viewtoggle a + a { border-left: 1px solid var(--th-line); }
+.th-viewtoggle a.is-on { background: var(--th-ink, #070707); color: #fff; }
+
+/* List view: a thumbnail column, because a page of "… Snapback" reads faster
+   as pictures than as text. */
+.th-ptable td, .th-ptable th { padding-top: 12px; padding-bottom: 12px; }
+.th-ptable__thumbcell { width: 56px; padding-right: 0 !important; }
+.th-ptable__thumb { display: block; width: 44px; height: 44px; border-radius: 8px; overflow: hidden; background: var(--th-line); }
+.th-ptable__thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Row selection + bulk actions. */
+.th-ptable__cbcell { width: 32px; padding-right: 0 !important; text-align: center; }
+.th-ptable__cbcell input { width: 16px; height: 16px; cursor: pointer; accent-color: var(--th-ink, #070707); }
+.th-ptable tr.is-selected td { background: var(--th-accent-weak, rgba(0,0,0,.04)); }
+/* Sticky so it stays reachable while scrolling a long selection. */
+.th-bulkbar {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: 8px 0 12px; padding: 10px 14px;
+  border: 1px solid var(--th-line); border-radius: 10px;
+  background: var(--th-surface, #fff);
+  box-shadow: 0 2px 10px rgba(0,0,0,.06);
+}
+.th-bulkbar__count { font-weight: 700; }
+.th-bulkbar__actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.th-bulkbar__clear { background: none; border: 0; color: var(--th-ink-2, #666); cursor: pointer; text-decoration: underline; padding: 4px; }
+.th-bulkbar__msg { color: var(--th-ink-2, #666); font-size: 13px; }
+
+/* Grid view. */
+.th-pgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 16px; }
+.th-pcard { display: flex; flex-direction: column; border: 1px solid var(--th-line); border-radius: 12px; overflow: hidden; background: var(--th-surface); text-decoration: none; color: inherit; transition: border-color .12s, transform .12s; }
+.th-pcard:hover { border-color: var(--th-ink, #070707); transform: translateY(-2px); }
+.th-pcard__img { aspect-ratio: 1; background: var(--th-line); display: flex; align-items: center; justify-content: center; }
+.th-pcard__img img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.th-pcard__ph { font-size: 11px; color: var(--th-muted); }
+.th-pcard__body { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.th-pcard__meta { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 13px; }
+
+/* The real storefront page, framed and scrollable. */
+/* Scrolls, so the whole page can be walked through rather than just its fold.
+   The iframe is rendered wide and scaled, so what you scroll is the desktop
+   layout — not the mobile one the narrow column would otherwise trigger. */
+/* Sized to the card by the component, and never scrolls — a card is a fixed
+   piece of layout, so a scrollbar around it only means the box is wrong. */
+.th-pv-frame--card { overflow: hidden; }
+.th-pv-frame { position: relative; width: 100%; height: 620px; border: 1px solid var(--th-line); border-radius: 12px; overflow-y: auto; overflow-x: hidden; background: #fff; }
+/* Out of flow: an in-flow 1280px child makes its own container 1280px wide,
+   so every attempt to measure the available space returned the child's width
+   and the preview never scaled down. */
+.th-pv-frame iframe { position: absolute; top: 0; left: 0; border: 0; display: block; }
+
+/* Look controls, sitting under the preview they change. */
+.th-look { margin-top: 16px; border: 1px solid var(--th-line); border-radius: 12px; padding: 16px; background: var(--th-surface); }
+.th-look__head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 12px; font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--th-muted); }
+.th-look__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
+.th-look__field { display: flex; flex-direction: column; gap: 5px; font-size: 12px; color: var(--th-muted); }
+.th-look__field select { width: 100%; }
+
+
+/* The category-side product picker (AssignProducts). Compact so it lives
+   inside a table cell without blowing the row height. */
+.th-assign { margin-top: 6px; border: 1px solid var(--th-line); border-radius: 8px; padding: 8px; background: var(--th-surface, #fff); max-width: 340px; }
+.th-assign__head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.th-assign__head strong { flex: 1; font-size: var(--th-fs-sm); }
+.th-assign__search { width: 100%; box-sizing: border-box; margin-bottom: 6px; }
+.th-assign__list { max-height: 260px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
+.th-assign__row { display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: 6px; cursor: pointer; font-size: var(--th-fs-sm); }
+.th-assign__row:hover { background: var(--th-hover, #f3f4f6); }
+.th-assign__row.on { background: var(--th-accent-weak, #eef2ff); }
+.th-assign__row img { border-radius: 4px; object-fit: cover; }
+.th-assign__noimg { width: 26px; height: 26px; border-radius: 4px; background: var(--th-line); display: inline-block; }
+
+
+/* Studio header: title on the left, publish actions on the right. */
+.th-studio__actions { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+/* ── Counter › Payments & Transactions ─────────────────────────────────── */
+.pay-tabs { display: flex; gap: 2px; flex-wrap: wrap; border-bottom: 1px solid var(--th-ink-3); margin: 16px 0 20px; }
+.pay-tab { padding: 9px 15px; font-size: var(--th-fs-sm); font-weight: 600; color: var(--th-muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: color .15s ease, border-color .15s ease; }
+.pay-tab:hover { color: var(--th-ink); }
+.pay-tab.active { color: var(--th-ink); border-bottom-color: var(--th-accent); }
+.pay-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.pay-scroll { overflow-x: auto; }
+.pay-num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.pay-neg { color: var(--th-danger); }
+.pay-pos { color: #2e9e63; }
+.pay-orderlink { color: var(--th-accent); text-decoration: none; font-weight: 600; }
+.pay-orderlink:hover { text-decoration: underline; }
+.pay-substats { display: flex; flex-wrap: wrap; gap: 22px 26px; }
+.pay-substat-v { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.pay-substat-l { font-size: var(--th-fs-xs); color: var(--th-muted); text-transform: uppercase; letter-spacing: .04em; margin-top: 2px; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   PAYMENTS OVERVIEW REDESIGN — Direction A                       (2026-08-16)
+   Ported faithfully from payments-redesign/direction-A.html (lines ~44-224).
+   Adds the two-track colour system + every section class the redesign uses.
+   Renames applied vs the mockup:
+     .hero            → .pay-hero          (‘.hero’ is too generic for a shared
+                                            sheet; component agents use .pay-hero)
+     --track-woo*     → --th-track-woo*    (join the app’s --th- token namespace)
+     --track-stripe*  → --th-track-stripe*
+   Reused as-is from earlier in this file (NOT re-declared here): .card, .l,
+   .muted, .th-btn(.th-btn-primary), .th-about-badge(.is-prod), .pay-num,
+   .pay-neg, .pay-pos, .pay-orderlink, .pay-scroll.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+/* ── Two-track colour key — one hue per money rail, carried hero → tiles →
+   activity chips → filters so an operator learns “red = WooPayments,
+   indigo = Stripe” once and reads it everywhere. Woo takes the brand accent;
+   Stripe takes a DISTINCT indigo, deliberately NOT the primary-button blue
+   (--th-accent-btn), so a track label never reads as a clickable control. */
+:root {
+  --th-track-woo: var(--th-accent);
+  --th-track-woo-tint: rgba(232, 59, 59, 0.10);
+  --th-track-stripe: #6366f1;
+  --th-track-stripe-tint: rgba(99, 102, 241, 0.10);
+}
+/* Dark — same mechanism therum-tokens.css uses for every palette flip:
+   explicit [data-color-mode='dark'] (+ :has ancestors so <html>/<body> flip
+   too) AND the system-preference form for the 'system' setting. Woo still
+   follows --th-accent (red in every mode); Stripe lifts to a lighter indigo
+   so it stays legible on the dark canvas. */
+html:has([data-color-mode='dark']),
+body:has([data-color-mode='dark']),
+[data-color-mode='dark'] {
+  --th-track-woo: var(--th-accent);
+  --th-track-woo-tint: rgba(232, 59, 59, 0.22);
+  --th-track-stripe: #a5b4fc;
+  --th-track-stripe-tint: rgba(99, 102, 241, 0.24);
+}
+@media (prefers-color-scheme: dark) {
+  [data-color-mode='system'] {
+    --th-track-woo: var(--th-accent);
+    --th-track-woo-tint: rgba(232, 59, 59, 0.22);
+    --th-track-stripe: #a5b4fc;
+    --th-track-stripe-tint: rgba(99, 102, 241, 0.24);
+  }
+}
+
+/* .pay-pos in dark: the light-mode #2e9e63 measures ~3:1 on the dark card —
+   lift positive-net green to the palette’s dark success ink (mockup line 105).
+   Note: .seg-btn.active[data-filter=all] needs NO dark override here — unlike
+   the mockup, this app’s --th-emphasis-bg (#0a0a0a) and --th-text-inverse
+   (#fff) do not flip by mode, so the base rule is already white-on-dark in
+   both. */
+html:has([data-color-mode='dark']) .pay-pos,
+body:has([data-color-mode='dark']) .pay-pos,
+[data-color-mode='dark'] .pay-pos { color: #6ee7b7; }
+@media (prefers-color-scheme: dark) {
+  [data-color-mode='system'] .pay-pos { color: #6ee7b7; }
+}
+
+/* A disabled .th-btn (WooPayments’ instant-payout uses aria-disabled) must
+   READ disabled — the shared .th-btn has no aria-disabled dip (mockup 115-116). */
+.th-btn[aria-disabled='true'] { opacity: 0.5; cursor: not-allowed; }
+.th-btn[aria-disabled='true']:hover { border-color: var(--th-line); }
+
+/* ── 1 · BALANCE HERO ─────────────────────────────────────────────────────── */
+.pay-hero { padding: 28px 30px; margin-bottom: 16px; display: grid; grid-template-columns: 1.15fr 1fr; gap: 32px; align-items: center; }
+.hero-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.hero-num { font-family: var(--th-font-display); font-size: 54px; line-height: 1; font-weight: 700; letter-spacing: -1.5px; font-variant-numeric: tabular-nums; margin: 4px 0 6px; }
+.hero-caption { color: var(--th-ink-2); font-size: var(--th-fs-sm); margin-bottom: 20px; }
+.hero-caption b { color: var(--th-ink); font-weight: 600; }
+.hero-stats { display: flex; gap: 34px; flex-wrap: wrap; }
+.hs-v { font-size: 20px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.hs-l { font-size: var(--th-fs-xs); color: var(--th-muted); text-transform: uppercase; letter-spacing: .04em; margin-top: 3px; }
+.updated { font-size: var(--th-fs-2xs); color: var(--th-muted); display: flex; align-items: center; gap: 6px; }
+.updated::before { content: ""; width: 6px; height: 6px; border-radius: 999px; background: var(--th-success-text); }
+
+/* per-account split (right column) */
+.split { border-left: 1px solid var(--th-line); padding-left: 32px; }
+.split-title { font-size: var(--th-fs-xs); color: var(--th-muted); text-transform: uppercase; letter-spacing: .06em; font-weight: 600; margin-bottom: 12px; }
+.split-bar { display: flex; height: 12px; border-radius: 999px; overflow: hidden; background: var(--th-surface-2); margin-bottom: 16px; }
+.seg-w { background: var(--th-track-woo); }
+.seg-s { background: var(--th-track-stripe); }
+.legend { display: flex; flex-direction: column; gap: 12px; }
+.lg-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.lg-name { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: var(--th-fs-sm); }
+.dot { width: 9px; height: 9px; border-radius: 999px; flex-shrink: 0; }
+.dot-w { background: var(--th-track-woo); }
+.dot-s { background: var(--th-track-stripe); }
+.lg-amt { font-variant-numeric: tabular-nums; font-weight: 700; font-size: var(--th-fs-sm); }
+.lg-pct { color: var(--th-muted); font-size: var(--th-fs-xs); font-variant-numeric: tabular-nums; min-width: 52px; text-align: right; }
+.split-foot { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--th-line); font-size: var(--th-fs-xs); color: var(--th-muted); display: flex; align-items: center; gap: 8px; }
+.split-foot svg { flex-shrink: 0; color: var(--th-muted); }
+.split-foot b { color: var(--th-ink-2); font-weight: 600; }
+
+/* ── 2 · ACCOUNT TILES (one card, two symmetric halves) ───────────────────── */
+.accounts { margin-bottom: 16px; overflow: hidden; }
+.acct-grid { display: grid; grid-template-columns: 1fr 1fr; }
+.acct { position: relative; padding: 22px 24px 20px; }
+.acct + .acct { border-left: 1px solid var(--th-line); }
+.acct::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 3px; }
+.acct-woo::before { background: var(--th-track-woo); }
+.acct-stripe::before { background: var(--th-track-stripe); }
+.acct-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.acct-id { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.mono { width: 34px; height: 34px; border-radius: 9px; display: flex; align-items: center; justify-content: center; font-family: var(--th-font-display); font-weight: 800; font-size: 13px; flex-shrink: 0; }
+.mono-w { background: var(--th-track-woo-tint); color: var(--th-track-woo); }
+.mono-s { background: var(--th-track-stripe-tint); color: var(--th-track-stripe); }
+.acct-name { font-family: var(--th-font-display); font-size: var(--th-fs-md); font-weight: 700; line-height: 1.15; }
+.acct-role { font-size: var(--th-fs-xs); color: var(--th-muted); margin-top: 1px; }
+.acct-badges { display: flex; flex-direction: column; align-items: flex-end; gap: 5px; flex-shrink: 0; }
+/* .badge-ok modifies .th-about-badge (same specificity, appears later → wins). */
+.badge-ok { background: var(--th-success-bg); border-color: transparent; color: var(--th-success-ink); }
+.stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; margin: 18px 0 4px; }
+.st-l { font-size: var(--th-fs-2xs); color: var(--th-muted); text-transform: uppercase; letter-spacing: .05em; margin-bottom: 3px; }
+.st-v { font-size: var(--th-fs-md); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
+.st-v small { font-size: var(--th-fs-xs); font-weight: 600; color: var(--th-muted); }
+.st-note { font-size: var(--th-fs-2xs); color: var(--th-muted); margin-top: 2px; }
+.acct-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; padding-top: 16px; border-top: 1px dashed var(--th-line); }
+.reason { flex-basis: 100%; font-size: var(--th-fs-2xs); color: var(--th-muted); margin: -2px 0 0; }
+.reason b { color: var(--th-warning-ink); }
+.same-bank { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 11px 16px; border-top: 1px solid var(--th-line); background: var(--th-surface-2); font-size: var(--th-fs-xs); color: var(--th-ink-2); }
+.same-bank svg { color: var(--th-muted); }
+.same-bank b { font-variant-numeric: tabular-nums; }
+
+/* ── 3 · MERGED ACTIVITY (payouts + transactions, one account filter) ─────── */
+.activity { margin-bottom: 16px; }
+.act-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; padding: 18px 22px 14px; }
+.act-title { font-family: var(--th-font-display); font-size: var(--th-fs-md); font-weight: 700; }
+.act-title span { color: var(--th-muted); font-weight: 500; font-size: var(--th-fs-sm); }
+.seg { display: inline-flex; gap: 2px; padding: 3px; background: var(--th-surface-2); border: 1px solid var(--th-line); border-radius: var(--th-r-pill); }
+.seg-btn { display: inline-flex; align-items: center; gap: 7px; padding: 6px 14px; border: none; background: transparent; color: var(--th-ink-2); font-family: var(--th-font-body); font-size: var(--th-fs-xs); font-weight: 600; border-radius: var(--th-r-pill); cursor: pointer; transition: all var(--th-transition); }
+.seg-btn:hover { color: var(--th-ink); }
+.seg-btn .dot { width: 8px; height: 8px; }
+.seg-btn.active { background: var(--th-emphasis-bg); color: var(--th-text-inverse); }
+.seg-btn.active[data-filter="woo"] { background: var(--th-track-woo); color: #fff; }
+.seg-btn.active[data-filter="stripe"] { background: var(--th-track-stripe); color: #fff; }
+.seg-btn.active .dot { background: #fff !important; }
+.act-section-l { font-size: var(--th-fs-2xs); text-transform: uppercase; letter-spacing: .06em; color: var(--th-muted); font-weight: 700; padding: 14px 22px 8px; }
+.act-divider { border-top: 1px solid var(--th-line); }
+/* The ledgers sit flush INSIDE .card.activity — override this file’s global
+   table chrome (card bg + border + shadow + radius from the `table` rule)
+   so they read as sections of the card, not cards-within-a-card. Matches the
+   mockup’s transparent, borderless tables. */
+.act-tbl { background: transparent; border: none; box-shadow: none; border-radius: 0; backdrop-filter: none; }
+.act-tbl th, .act-tbl td { padding: 11px 22px; border-bottom: 1px solid var(--th-line); }
+.act-tbl th { background: transparent; font-weight: 600; }
+.act-tbl tbody tr:last-child td { border-bottom: none; }
+.act-tbl tbody tr:hover td { background: var(--th-surface-2); }
+.track-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px 3px 8px; border-radius: 999px; font-size: var(--th-fs-2xs); font-weight: 600; white-space: nowrap; }
+.chip-w { background: var(--th-track-woo-tint); color: var(--th-track-woo); }
+.chip-s { background: var(--th-track-stripe-tint); color: var(--th-track-stripe); }
+.cust { font-weight: 600; }
+.cust-sub { font-size: var(--th-fs-2xs); color: var(--th-muted); }
+.type-tag { display: inline-block; font-size: var(--th-fs-2xs); font-weight: 600; color: var(--th-muted); text-transform: uppercase; letter-spacing: .04em; }
+.no-match { display: none; padding: 18px 22px; color: var(--th-muted); font-size: var(--th-fs-sm); }
+.act-foot { padding: 14px 22px; display: flex; gap: 10px; flex-wrap: wrap; border-top: 1px solid var(--th-line); }
+
+/* ── 4 · DISPUTES empty state (slim strip) ────────────────────────────────── */
+.disputes { display: flex; align-items: center; gap: 16px; padding: 18px 22px; }
+.disp-icon { width: 40px; height: 40px; border-radius: 10px; background: var(--th-success-bg); color: var(--th-success-ink); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+.disp-body { flex: 1; min-width: 0; }
+.disp-title { font-family: var(--th-font-display); font-size: var(--th-fs-sm); font-weight: 700; }
+.disp-sub { font-size: var(--th-fs-xs); color: var(--th-muted); margin-top: 1px; }
+.disp-count { font-size: var(--th-fs-xl); font-weight: 800; color: var(--th-muted); font-variant-numeric: tabular-nums; }
+
+/* ── responsive (mockup’s @media max-width:820px; .wrap omitted — the app’s
+   #th-content owns page padding) ──────────────────────────────────────────── */
+@media (max-width: 820px) {
+  .pay-hero { grid-template-columns: 1fr; gap: 24px; }
+  .split { border-left: none; border-top: 1px solid var(--th-line); padding-left: 0; padding-top: 22px; }
+  .acct-grid { grid-template-columns: 1fr; }
+  .acct + .acct { border-left: none; border-top: 1px solid var(--th-line); }
+  .hero-num { font-size: 44px; }
+}

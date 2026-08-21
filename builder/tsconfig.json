@@ -1,0 +1,25 @@
+{
+  "compilerOptions": {
+    // Standard Vite ambient types (import.meta.env, *.css/*.svg side-effect
+    // imports, etc.) — was missing entirely; TS 5 silently tolerated the gap,
+    // TS 7 correctly doesn't (surfaced by the styles.css side-effect import).
+    "types": ["vite/client"],
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noUncheckedIndexedAccess": true,
+    "noFallthroughCasesInSwitch": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true
+  },
+  "include": ["src"]
+}
