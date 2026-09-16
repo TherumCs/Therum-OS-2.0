@@ -56,6 +56,12 @@ for real were closed.
   to their vendor, webhook redirects never followed, inert admin fallback token,
   rate limits on public writes.
 
+### Product is store-neutral (cut moved 2026-09-16)
+- The first cut of this tag still carried one store's brand in code. The tag now
+  points at the store-neutral commit: site name, Meta domain verification,
+  email logo, careers inbox and category landings are settings / env / site pack
+  (`EMAIL_LOGO_URL`, `CAREERS_INBOX`, `SITE_PACK_DIR` — see `.env.example`).
+
 ### Known gaps (honest)
 - Frequency cap and SMS sends not yet exercised on a real audience.
 - Four Printify pins still unlinked (re-publish overwrites curation).
