@@ -72,6 +72,16 @@ export async function transitionOrder(id: string, status: string): Promise<void>
   revalidatePath('/orders');
 }
 
+/**
+ * Set the production stage of an order's lines from the list. No itemIds =
+ * the WHOLE order. Entering 'in_production' emails the customer (once per line)
+ * server-side — the same endpoint the order detail's per-line controls use.
+ */
+export async function setProduction(id: string, status: string): Promise<void> {
+  await apiSend('POST', `/api/orders/${id}/production`, { status });
+  revalidatePath('/orders');
+}
+
 export async function toggleExtension(id: string, enabled: boolean): Promise<void> {
   await apiSend('PATCH', `/api/extensions/${id}`, { enabled });
   revalidatePath('/extensions');

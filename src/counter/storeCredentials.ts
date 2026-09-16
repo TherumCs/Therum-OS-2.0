@@ -61,8 +61,13 @@ export function readStoreCredential(req: FastifyRequest): { key: string; secret:
 }
 
 export const storeCredentials = {
-  /** Issues a new pair. The secret is returned here and nowhere else, ever. */
-  async issue(label: string, scope: StoreScope = 'read_write'): Promise<IssuedCredential> {
+  /**
+   * Issues a new pair. The secret is returned here and nowhere else, ever.
+   * `firstParty` marks an ADMIN-issued key (the merchant's own tooling) that is
+   * allowed to see all orders; it MUST stay false for any partner-issued key
+   * (wc-auth), which is fenced to its own vendor. Defaults false = fail closed.
+   */
+  async issue(label: string, scope: StoreScope = 'read_write', firstParty = false): Promise<IssuedCredential> {
     const clean = label.trim();
     if (!clean) throw new ValidationError('Give this key a name so you can tell it apart later.', 'label');
     if (scope !== 'read' && scope !== 'read_write') {
@@ -72,7 +77,7 @@ export const storeCredentials = {
     const consumerKey = `ck_${randomBytes(KEY_BYTES).toString('hex')}`;
     const consumerSecret = `cs_${randomBytes(KEY_BYTES).toString('hex')}`;
     const row = await db.storeCredential.create({
-      data: { label: clean, consumerKey, secretHash: sha256(consumerSecret), scope },
+      data: { label: clean, consumerKey, secretHash: sha256(consumerSecret), scope, firstParty },
     });
     return { id: row.id, keyId: row.keyId, label: row.label, consumerKey, consumerSecret, scope };
   },
@@ -96,7 +101,7 @@ export const storeCredentials = {
     void db.storeCredential
       .update({ where: { id: row.id }, data: { lastUsedAt: new Date(), lastUsedIp: ip ?? null } })
       .catch(() => {});
-    return { id: row.id, label: row.label, scope: row.scope as StoreScope };
+    return { id: row.id, label: row.label, scope: row.scope as StoreScope, firstParty: row.firstParty };
   },
 
   /** Never returns a secret — there is nothing recoverable to return. */

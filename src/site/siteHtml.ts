@@ -2,6 +2,7 @@ import { BANNER_RUNTIME, BANNER_STYLES } from './bannerRuntime.js';
 import { CONTACT_CSS, CONTACT_RUNTIME } from './contactForm.js';
 import { COUNTDOWN_RUNTIME } from './countdownRuntime.js';
 import { SUBSCRIBE_SCRIPT } from './shortcodes.js';
+import { POPUP_RUNTIME, POPUP_STYLES } from './popupRuntime.js';
 import { MOBILE_MENU_CSS, MOBILE_MENU_RUNTIME } from './mobileMenu.js';
 import { HEADER_CART_CSS, headerCartRuntime, HEADER_CART_DEFAULTS, type HeaderCartConfig } from './headerCart.js';
 // Base Theme — the default public frontend shell. Deliberately minimal
@@ -52,6 +53,18 @@ const HOME_MOBILE_CSS = `@media(max-width:767px){`
   + `.th-el-2ff5950 .c-ip-button,.th-el-0e291aa .c-ip-button,.th-el-83ace67 .c-ip-button{font-size:12px!important}`
   + `}`;
 
+// Money-shots (home, DESKTOP): the LEFT half is the man's PORTRAIT video
+// (home-video-ca.mp4, 1292×1604, /about link), the RIGHT the woman's landscape
+// clip (/shop). Bam's call: the panel must be SEAMLESS — video fills it edge to
+// edge, no letterbox borders, keep the panel dimensions. A portrait clip in the
+// wider ~square panel can only fill it by cropping top/bottom (cover) OR show
+// whole with side bars (contain); seamless wins, so cover it is, centered — the
+// source gets recut with head/foot room if the crop bites. Forced cover here so
+// the framing is explicit and can't drift.
+const HOME_DESKTOP_CSS = `@media(min-width:768px){`
+  + `.th-el-8700216 > .tsc-vid[href="/about-the-sidemoney-company"] video{object-fit:cover!important;object-position:center!important}`
+  + `}`;
+
 const CSS = `
 :root{
   /* Same ink as the storefront and the ported theme (--button-color). Content
@@ -98,13 +111,17 @@ main#brx-content,main.l-inner{padding-top:0;padding-bottom:0}
 .prose pre{background:#111;color:#eee;border-radius:var(--radius-md);padding:16px;overflow-x:auto;font-size:13px;margin:0 0 1.1em}
 .prose code{font-size:.92em}
 .prose hr{border:0;border-top:1px solid var(--bd);margin:2em 0}
-/* Index cards (blog/work/landing) */
-.cards{display:flex;flex-direction:column;gap:14px}
-.card{display:block;background:var(--sf);border:1px solid var(--bd);border-radius:var(--radius-lg);padding:22px 24px;transition:border-color var(--e),transform var(--e)}
-.card:hover{border-color:var(--bd2);transform:translateY(-1px)}
-.card .t{font-weight:700;font-size:17px;letter-spacing:-0.01em}
-.card .x{color:var(--tx2);font-size:14px;margin-top:4px}
-.card .d{color:var(--tx3);font-size:12px;margin-top:8px}
+/* Index cards (blog/work/landing) — editorial grid with cover images */
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:24px}
+.card{display:flex;flex-direction:column;background:var(--sf);border:1px solid var(--bd);border-radius:var(--radius-lg);overflow:hidden;transition:border-color var(--e),transform var(--e),box-shadow var(--e)}
+.card:hover{border-color:var(--bd2);transform:translateY(-2px);box-shadow:0 12px 30px rgba(0,0,0,0.07)}
+.card__cover{aspect-ratio:3/2;background:var(--sf2);overflow:hidden}
+.card__cover img{width:100%;height:100%;object-fit:cover;display:block;transition:transform .45s ease}
+.card:hover .card__cover img{transform:scale(1.04)}
+.card__body{padding:20px 22px;display:flex;flex-direction:column;gap:7px}
+.card .t{font-weight:700;font-size:18px;letter-spacing:-0.01em;line-height:1.25;text-wrap:balance}
+.card .x{color:var(--tx2);font-size:14px;line-height:1.55}
+.card .d{color:var(--tx3);font-size:12px;text-transform:uppercase;letter-spacing:.04em}
 .section-label{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--tx3);margin:40px 0 14px}
 .empty{color:var(--tx3);text-align:center;padding:60px 0}
 footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-size:13px}
@@ -329,11 +346,11 @@ ${p.body}
 <meta name="facebook-domain-verification" content="9t3nhx1yw9xijatt76fw2lzktpi878">
 <title>${esc(p.title)}</title>
 ${p.headExtra ?? ''}
-<style>:root{--th-site-max:${siteMax}}${CSS}${BANNER_STYLES}${CONTACT_CSS}${hasChrome ? HEADER_CART_CSS + PORTED_DOC_CSS + MOBILE_MENU_CSS : ''}</style>
+<style>:root{--th-site-max:${siteMax}}${CSS}${BANNER_STYLES}${CONTACT_CSS}${POPUP_STYLES}${hasChrome ? HEADER_CART_CSS + PORTED_DOC_CSS + MOBILE_MENU_CSS : ''}</style>
 ${p.dock ? `<style>${p.dock.styles}</style>` : ''}
-${p.chromeCssUrl ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap"><link rel="stylesheet" href="${esc(p.chromeCssUrl)}">` : ''}
+${p.chromeCssUrl ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@100..900&family=Manrope:wght@200..800&family=Roboto+Condensed:wght@100..900&family=Roboto:wght@100..900&family=Montserrat:wght@100..900&display=swap"><link rel="stylesheet" href="${esc(p.chromeCssUrl)}">` : ''}
 ${p.pageCss ? `<style>${p.pageCss}</style>` : ''}
-<style>${HOME_MOBILE_CSS}</style>
+<style>${HOME_MOBILE_CSS}${HOME_DESKTOP_CSS}</style>
 </head>
 <body class="${BODY_CLASS}">
 <div id="th-shell">
@@ -342,7 +359,7 @@ ${main}
 ${footer}
 </div>
 ${p.dock ? `${p.dock.markup}\n<script>${p.dock.script}</script>` : ''}
-<script>${BANNER_RUNTIME}${SUBSCRIBE_SCRIPT}${CONTACT_RUNTIME}${COUNTDOWN_RUNTIME}</script>
+<script>${BANNER_RUNTIME}${SUBSCRIBE_SCRIPT}${CONTACT_RUNTIME}${COUNTDOWN_RUNTIME}${POPUP_RUNTIME}</script>
 ${hasChrome ? `<script>${headerCartRuntime(p.headerIcons ?? HEADER_CART_DEFAULTS)}</script><script>${MOBILE_MENU_RUNTIME}</script>` : ''}
 </body>
 </html>`;

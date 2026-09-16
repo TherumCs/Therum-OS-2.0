@@ -1,5 +1,6 @@
 import { connectionService } from './connection.service.js';
 import { randomUUID } from 'node:crypto';
+import { logger } from '../lib/logger.js';
 
 // Sending mail through the store owner's own Google account.
 //
@@ -20,7 +21,13 @@ import { randomUUID } from 'node:crypto';
 // typed in, and this grant is narrow, auditable in the Google account, and
 // revocable from there without touching anything else.
 
-export const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
+// openid + email so the consent captures WHICH mailbox was authorised (the
+// userinfo call in storeGmailGrant needs it). Without them cred.email was always
+// empty and the sender-identity guard below was permanently inert (audit C10) —
+// store mail could silently go out from a personal account. New grants capture
+// the identity; a legacy send-only grant has no email and now fails CLOSED in
+// viaGmail (skips Gmail, falls through to an MX/SMTP send from the real From).
+export const GMAIL_SEND_SCOPE = 'openid email https://www.googleapis.com/auth/gmail.send';
 export const GMAIL_PROVIDER = 'google-gmail';
 
 interface GmailCredential {
@@ -79,7 +86,7 @@ async function accessToken(cred: GmailCredential): Promise<string | null> {
  * subject or a display name is header injection — it would let anything that
  * reaches this function append its own headers, Bcc included.
  */
-export function buildRawMessage(msg: { to: string; from: string; subject: string; body: string; html?: string }): string {
+export function buildRawMessage(msg: { to: string; from: string; subject: string; body: string; html?: string; headers?: Record<string, string> }): string {
   const strip = (v: string): string => v.replace(/[\r\n]+/g, ' ').trim();
   // Header values are ASCII per RFC 5322; a non-ASCII Subject (an em-dash, or a
   // product name in another script) must be an RFC 2047 encoded-word, or clients
@@ -94,6 +101,10 @@ export function buildRawMessage(msg: { to: string; from: string; subject: string
     `To: ${strip(msg.to)}`,
     `Subject: ${encWord(msg.subject)}`,
     'MIME-Version: 1.0',
+    // Extra headers (List-Unsubscribe et al.) — CR/LF stripped from both name
+    // and value so a caller-supplied header can never inject a second header
+    // line or a bare body.
+    ...Object.entries(msg.headers ?? {}).map(([k, v]) => `${strip(k)}: ${strip(v)}`),
   ];
   // Plain-text-only when there is no HTML part — the original behaviour.
   if (!msg.html) {
@@ -126,7 +137,7 @@ export function buildRawMessage(msg: { to: string; from: string; subject: string
 }
 
 /** Returns false rather than throwing, so the sender chain moves on. */
-export async function viaGmail(msg: { to: string; from: string; subject: string; body: string; html?: string }): Promise<boolean> {
+export async function viaGmail(msg: { to: string; from: string; subject: string; body: string; html?: string; headers?: Record<string, string> }): Promise<boolean> {
   const cred = parseGmailCredential(await connectionService.credentialFor(GMAIL_PROVIDER));
   if (!cred) return false;
   const token = await accessToken(cred);
@@ -134,7 +145,31 @@ export async function viaGmail(msg: { to: string; from: string; subject: string;
   // Gmail sends as the authorised mailbox whatever From is claimed, so the
   // stored address is used when we have it — a From the account cannot send
   // as is a fast route into spam folders.
-  const from = cred.email || msg.from;
+  //
+  // IDENTITY GUARD (audit + standing store rule): customer mail must go out as
+  // the configured store From (commoncents@sidemoney.co), NEVER the personal
+  // account a Gmail grant might have been authorised against (hello@bamleon.com).
+  // If the connected mailbox does not match the configured From, this transport
+  // would silently REBRAND every receipt/refund/shipping email to the wrong
+  // identity — so skip it and let a transport that can honour the real From
+  // (SMTP / direct-MX as the store domain) take the send instead of sending as
+  // the wrong sender.
+  const addrOf = (s: string): string => (s.match(/<([^>]+)>/)?.[1] ?? s).trim().toLowerCase();
+  // FAIL CLOSED. Send via Gmail ONLY when the connected mailbox identity is known
+  // AND matches the configured store From. If cred.email is empty (a legacy
+  // send-only grant that never captured identity) or it mismatches, we cannot
+  // prove the mail would go out as commoncents@sidemoney.co — so skip Gmail and
+  // let a transport that honours the configured From (SMTP / direct-MX as the
+  // store domain) take the send, instead of silently sending from the wrong
+  // (possibly personal) mailbox (audit C10 + standing store-identity rule).
+  if (!cred.email || !msg.from || addrOf(cred.email) !== addrOf(msg.from)) {
+    logger.warn(
+      { mailbox: cred.email ? addrOf(cred.email) : '(identity not captured)', configuredFrom: msg.from ? addrOf(msg.from) : '(unset)' },
+      'gmail transport skipped: connected mailbox identity unknown or does not match the configured store From — routing this send to another transport',
+    );
+    return false;
+  }
+  const from = cred.email;
   const res = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/messages/send', {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },

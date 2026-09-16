@@ -198,7 +198,7 @@ export const CONTACT_RUNTIME = `
       if (!res.ok) throw new Error((out.error && out.error.message) || 'That did not send.');
       if (out.sent === false) throw new Error('Email is not connected on this store yet.');
       form.innerHTML = '<div class="cf__done"><h3>Message sent</h3>'
-        + '<p>Thanks — we have it, and we will come back to you at ' + email.replace(/[<>&]/g, '') + '.</p></div>';
+        + '<p>Thanks — we have it, and we will come back to you at ' + email.replace(/[<>&']/g, '') + '.</p></div>';
     } catch (err) {
       send.disabled = false; send.textContent = 'Send it';
       say(err.message || 'That did not send. Try again in a moment.', true);

@@ -86,8 +86,8 @@ function dropdown(g: ToolbarGroup, i: number): string {
   return `
   <div class="sh-pill-wrap">
     <button class="sh-pill${chosen ? ' has' : ''}" type="button" aria-expanded="false" aria-controls="${id}">
-      <span class="sh-pill__label">${g.label}</span>
-      ${chosen ? `<span class="sh-fpill__value">${chosen.label}</span>` : ''}
+      <span class="sh-pill__label">${esc(g.label)}</span>
+      ${chosen ? `<span class="sh-fpill__value">${esc(chosen.label)}</span>` : ''}
       <span class="sh-pill__caret" aria-hidden="true">⌄</span>
     </button>
     <div class="sh-pop${g.grid ? ' sh-pop--grid' : ''}${g.swatches ? ' sh-pop--mega' : ''}" id="${id}" hidden>

@@ -13,7 +13,7 @@
 // its last line (no widows — a standing rule).
 
 // ── Tokens ───────────────────────────────────────────────────────────────────
-const T = {
+export const T = {
   bg: '#fafafa', card: '#ffffff', border: '#e7e7e7', hair: '#efefef',
   ink: '#0a0a0a', body: '#4a4a4a', mute: '#8a8a8a', faint: '#b3b3b3',
   black: '#070707', red: '#e83b3b', thumb: '#f2f2f2',
@@ -25,31 +25,31 @@ const T = {
 const LOGO = process.env.EMAIL_LOGO_URL
   || `${(process.env.PUBLIC_ORIGIN ?? '').replace(/\/+$/, '')}/wp-content/uploads/2026/03/full-sig-black.png`;
 
-const esc = (s: string): string =>
+export const esc = (s: string): string =>
   String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 
 // No widows: bind the last word of each line to the one before it with a real
 // non-breaking space (U+00A0), so a single word can never wrap alone. The
 // email-safe technique — clients ignore CSS text-wrap.
 const NBSP = String.fromCharCode(160);
-const nw = (html: string): string =>
+export const nw = (html: string): string =>
   String(html).split(/(<br\s*\/?>)/i).map((s) => (/^<br/i.test(s) ? s : s.replace(/ ([^ ]+ *)$/, NBSP + '$1'))).join('');
 
 // ── Components ───────────────────────────────────────────────────────────────
-const eyebrow = (t: string, color: string = T.mute): string =>
+export const eyebrow = (t: string, color: string = T.mute): string =>
   `<div style="font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:${color};text-align:center;">${nw(esc(t))}</div>`;
-const h1 = (t: string): string =>
+export const h1 = (t: string): string =>
   `<h1 style="margin:8px 0 0;font-size:27px;line-height:1.15;font-weight:800;letter-spacing:-.02em;color:${T.ink};text-align:center;">${nw(t)}</h1>`;
-const para = (t: string, extra: string = ''): string =>
+export const para = (t: string, extra: string = ''): string =>
   `<p style="margin:0 0 15px;font-size:15px;line-height:1.7;color:${T.body};text-align:center;${extra}">${nw(t)}</p>`;
-const button = (label: string, url: string): string =>
+export const button = (label: string, url: string): string =>
   `<a href="${esc(url)}" style="display:block;background:${T.black};color:#ffffff;text-decoration:none;text-align:center;padding:17px;font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;">${esc(label)}</a>`;
-const hair = (): string => `<div style="height:1px;background:${T.hair};font-size:0;line-height:0;">&nbsp;</div>`;
-const note = (t: string): string => `<p style="margin:0;text-align:center;font-size:12px;color:${T.mute};line-height:1.6;">${nw(t)}</p>`;
-const section = (pad: string, html: string): string => `<tr><td style="padding:${pad};">${html}</td></tr>`;
+export const hair = (): string => `<div style="height:1px;background:${T.hair};font-size:0;line-height:0;">&nbsp;</div>`;
+export const note = (t: string): string => `<p style="margin:0;text-align:center;font-size:12px;color:${T.mute};line-height:1.6;">${nw(t)}</p>`;
+export const section = (pad: string, html: string): string => `<tr><td style="padding:${pad};">${html}</td></tr>`;
 
 // Product row: thumbnail + name/meta + price. Used where an image is available.
-function productRow(it: { img?: string; name: string; meta?: string; value: string; muted?: boolean }): string {
+export function productRow(it: { img?: string; name: string; meta?: string; value: string; muted?: boolean }): string {
   const c = it.muted ? T.mute : T.ink;
   const thumb = it.img
     ? `<td width="64" style="padding:10px 0;"><img src="${esc(it.img)}" width="56" height="56" alt="" style="display:block;width:56px;height:56px;border-radius:8px;background:${T.thumb};object-fit:cover;border:1px solid ${T.hair};"></td>`
@@ -61,21 +61,29 @@ function productRow(it: { img?: string; name: string; meta?: string; value: stri
 }
 
 // ── Shell ────────────────────────────────────────────────────────────────────
-function shell(inner: string, opts: { preheader?: string; siteName?: string } = {}): string {
+export function shell(inner: string, opts: { preheader?: string; siteName?: string; unsubscribeUrl?: string; logoWidth?: number } = {}): string {
+  // Marketing mail (Flow) runs the logo larger; transactional stays at 150.
+  const logoW = opts.logoWidth ?? 150;
   const siteName = opts.siteName || 'Therum OS';
   // Absolute links only — mail clients have no base URL. The store's public
   // origin is configured per-install via PUBLIC_ORIGIN; empty when unset.
   const origin = (process.env.PUBLIC_ORIGIN ?? '').replace(/\/+$/, '');
   const host = origin.replace(/^https?:\/\//, '');
+  // "Unsubscribe" appears ONLY on marketing mail, and only as a real,
+  // per-recipient opt-out link (opts.unsubscribeUrl). It used to be hard-coded
+  // on EVERY email pointing at /account — a dead control that opted no one out,
+  // and one that has no business on a receipt or a login code anyway. A
+  // transactional email now shows just "Your account".
   const footer = `${esc(siteName).toUpperCase()} &nbsp;·&nbsp; <a href="${esc(origin)}" style="color:${T.mute};text-decoration:none;">${esc(host)}</a><br>`
-    + `<a href="${esc(origin)}/account" style="color:${T.mute};text-decoration:none;">Your account</a> &nbsp;·&nbsp; <a href="${esc(origin)}/account" style="color:${T.mute};text-decoration:none;">Unsubscribe</a>`;
+    + `<a href="${esc(origin)}/account" style="color:${T.mute};text-decoration:none;">Your account</a>`
+    + (opts.unsubscribeUrl ? ` &nbsp;·&nbsp; <a href="${esc(opts.unsubscribeUrl)}" style="color:${T.mute};text-decoration:none;">Unsubscribe</a>` : '');
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>`
     + `<body style="margin:0;padding:0;background:${T.bg};">`
     + `<div style="display:none;max-height:0;overflow:hidden;opacity:0;">${esc(opts.preheader || '')}</div>`
     + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${T.bg};"><tr><td align="center" style="padding:28px 12px 40px;">`
     + `<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${T.card};border:1px solid ${T.border};border-radius:14px;overflow:hidden;font-family:${T.font};">`
     + `<tr><td style="height:3px;background:${T.red};font-size:0;line-height:0;">&nbsp;</td></tr>`
-    + `<tr><td align="center" style="padding:34px 24px 30px;"><img src="${LOGO}" alt="${esc(siteName).toUpperCase()}" width="150" style="display:block;width:150px;max-width:56%;height:auto;border:0;"></td></tr>`
+    + `<tr><td align="center" style="padding:34px 24px 30px;"><img src="${LOGO}" alt="${esc(siteName).toUpperCase()}" width="${logoW}" style="display:block;width:${logoW}px;max-width:${logoW > 150 ? 70 : 56}%;height:auto;border:0;"></td></tr>`
     + inner
     + `<tr><td style="padding:26px 36px 30px;">${hair()}<div style="padding-top:18px;text-align:center;font-size:11px;line-height:1.7;color:${T.faint};letter-spacing:.02em;">${footer}</div></td></tr>`
     + `</table></td></tr></table></body></html>`;
@@ -125,6 +133,9 @@ export interface MessageEmailOpts {
   signoff?: string;
   preheader?: string;
   siteName?: string;
+  /** Marketing sends only: real per-recipient opt-out link. Transactional
+   *  callers (password reset, email verification) leave this unset. */
+  unsubscribeUrl?: string;
 }
 export function messageEmailHtml(o: MessageEmailOpts): string {
   const body = o.paragraphs
@@ -135,7 +146,7 @@ export function messageEmailHtml(o: MessageEmailOpts): string {
     + (o.cta ? section('24px 48px 0', button(o.cta.label, o.cta.url)) : '')
     + (o.ctaNote ? section('12px 48px 0', note(o.ctaNote)) : '')
     + (o.signoff ? section('26px 48px 0', para(o.signoff, 'margin-bottom:0;')) : '');
-  return shell(inner, { preheader: o.preheader ?? o.heading, siteName: o.siteName });
+  return shell(inner, { preheader: o.preheader ?? o.heading, siteName: o.siteName, unsubscribeUrl: o.unsubscribeUrl });
 }
 
 /** The Friends & Family welcome — "Replenish Yourself." */
@@ -209,6 +220,8 @@ export interface OfferEmailOpts {
   badge?: string;
   cta: { label: string; url: string };
   siteName?: string;
+  /** Marketing send: real per-recipient opt-out link. */
+  unsubscribeUrl?: string;
 }
 export function offerEmailHtml(o: OfferEmailOpts): string {
   const hero = o.heroImg
@@ -226,7 +239,7 @@ export function offerEmailHtml(o: OfferEmailOpts): string {
       + (o.productName ? `<div style="font-size:14px;font-weight:700;color:${T.ink};text-align:center;">${nw(esc(o.productName))}</div>` : '')
       + priceLine)
     + section('22px 48px 0', button(o.cta.label, o.cta.url));
-  return shell(inner, { preheader: o.heading, siteName: o.siteName });
+  return shell(inner, { preheader: o.heading, siteName: o.siteName, unsubscribeUrl: o.unsubscribeUrl });
 }
 
 // ── Login code / verification ────────────────────────────────────────────────

@@ -246,17 +246,82 @@ function headExtraFor(r: { metaTags: string; jsonLd: unknown }): string {
 async function indexCards(type: 'post' | 'case_study', base: string): Promise<string> {
   const items = await db.content.findMany({
     where: { type, status: 'published' },
-    select: { slug: true, title: true, excerpt: true, publishedAt: true },
+    select: { slug: true, title: true, excerpt: true, coverImage: true, publishedAt: true },
     orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
     take: 50,
   });
   if (!items.length) return '<p class="empty">Nothing published yet.</p>';
   return `<div class="cards">${items.map((i) => `
-    <a class="card" href="${base}/${esc(i.slug)}">
-      <div class="t">${esc(i.title)}</div>
-      ${i.excerpt ? `<div class="x">${esc(i.excerpt)}</div>` : ''}
-      ${i.publishedAt ? `<div class="d">${esc(fmtDate(i.publishedAt))}</div>` : ''}
+    <a class="card${i.coverImage ? '' : ' card--nocover'}" href="${base}/${esc(i.slug)}">
+      ${i.coverImage ? `<div class="card__cover"><img src="${esc(i.coverImage)}" alt="" loading="lazy" decoding="async"></div>` : ''}
+      <div class="card__body">
+        <div class="t">${esc(i.title)}</div>
+        ${i.excerpt ? `<div class="x">${esc(i.excerpt)}</div>` : ''}
+        ${i.publishedAt ? `<div class="d">${esc(fmtDate(i.publishedAt))}</div>` : ''}
+      </div>
     </a>`).join('')}</div>`;
+}
+
+// One card for the ported homepage "Reserve Notes" carousel, in the theme's own
+// `.c-post-list` markup so the design is untouched — but pointed at the live post
+// (/blog/<slug>) instead of the baked WP permalink.
+function portNewsCard(p: { slug: string; title: string; excerpt: string | null; coverImage: string | null; publishedAt: Date | string | null }): string {
+  const href = `/blog/${esc(p.slug)}`;
+  const date = p.publishedAt ? new Date(p.publishedAt).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) : '';
+  const img = p.coverImage ? `<img loading="lazy" decoding="async" class="c-post-list__img" src="${esc(p.coverImage)}" alt="${esc(p.title)}"/>` : '';
+  const exc = p.excerpt ? `<div class="c-post-list__except"><p>${esc(p.excerpt)}</p></div>` : '';
+  return `<article class="c-post-list c-post-list--standard c-post-list--grid c-post-list--no-sidebar c-post-list--with-thumb c-post-list--post js-post-item post type-post status-publish format-standard has-post-thumbnail hentry category-news">`
+    + `<div class="c-post-list__thumb c-post-list__thumb--standard c-post-list__thumb--grid"><div class="c-post-list__thumb-inner c-post-list__thumb-inner--grid"><a href="${href}" role="presentation">${img}</a></div></div>`
+    + `<div class="c-post-list__wrap c-post-list__wrap--standard c-post-list__wrap--grid c-post-list__wrap--with-thumb c-post-list__wrap--no-sidebar">`
+    + `<div class="c-post-list__meta-date c-post-list__meta-date--with-thumb c-post-list__meta-date--no-sidebar c-post-list__meta-date--grid">${date}</div>`
+    + `<a class="c-post-list__header-link" href="${href}"><h2 class="c-post-list__header">${esc(p.title)}</h2></a>`
+    + exc
+    + `<div class="c-post-list__spacer"></div>`
+    + `<div class="c-post-list__meta-category"><a class="c-post-list__categories-item-link" href="/blog">News</a></div>`
+    + `<a class="c-post-list__continue" aria-label="Read More: ${esc(p.title)}" href="${href}"><span class="c-post-list__continue-text">Read More</span><i class="c-post-list__continue-icon ip-button-more"></i></a>`
+    + `</div></article>`;
+}
+
+// The ported homepage baked its 3 newest-at-port-time posts into a STATIC
+// carousel (`.c-ip-news-carousel__list`), so it never updates and the cards link
+// to dead WP permalinks. Swap the baked cards for the live latest 3 in the same
+// markup, and drop a "View all posts" link under the section. No-ops (returns the
+// html untouched) if the carousel markup is absent or its divs don't balance.
+async function freshenReserveNotes(html: string): Promise<string> {
+  const open = html.match(/<div\s+class="c-ip-news-carousel__list[^"]*"[^>]*>/);
+  if (!open || open.index == null) return html;
+  const innerStart = open.index + open[0].length;
+  let depth = 1;
+  const re = /<div\b|<\/div>/gi;
+  re.lastIndex = innerStart;
+  let m: RegExpExecArray | null;
+  let closeStart = -1;
+  while ((m = re.exec(html))) {
+    if (m[0].toLowerCase() === '</div>') { depth--; if (depth === 0) { closeStart = m.index; break; } } else depth++;
+  }
+  if (closeStart < 0) return html;
+  const latest = await db.content.findMany({
+    where: { type: 'post', status: 'published' },
+    select: { slug: true, title: true, excerpt: true, coverImage: true, publishedAt: true },
+    orderBy: [{ publishedAt: 'desc' }, { createdAt: 'desc' }],
+    take: 3,
+  });
+  if (!latest.length) return html;
+  const cards = latest.map(portNewsCard).join('');
+  const viewAll = `<div style="text-align:center;margin:16px 0 0"><a href="/blog" style="display:inline-block;font:600 12px/1 'Manrope',sans-serif;letter-spacing:.16em;text-transform:uppercase;color:#070707;border-bottom:2px solid #070707;padding-bottom:5px">View all posts</a></div>`;
+  return html.slice(0, innerStart) + cards + '</div>' + viewAll + html.slice(closeStart + '</div>'.length);
+}
+
+// The homepage marquee ("running line") is baked into the ported homepage body.
+// While the Sixers pre-order window is open (before the Oct 10 on-sale date),
+// lead the strip with the pre-order line; it AUTO-EXPIRES on that date so it
+// never goes stale. No-ops if the marquee markup is absent or the line already
+// present. Injected into every content copy so the theme's clones all carry it.
+function injectMarqueePreorder(html: string): string {
+  if (Date.now() >= Date.parse('2026-10-10T00:00:00Z')) return html;
+  if (html.includes('pre-order now, ships')) return html;
+  const li = '<li class="c-ip-running-line__item"><svg aria-hidden="true" class="c-ip-running-line__icon th-font-icon-svg e-fas-circle" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg"><path d="M256 8C119 8 8 119 8 256s111 248 248 248 248-111 248-248S393 8 256 8z"></path></svg><div class="c-ip-running-line__title">Sixers Season jerseys — pre-order now, ships October 10th</div></li>';
+  return html.replace(/(<ul class="c-ip-running-line__content[^"]*"[^>]*>)/g, `$1${li}`);
 }
 
 export async function siteRoutes(app: FastifyInstance): Promise<void> {
@@ -323,6 +388,10 @@ export async function siteRoutes(app: FastifyInstance): Promise<void> {
     if (ctx.homepageSlug) {
       try {
         const r = await contentService.renderBySlug(ctx.homepageSlug, originOf(req), `${originOf(req)}/`);
+        // The ported "Reserve Notes" carousel was baked static at port time — keep
+        // it live: latest 3 posts + a link to the full blog.
+        r.html = await freshenReserveNotes(r.html);
+        r.html = injectMarqueePreorder(r.html);
         return send(reply, sitePage({
           ...ctx.chrome,
           title: `${r.title} — ${ctx.siteName}`,

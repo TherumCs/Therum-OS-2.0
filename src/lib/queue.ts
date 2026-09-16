@@ -43,6 +43,14 @@ export const LIFECYCLE_QUEUE = 'lifecycle';
 export const LIFECYCLE_CRON = '0 5 * * *'; // daily at 05:00
 export const lifecycleQueue = new Queue(LIFECYCLE_QUEUE, { connection });
 
+// Marketing sends. A campaign's recipients are queued as CampaignSend rows and
+// ONE job per campaign drains them in batches; the minute tick picks up
+// anything scheduled for a time that has now passed (so a scheduled send
+// survives a worker restart — the delayed job is a fast path, not the record).
+export const MARKETING_QUEUE = 'marketing';
+export const MARKETING_TICK_CRON = '* * * * *';
+export const marketingQueue = new Queue(MARKETING_QUEUE, { connection });
+
 /** Settings > Backup frequency -> cron. Times are deliberately off-peak. */
 export const BACKUP_CRON: Record<string, string> = {
   hourly: '0 * * * *',
@@ -60,5 +68,5 @@ export const BACKUP_CRON: Record<string, string> = {
 // every test file still closed only importQueue, and again because nothing
 // ever closed the rate limiter's lazy client.
 export async function closeQueues(): Promise<void> {
-  await Promise.all([importQueue.close(), milieusQueue.close(), backupQueue.close(), catalogSyncQueue.close(), lifecycleQueue.close(), disconnectRedis()]);
+  await Promise.all([importQueue.close(), milieusQueue.close(), backupQueue.close(), catalogSyncQueue.close(), lifecycleQueue.close(), marketingQueue.close(), disconnectRedis()]);
 }

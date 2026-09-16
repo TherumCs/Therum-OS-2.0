@@ -66,7 +66,19 @@ async function blockedByTwoFactorPolicy(
   if (!requireTwoFactor) return false;
 
   const user = await db.adminUser.findUnique({ where: { id: userId }, select: { totpEnabled: true } });
-  if (user?.totpEnabled) return false;
+  // Mandatory-2FA invariant (audit R6): while enforcement is ON, an ENROLLED user
+  // must not be able to turn 2FA OFF — that defeats the requirement and was half
+  // the rebind vector (disable, then re-enrol the attacker's device). To stop
+  // requiring 2FA, an admin turns the setting off first. This must be checked
+  // BEFORE the enrolled-user early-return below, which otherwise waves it through.
+  if (user?.totpEnabled) {
+    const path = (req.url.split('?')[0] ?? '').replace(/\/+$/, '');
+    if (req.method === 'POST' && path === '/api/auth/2fa/disable') {
+      reply.status(403).send({ error: { code: 'two_factor_required', message: 'Two-factor authentication is required here and cannot be turned off while enforcement is on.' } });
+      return true;
+    }
+    return false;
+  }
 
   // An API token cannot enrol anything — there is no interactive session
   // behind it — so the allowlist would be meaningless. It fails with a

@@ -62,8 +62,9 @@ export const PAGE_CSP =
   // Hosted product video and posters.
   "media-src 'self' https:; " +
   `connect-src 'self' ${PAY_CONNECT}; ` +
-  // Apple Pay and Google Pay present their sheets from the gateway's frame.
-  `frame-src 'self' ${PAY_FRAME}; ` +
+  // Apple Pay and Google Pay present their sheets from the gateway's frame;
+  // YouTube (privacy-nocookie) backs the category-page band video sections.
+  `frame-src 'self' ${PAY_FRAME} https://www.youtube.com https://www.youtube-nocookie.com; ` +
   "frame-ancestors 'self'; " +
   "base-uri 'self'";
 

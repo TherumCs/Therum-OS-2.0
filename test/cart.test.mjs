@@ -169,9 +169,12 @@ test('cart → order → payment: the full C1+C2 lifecycle; guest email recorded
   assert.equal(guestOrder.guestEmail, 'cart-shopper@example.com');
   assert.equal(guestOrder.customerId, null, 'unverified email does not attach a customer account');
 
-  // Cart is gone after checkout.
-  const gone = await app.inject({ method: 'GET', url: '/api/cart', headers: { 'x-cart-token': cartToken } });
-  assert.equal(gone.statusCode, 404);
+  // The cart deliberately SURVIVES checkout — it is cleared only at the paid
+  // edge (markPaid), so a declined or abandoned payment can retry the same cart.
+  // Editing it and re-checking-out is made safe by order.create's reconcile
+  // (audit C1/C2), not by destroying the cart here.
+  const stillThere = await app.inject({ method: 'GET', url: '/api/cart', headers: { 'x-cart-token': cartToken } });
+  assert.equal(stillThere.statusCode, 200, 'cart stays alive until payment so a declined charge can retry');
 
   // Inventory reserved by the order create.
   const vv = await db.productVariant.findUnique({ where: { id: v1.id } });

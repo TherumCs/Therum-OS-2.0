@@ -37,6 +37,11 @@ interface ShopifyAuth {
   id: string;
   label: string;
   scope: 'read' | 'read_write';
+  // ADMIN-issued (merchant's own tooling) vs a partner key. A partner key is
+  // fenced to its own vendor's products on write; first-party is unscoped. The
+  // Woo bridge already carries this; the Shopify bridge did not, so partner
+  // PUT/DELETE could wipe/unpublish the whole catalogue (audit R6 CRITICAL).
+  firstParty: boolean;
 }
 
 declare module 'fastify' {
@@ -94,6 +99,21 @@ export async function shopifyCompatRoutes(app: FastifyInstance): Promise<void> {
       return false;
     }
     return true;
+  }
+
+  // Fence a partner key to its OWN vendor's products (audit R6 CRITICAL — the
+  // Shopify bridge PUT/DELETE had no ownership check, so any read_write partner
+  // could unpublish or hard-delete the whole catalogue). A first-party (admin)
+  // key is unscoped; a partner key is resolved to its vendor by the immutable
+  // credential id, and a partner with no vendor owns nothing → matches nothing
+  // (fail closed). Returns {ok:false} after sending 404 when the caller can own
+  // nothing; otherwise an AND-able product filter.
+  async function ownerScope(req: FastifyRequest, reply: FastifyReply): Promise<{ ok: true; where: Record<string, unknown> } | { ok: false }> {
+    if (req.shopifyAuth?.firstParty) return { ok: true, where: {} };
+    const credId = req.shopifyAuth?.id ?? null;
+    const vendor = credId ? await db.vendor.findFirst({ where: { credentialId: credId }, select: { id: true } }) : null;
+    if (!vendor) { shopifyError(reply, 404, '[API] Not Found'); return { ok: false }; }
+    return { ok: true, where: { vendorId: vendor.id } };
   }
 
   /** One product, in Shopify's shape. */
@@ -198,7 +218,14 @@ export async function shopifyCompatRoutes(app: FastifyInstance): Promise<void> {
         currency: o.currency,
         created_at: o.createdAt.toISOString(),
         total_price: String(toMajor(o.total, currency)),
-        email: o.customer?.email ?? o.guestEmail ?? '',
+        // PII NOT leaked here. Unlike wooCompat, shopifyCompat products carry no
+        // vendorId/fulfillmentProvider (product.create sets neither), so there is
+        // no per-partner ownership to scope this list by — any store key would
+        // otherwise harvest EVERY customer's email. Shape preserved (field kept),
+        // value redacted. This is not the POD fulfilment path (wooCompat is); a
+        // partner that truly needs the address uses the scoped wooCompat order
+        // routes. (audit follow-up)
+        email: '',
         line_items: o.items.map((i) => ({
           id: i.id,
           title: i.variant?.product?.name ?? 'Item',
@@ -262,7 +289,8 @@ export async function shopifyCompatRoutes(app: FastifyInstance): Promise<void> {
   app.put(`${PREFIX}/products/:id.json`, authed, async (req, reply) => {
     if (!requireWrite(req, reply)) return;
     const id = (req.params as { id: string }).id.replace(/\.json$/, '');
-    const existing = await db.product.findUnique({ where: { id } });
+    const own = await ownerScope(req, reply); if (!own.ok) return;
+    const existing = await db.product.findFirst({ where: { id, ...own.where } });
     if (!existing) { shopifyError(reply, 404, '[API] Not Found'); return; }
     const body = ((req.body ?? {}) as { product?: Record<string, unknown> }).product ?? {};
     const commerce = await settingsService.getCommerce();
@@ -283,9 +311,20 @@ export async function shopifyCompatRoutes(app: FastifyInstance): Promise<void> {
   app.delete(`${PREFIX}/products/:id.json`, authed, async (req, reply) => {
     if (!requireWrite(req, reply)) return;
     const id = (req.params as { id: string }).id.replace(/\.json$/, '');
-    const existing = await db.product.findUnique({ where: { id } });
+    const own = await ownerScope(req, reply); if (!own.ok) return;
+    const existing = await db.product.findFirst({ where: { id, ...own.where }, select: { id: true } });
     if (!existing) { shopifyError(reply, 404, '[API] Not Found'); return; }
-    await db.product.delete({ where: { id } });
+    // Soft-delete by default (status:'draft'), matching the Woo bridge — a bare
+    // DELETE must not permanently destroy catalogue. A hard delete needs ?force
+    // AND the product must have no order lines (else its order history breaks).
+    const ordered = await db.orderItem.findFirst({ where: { variant: { productId: id } }, select: { id: true } });
+    const q = req.query as Record<string, string | undefined>;
+    if (q.force === 'true') {
+      if (ordered) { shopifyError(reply, 422, '[API] Cannot permanently delete a product that has orders'); return; }
+      await db.product.delete({ where: { id } });
+    } else {
+      await db.product.update({ where: { id }, data: { status: 'draft' } });
+    }
     // Shopify answers an empty object, not the deleted resource.
     reply.send({});
   });
@@ -303,8 +342,12 @@ export async function shopifyCompatRoutes(app: FastifyInstance): Promise<void> {
     'products/update': 'product.updated',
   };
 
-  app.get(`${PREFIX}/webhooks.json`, authed, async (_req, reply) => {
-    const rows = await db.storeWebhook.findMany({ orderBy: { createdAt: 'desc' } });
+  app.get(`${PREFIX}/webhooks.json`, authed, async (req, reply) => {
+    // Scope to the caller's own credential: an unscoped list let any read_write
+    // partner read every OTHER partner's delivery URLs (which can carry per-
+    // partner tokens) and, via DELETE below, remove them — silently cutting off a
+    // rival's order feed (audit).
+    const rows = await db.storeWebhook.findMany({ where: { credentialId: req.shopifyAuth?.id ?? ' none' }, orderBy: { createdAt: 'desc' } });
     const back = Object.fromEntries(Object.entries(SHOPIFY_TOPICS).map(([k, v]) => [v, k]));
     reply.send({
       webhooks: rows.map((w) => ({
@@ -359,7 +402,9 @@ export async function shopifyCompatRoutes(app: FastifyInstance): Promise<void> {
   app.delete(`${PREFIX}/webhooks/:id.json`, authed, async (req, reply) => {
     if (!requireWrite(req, reply)) return;
     const id = (req.params as { id: string }).id.replace(/\.json$/, '');
-    const existing = await db.storeWebhook.findUnique({ where: { id } });
+    // Only the OWNER may delete a webhook — a non-owned id is a 404, never
+    // someone else's row (audit).
+    const existing = await db.storeWebhook.findFirst({ where: { id, credentialId: req.shopifyAuth?.id ?? ' none' } });
     if (!existing) { shopifyError(reply, 404, '[API] Not Found'); return; }
     await db.storeWebhook.delete({ where: { id } });
     reply.send({});

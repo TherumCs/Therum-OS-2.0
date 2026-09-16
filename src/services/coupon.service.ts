@@ -106,9 +106,19 @@ export const couponService = {
   },
 
   async remove(id: string): Promise<void> {
-    const c = await db.coupon.findUnique({ where: { id }, select: { id: true } });
+    const c = await db.coupon.findUnique({ where: { id }, select: { id: true, _count: { select: { redemptions: true } } } });
     if (!c) throw new NotFoundError('Coupon not found', 'id');
-    await db.coupon.delete({ where: { id } }); // redemptions cascade
+    // A coupon with redemptions is FINANCIAL HISTORY: real orders point at those
+    // redemption rows (what discount was applied, to whom, when). A hard delete
+    // cascades them away — the order's discount can no longer be explained or
+    // audited. Soft-delete (status:'inactive') retires the code — it stops
+    // validating at checkout — while preserving the ledger. Only a coupon that
+    // was never used is truly deleted.
+    if (c._count.redemptions > 0) {
+      await db.coupon.update({ where: { id }, data: { status: 'inactive' } });
+    } else {
+      await db.coupon.delete({ where: { id } });
+    }
   },
 
   // ── cart/checkout ──
@@ -151,7 +161,7 @@ export const couponService = {
   // (checkout) uses that to decide whether the discount actually applies.
   // Idempotent per order via UNIQUE(couponId, orderId): a retry of the SAME
   // order returns true without double-counting.
-  async reserveForOrder(orderId: string, couponId: string, amount: number, email: string | null): Promise<boolean> {
+  async reserveForOrder(orderId: string, couponId: string, amount: number, email: string | null, customerId: string | null = null): Promise<boolean> {
     // Already recorded for this order? (checkout retry / same-order dedupe)
     const already = await db.couponRedemption.findUnique({ where: { coupon_order: { couponId, orderId } }, select: { id: true } });
     if (already) return true;
@@ -164,9 +174,19 @@ export const couponService = {
       if (claimed !== 1) return false; // exhausted between quote and record
 
       // Per-user cap, re-checked inside the transaction against unreleased rows.
+      // Key on the VERIFIED customerId when signed in — email alone was bypassable
+      // by typing a fresh address per checkout, and was skipped entirely when
+      // absent (audit C15). A guest falls back to email. If the coupon HAS a
+      // per-user cap but the request carries NEITHER identity, refuse the discount
+      // rather than silently skipping the cap.
       const coupon = await tx.coupon.findUnique({ where: { id: couponId }, select: { usageLimitPerUser: true } });
-      if (coupon?.usageLimitPerUser != null && email) {
-        const used = await tx.couponRedemption.count({ where: { couponId, email, releasedAt: null } });
+      if (coupon?.usageLimitPerUser != null) {
+        if (!customerId && !email) {
+          await tx.coupon.update({ where: { id: couponId }, data: { usageCount: { decrement: 1 } } });
+          return false; // capped coupon with no way to attribute the user → no discount
+        }
+        const where = customerId ? { couponId, customerId, releasedAt: null } : { couponId, email, releasedAt: null };
+        const used = await tx.couponRedemption.count({ where });
         if (used >= coupon.usageLimitPerUser) {
           // Roll the global claim back — this user is over their per-user cap.
           await tx.coupon.update({ where: { id: couponId }, data: { usageCount: { decrement: 1 } } });
@@ -175,7 +195,7 @@ export const couponService = {
       }
 
       try {
-        await tx.couponRedemption.create({ data: { couponId, orderId, amount, email } });
+        await tx.couponRedemption.create({ data: { couponId, orderId, amount, email, customerId } });
       } catch (err) {
         if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
           // Concurrent same-order insert won — release our extra claim.

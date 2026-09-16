@@ -531,14 +531,19 @@ export const CHECKOUT_FLOW_RUNTIME = `
     var railItems = el('co-rail-items');
     if (railItems) {
       railItems.innerHTML = t.lines.map(function(l){
-        var meta = [l.color, l.size].filter(Boolean).join(' · ');
+        // Escape EVERY interpolated field — image url, product name, colour/size
+        // — exactly as lineRow() does. This is catalog data (Printful/Printify
+        // titles, colour names, imported CSVs); a title with quotes/tags broke
+        // the rail for everyone and a poisoned feed executed inline JS under the
+        // CSP's 'unsafe-inline' (audit H4). Drifted, unescaped copy of lineRow.
+        var meta = esc([l.color, l.size].filter(Boolean).join(' · '));
         return '<div class="co-rail-line">'
           + (l.image
-              ? '<img class="co-rail-img" src="' + l.image + '" alt="" loading="lazy">'
+              ? '<img class="co-rail-img" src="' + esc(l.image) + '" alt="" loading="lazy">'
               : '<span class="co-rail-img co-rail-img--ph"></span>')
-          + '<span class="co-rail-txt"><span class="co-rail-nm">' + l.productName + '</span>'
+          + '<span class="co-rail-txt"><span class="co-rail-nm">' + esc(l.productName) + '</span>'
           + (meta ? '<span class="co-rail-meta">' + meta + '</span>' : '')
-          + '<span class="co-rail-meta">Qty ' + l.quantity + '</span></span>'
+          + '<span class="co-rail-meta">Qty ' + esc(String(l.quantity)) + '</span></span>'
           + '<span class="co-rail-amt">' + fmt(l.lineTotal) + '</span></div>';
       }).join('');
     }
@@ -557,14 +562,14 @@ export const CHECKOUT_FLOW_RUNTIME = `
 
   function lineRow(l){
     return '<div class="co-line">'
-      + (l.image ? '<img src="' + l.image + '" alt="">' : '<img alt="">')
-      + '<div><div class="co-nm">' + l.productName + '</div>'
-      + '<div class="co-vr">' + [l.color, l.size, l.sku].filter(Boolean).join(' · ') + '</div></div>'
+      + (l.image ? '<img src="' + esc(l.image) + '" alt="">' : '<img alt="">')
+      + '<div><div class="co-nm">' + esc(l.productName) + '</div>'
+      + '<div class="co-vr">' + esc([l.color, l.size, l.sku].filter(Boolean).join(' · ')) + '</div></div>'
       + '<span class="co-qty"><button data-dec="' + l.variantId + '" aria-label="Decrease">−</button>'
       + '<span>' + l.quantity + '</span>'
       + '<button data-inc="' + l.variantId + '" data-q="' + l.quantity + '" aria-label="Increase">+</button></span>'
       + '<span class="co-amt">' + fmt(l.lineTotal) + '</span>'
-      + '<button class="co-rm" type="button" data-rm="' + l.variantId + '" aria-label="Remove ' + l.productName + '">×</button></div>';
+      + '<button class="co-rm" type="button" data-rm="' + l.variantId + '" aria-label="Remove ' + esc(l.productName) + '">×</button></div>';
   }
 
   function empty(){
@@ -677,8 +682,12 @@ export const CHECKOUT_FLOW_RUNTIME = `
     // below, in BOTH modes — hiding what they are buying at the moment they pay
     // is where doubt creeps in.
     var items = t.lines.map(function(l){
-      return '<div class="co-line"><div><div class="co-nm">' + l.quantity + ' × ' + l.productName + '</div>'
-        + '<div class="co-vr">' + [l.color, l.size].filter(Boolean).join(' · ') + '</div></div>'
+      // Escaped to match lineRow()/setSummary() — catalog fields (name/color/size)
+      // are the same untrusted POD/CSV source. Kept escaped so if this block is
+      // ever wired back into the return (see comment above) it can't ship the H4
+      // XSS as unescaped drift.
+      return '<div class="co-line"><div><div class="co-nm">' + esc(String(l.quantity)) + ' × ' + esc(l.productName) + '</div>'
+        + '<div class="co-vr">' + esc([l.color, l.size].filter(Boolean).join(' · ')) + '</div></div>'
         + '<span class="co-amt">' + fmt(l.lineTotal) + '</span></div>';
     }).join('');
 

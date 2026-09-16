@@ -133,7 +133,11 @@ async function save(state: CartState): Promise<void> {
   await redis.set(key(state.id), JSON.stringify(state), 'EX', TTL_SECONDS);
 }
 
-async function computeTotals(state: CartState): Promise<CartTotals> {
+// sessionCustomerId is the customer verified on THIS request (null if none).
+// Member pricing + members-only coupons are bound to it, NEVER to the persisted
+// state.customerId — otherwise anyone reusing a cart token a member once stamped
+// inherits F&F pricing. No live session ⇒ no member benefit, full price.
+async function computeTotals(state: CartState, sessionCustomerId: string | null = null): Promise<CartTotals> {
   const variantIds = state.items.map((i) => i.variantId);
   const variants = variantIds.length
     ? await db.productVariant.findMany({
@@ -174,22 +178,53 @@ async function computeTotals(state: CartState): Promise<CartTotals> {
   // written ONLY from a verified customer session. That is the proof the rule
   // was waiting for, so the benefit finally reaches the storefront cart
   // instead of appearing for the first time on the order.
+  // Per-product opt-out base: a line flagged meta.noMemberDiscount (e.g. an
+  // at-cost licensed item) is excluded from ANY promotional base — member
+  // discount AND coupon — so it is never marked down below the flat price the
+  // merchant set for it. The coupon path used to quote against the FULL subtotal,
+  // so a store-wide coupon discounted the opted-out item anyway, potentially
+  // below cost (audit H2). One base, both promotions.
+  const eligibleSubtotal = lines.reduce((s, l) => {
+    const meta = (byId.get(l.variantId)?.product.meta ?? null) as Record<string, unknown> | null;
+    return meta?.noMemberDiscount === true ? s : s + l.lineTotal;
+  }, 0);
+
   let discount: CartTotals['discount'] = null;
-  if (state.customerId && (await capabilityService.isEnabled('memberships'))) {
-    const m = await milieuService.discountFor(state.customerId);
+  if (sessionCustomerId && (await capabilityService.isEnabled('memberships'))) {
+    const m = await milieuService.discountFor(sessionCustomerId);
     if (m) {
-      // Per-product opt-out: a line flagged meta.noMemberDiscount (e.g. an
-      // at-cost bespoke) is excluded from the member-discount base, so it is
-      // never marked down below the flat price the merchant set for it.
-      const eligibleSubtotal = lines.reduce((s, l) => {
-        const meta = (byId.get(l.variantId)?.product.meta ?? null) as Record<string, unknown> | null;
-        return meta?.noMemberDiscount === true ? s : s + l.lineTotal;
-      }, 0);
       discount = {
         amount: Math.round(eligibleSubtotal * (m.pct / 100)),
         label: `${m.milieuName} (${m.pct}%)`,
         pct: m.pct,
       };
+    }
+  }
+
+  // ── PIN BUNDLE ──────────────────────────────────────────────────────────
+  // Volume price on the $ixers pins (product.meta.bundleGroup === 'sixers-pins'),
+  // any sizes mixed, by TOTAL pin count: 5+ → $5/pin ("5 for $25"), 15+ → $3/pin.
+  // Modelled as a member-side auto-discount so it rides the SAME single-discount
+  // slot as the milieu %: best-single-wins keeps whichever saves more, the margin
+  // floor below clamps it against each pin's cost, and the order charges it through
+  // the existing discountOverride — no new money-path primitive, and a bundle
+  // blocks stacked coupon codes exactly the way a member price does. Applied only
+  // when it genuinely beats the per-size regular price, so an all-small basket is
+  // never charged UP to a "deal" that would cost more than full price.
+  let pinQty = 0;
+  let pinRegular = 0;
+  for (const l of lines) {
+    const lm = (byId.get(l.variantId)?.product.meta ?? null) as Record<string, unknown> | null;
+    if (lm?.bundleGroup === 'sixers-pins') {
+      pinQty += l.quantity;
+      pinRegular += l.lineTotal;
+    }
+  }
+  if (pinQty >= 5) {
+    const perPin = pinQty >= 15 ? 300 : 500;
+    const amount = pinRegular - perPin * pinQty;
+    if (amount > 0 && (!discount || amount > discount.amount)) {
+      discount = { amount, label: `Pin bundle · $${perPin / 100}/pin`, pct: 0 };
     }
   }
 
@@ -208,7 +243,11 @@ async function computeTotals(state: CartState): Promise<CartTotals> {
   if (state.couponCode && discount) {
     couponBlocked = 'Your member price is already applied — codes do not stack on top of it.';
   } else if (state.couponCode) {
-    const q = await couponService.quoteOrNull(state.couponCode, subtotal, state.customerEmail ?? null, state.customerId ?? null);
+    // sessionCustomerId (live), not state.customerId — a members-only coupon
+    // must validate against who is ACTUALLY signed in on this request, not who
+    // last stamped the cart token. Quoted against the ELIGIBLE subtotal so a
+    // no-discount (meta.noMemberDiscount) line is never couponed below cost (H2).
+    const q = await couponService.quoteOrNull(state.couponCode, eligibleSubtotal, state.customerEmail ?? null, sessionCustomerId);
     if (q) coupon = { amount: q.amount, code: q.code };
   }
 
@@ -321,14 +360,30 @@ async function computeTotals(state: CartState): Promise<CartTotals> {
   };
 }
 
+/**
+ * $ixers jerseys are limited to ONE per order — any single design, quantity 1.
+ * Flagged per product with meta.limitGroup === 'sixers-jersey'. This is a cart
+ * (per-order) cap, not a lifetime-per-customer check; a buyer placing separate
+ * orders is not blocked here.
+ */
+const isJerseyProduct = (p: { meta?: unknown } | null | undefined): boolean =>
+  (p?.meta as Record<string, unknown> | null | undefined)?.limitGroup === 'sixers-jersey';
+
 export const cartService = {
   // Lazy create: first add-to-cart with no token mints the session.
   async addItem(token: string | null, variantId: string, quantity: number, customerId: string | null = null, source: string | null = null) {
     const variant = await db.productVariant.findUnique({
       where: { id: variantId },
-      include: { product: { select: { status: true, visibility: true, ...GATE_INCLUDE } } },
+      include: { product: { select: { status: true, visibility: true, ...GATE_INCLUDE, meta: true } } },
     });
     if (!variant || variant.product.status !== 'active') {
+      throw new NotFoundError('Product not available', 'variantId');
+    }
+    // An external (affiliate) product is sold by the retailer, never by this
+    // cart — its variant carries a display price only. Same 404 as a missing
+    // product; the storefront never offers the button, this is the backstop.
+    const pmeta = variant.product.meta && typeof variant.product.meta === 'object' && !Array.isArray(variant.product.meta) ? (variant.product.meta as Record<string, unknown>) : {};
+    if (typeof pmeta.externalUrl === 'string' && pmeta.externalUrl) {
       throw new NotFoundError('Product not available', 'variantId');
     }
     /**
@@ -353,6 +408,29 @@ export const cartService = {
     if (customerId) state.customerId = customerId;
     if (source && !state.source) state.source = source; // first-touch — never overwrite
 
+    // Jersey limit: one jersey per order. Block a second jersey design, cap this
+    // one at quantity 1, then short-circuit the normal add below.
+    if (isJerseyProduct(variant.product)) {
+      const others = state.items.filter((i) => i.variantId !== variantId);
+      if (others.length) {
+        const rows = await db.productVariant.findMany({
+          where: { id: { in: others.map((i) => i.variantId) } },
+          select: { product: { select: { meta: true } } },
+        });
+        if (rows.some((r) => isJerseyProduct(r.product))) {
+          throw new ValidationError('Limit one jersey per order. Remove the other jersey to add this one.', 'variantId');
+        }
+      }
+      const item = state.items.find((i) => i.variantId === variantId);
+      if (item) item.quantity = 1;
+      else {
+        if (state.items.length >= MAX_LINES) throw new ValidationError(`Carts hold at most ${MAX_LINES} lines.`, 'variantId');
+        state.items.push({ variantId, quantity: 1 });
+      }
+      await save(state);
+      return { token: state.id, totals: await computeTotals(state, customerId ?? null) };
+    }
+
     const existing = state.items.find((i) => i.variantId === variantId);
     if (existing) {
       existing.quantity = Math.min(existing.quantity + quantity, MAX_QTY);
@@ -361,11 +439,16 @@ export const cartService = {
       state.items.push({ variantId, quantity });
     }
     await save(state);
-    return { token: state.id, totals: await computeTotals(state) };
+    return { token: state.id, totals: await computeTotals(state, customerId ?? null) };
   },
 
-  async setQuantity(token: string, variantId: string, quantity: number) {
+  async setQuantity(token: string, variantId: string, quantity: number, customerId: string | null = null) {
     if (quantity < 0 || quantity > MAX_QTY) throw new ValidationError(`Quantity must be 0–${MAX_QTY}.`, 'quantity');
+    // Jerseys are capped at one per order — never let a quantity change exceed it.
+    if (quantity > 1) {
+      const v = await db.productVariant.findUnique({ where: { id: variantId }, select: { product: { select: { meta: true } } } });
+      if (isJerseyProduct(v?.product)) quantity = 1;
+    }
     const state = await load(token);
     const line = state.items.find((i) => i.variantId === variantId);
     if (!line) throw new NotFoundError('Item not in cart', 'variantId');
@@ -375,7 +458,7 @@ export const cartService = {
       line.quantity = quantity;
     }
     await save(state);
-    return { token: state.id, totals: await computeTotals(state) };
+    return { token: state.id, totals: await computeTotals(state, customerId) };
   },
 
   /**
@@ -387,17 +470,17 @@ export const cartService = {
     const state = await load(token);
     if (customerId && state.customerId !== customerId) state.customerId = customerId;
     await save(state); // sliding TTL — an active cart doesn't expire mid-shop
-    return { token: state.id, customerEmail: state.customerEmail ?? null, totals: await computeTotals(state) };
+    return { token: state.id, customerEmail: state.customerEmail ?? null, totals: await computeTotals(state, customerId) };
   },
 
   // Attach a guest contact email — the receipt address only (audit H-1): it
   // does NOT look up or bind an existing customer, and grants no membership
   // benefit. Kept on the session, written to Order.guestEmail at checkout.
-  async setIdentity(token: string, email: string) {
+  async setIdentity(token: string, email: string, customerId: string | null = null) {
     const state = await load(token);
     state.customerEmail = email;
     await save(state);
-    return { token: state.id, totals: await computeTotals(state) };
+    return { token: state.id, totals: await computeTotals(state, customerId) };
   },
 
   // Apply a coupon code — hard-validates (throws the reason if invalid), then
@@ -407,7 +490,7 @@ export const cartService = {
     // Remember WHO applied it, so the recalc on every later cart read can
     // re-check a group restriction without the session being present again.
     if (customerId) state.customerId = customerId;
-    const totals = await computeTotals(state);
+    const totals = await computeTotals(state, customerId);
     // Refused BEFORE the code is looked up. Two reasons: the shopper should be
     // told why rather than watching a valid code do nothing, and checking
     // membership first means this cannot be used to probe whether a code
@@ -418,17 +501,17 @@ export const cartService = {
         'code',
       );
     }
-    await couponService.quote(code, totals.subtotal, state.customerEmail ?? null, state.customerId ?? null); // throws if invalid
+    await couponService.quote(code, totals.subtotal, state.customerEmail ?? null, customerId); // throws if invalid
     state.couponCode = code;
     await save(state);
-    return { token: state.id, totals: await computeTotals(state) };
+    return { token: state.id, totals: await computeTotals(state, customerId) };
   },
 
-  async removeCoupon(token: string) {
+  async removeCoupon(token: string, customerId: string | null = null) {
     const state = await load(token);
     state.couponCode = null;
     await save(state);
-    return { token: state.id, totals: await computeTotals(state) };
+    return { token: state.id, totals: await computeTotals(state, customerId) };
   },
 
   async clear(token: string): Promise<void> {
@@ -451,14 +534,14 @@ export const cartService = {
    * Destination and chosen speed. Returns the rates that apply so the caller
    * can render the picker and the recomputed totals in one round trip.
    */
-  async setShipping(token: string, shipAddress: ShipAddressInput, methodId?: string) {
+  async setShipping(token: string, shipAddress: ShipAddressInput, methodId?: string, customerId: string | null = null) {
     const state = await load(token);
     state.shipAddress = shipAddress;
     // computeTotals resolves the rate list for this address AND charges from it,
     // so the options returned here are exactly the options the summary bills —
     // no second rates() call built from lines that lack vendor/pickup and could
     // silently offer a different set than the one charged.
-    const probe = await computeTotals(state);
+    const probe = await computeTotals(state, customerId);
     // A method id from a previous quote may not exist in the new one (a
     // different country returns different rates), so it is validated against
     // what this address actually offers rather than trusted.
@@ -467,7 +550,7 @@ export const cartService = {
     await save(state);
     // Recompute only when the validated choice differs from what the probe
     // already charged; otherwise the probe holds the right totals.
-    const totals = state.shippingMethodId === probe.shippingMethodId ? probe : await computeTotals(state);
+    const totals = state.shippingMethodId === probe.shippingMethodId ? probe : await computeTotals(state, customerId);
     return { rates: totals.shippingOptions, selected: state.shippingMethodId, totals };
   },
 
@@ -481,7 +564,9 @@ export const cartService = {
     // subtotal and the shopper is undercharged.
     if (shipAddress) state.shipAddress = shipAddress;
 
-    const totals = await computeTotals(state);
+    // Member pricing bound to the VERIFIED session passed by the route, never
+    // the persisted cart state — a non-member reusing a member's token pays full.
+    const totals = await computeTotals(state, customerId ?? null);
     const short = totals.lines.filter((l) => l.available < l.quantity);
     if (short.length > 0) {
       throw new ConflictError(
@@ -560,7 +645,7 @@ export const cartService = {
         // never q.amount — the fresh quote is only capped at subtotal, so
         // applying it would undercharge the order below the configured floor.
         const applied = totals.coupon.amount;
-        const reserved = await couponService.reserveForOrder(baseOrder.id, q.couponId, applied, state.customerEmail ?? null);
+        const reserved = await couponService.reserveForOrder(baseOrder.id, q.couponId, applied, state.customerEmail ?? null, customerId ?? state.customerId ?? null);
         if (reserved) {
           await orderService.applyDiscount(baseOrder.id, applied, `Coupon ${q.code}`);
         }

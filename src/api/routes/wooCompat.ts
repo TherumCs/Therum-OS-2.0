@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { Prisma, type ProductStatus, type OrderStatus } from '@prisma/client';
 import { db } from '../../lib/db.js';
+import { localizeImageUrl } from '../../counter/catalogImport.js';
 import { storeCredentials, readStoreCredential } from '../../counter/storeCredentials.js';
 import { toMajor, toMinor } from '../../counter/currency.js';
 import { availableOf, isTracked, type StockStatus } from '../../counter/availability.js';
@@ -10,10 +11,20 @@ import { availableOf, isTracked, type StockStatus } from '../../counter/availabi
 // The old default (tracked + 0) rendered every pushed product "Sold out", which
 // is the whole "partial sync: product there but sold out" symptom.
 function mapStock(b: { manage_stock?: boolean; stock_status?: string; stock_quantity?: number }): { stockStatus: StockStatus; inventory: number } {
+  // manage_stock:true + a count is the unambiguous "track this many".
   if (b.manage_stock === true && typeof b.stock_quantity === 'number') return { stockStatus: 'tracked', inventory: b.stock_quantity };
+  // An EXPLICIT status is authoritative and wins over a bare count — this is the
+  // print-on-demand path (stock_status:'instock', no quantity) and it must stay
+  // in_stock/unlimited, never get pinned to a count.
   const ss = String(b.stock_status ?? '').toLowerCase();
+  if (ss === 'instock') return { stockStatus: 'in_stock', inventory: 0 };
   if (ss === 'outofstock') return { stockStatus: 'out_of_stock', inventory: 0 };
   if (ss === 'onbackorder') return { stockStatus: 'backorder', inventory: 0 };
+  // No explicit status, but the partner sent a count (manage_stock omitted, as
+  // several POD clients do): honour it as tracked stock rather than silently
+  // dropping it to a 0-count row that looks synced but shows "Sold out". Only an
+  // EXPLICIT manage_stock:false opts out of tracking a supplied quantity.
+  if (typeof b.stock_quantity === 'number' && b.manage_stock !== false) return { stockStatus: 'tracked', inventory: b.stock_quantity };
   return { stockStatus: 'in_stock', inventory: 0 };
 }
 import { slugify } from '../../lib/slug.js';
@@ -25,6 +36,8 @@ import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import { googleApp, authorizeUrl, signState, readState, exchangeCode, adminForGoogle } from '../../counter/adminGoogleSignIn.js';
 import { mintSessionToken, SESSION_TTL_SECONDS } from '../../services/auth.service.js';
 import { encryptSecret } from '../../lib/crypto.js';
+import { orderWebhookPayload } from '../../counter/orderWebhookPayload.js';
+import { assertPublicHttpsUrl } from '../../lib/ssrfGuard.js';
 import { adminSessionFrom, adminSessionDiagnosis, hasAdminSession, type SessionFailure } from '../../lib/adminSession.js';
 
 // A WooCommerce-shaped read surface, so print-on-demand platforms can connect.
@@ -80,6 +93,8 @@ interface StoreAuth {
   id: string;
   label: string;
   scope: 'read' | 'read_write';
+  /** True only for admin-issued (/store-keys) keys — see order scoping. */
+  firstParty: boolean;
 }
 
 declare module 'fastify' {
@@ -93,6 +108,16 @@ const ORDER_STATUSES = ['pending', 'processing', 'shipped', 'delivered', 'failed
 /** Narrows an arbitrary partner-supplied string to a real order status. */
 function asOrderStatus(value: string | undefined): OrderStatus | null {
   if (!value || value === 'any') return null;
+  // Woo has no "shipped" status — POD partners report fulfilment by writing
+  // back "completed" (and place holds as "on-hold"). Without this mapping a
+  // partner's "completed" write-back silently no-oped: asOrderStatus returned
+  // null, the status never moved, and the store kept showing "processing" for
+  // an order the factory had already shipped.
+  const WOO_ALIASES: Record<string, OrderStatus> = {
+    completed: 'shipped' as OrderStatus,
+    'on-hold': 'processing' as OrderStatus,
+  };
+  if (value in WOO_ALIASES) return WOO_ALIASES[value] ?? null;
   return (ORDER_STATUSES as readonly string[]).includes(value) ? (value as OrderStatus) : null;
 }
 
@@ -113,16 +138,27 @@ function wooError(reply: FastifyReply, status: number, code: string, message: st
  */
 async function wcCompatVerify(key: string, secret: string): Promise<StoreAuth | null> {
   const keyHash = createHmac('sha256', 'wc-api').update(key).digest('hex');
-  const rows = await db.$queryRawUnsafe<{ secret: string; scope: string; description: string | null }[]>(
-    'SELECT secret, scope, description FROM wc_compat_keys WHERE key_hash = $1 LIMIT 1',
-    keyHash,
-  );
+  // The compat-key table is an OPTIONAL import from the reference store — a fresh
+  // environment (and CI) has no such table. A missing table must degrade to
+  // "no compat key matched" (fall through to a clean 401), NOT throw a raw-query
+  // error that surfaces as a 500 on every invalid key.
+  let rows: { secret: string; scope: string; description: string | null }[];
+  try {
+    rows = await db.$queryRawUnsafe<{ secret: string; scope: string; description: string | null }[]>(
+      'SELECT secret, scope, description FROM wc_compat_keys WHERE key_hash = $1 LIMIT 1',
+      keyHash,
+    );
+  } catch {
+    return null;
+  }
   const row = rows[0];
   if (!row) return null;
   const a = Buffer.from(secret);
   const b = Buffer.from(row.secret);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
-  return { id: `wc:${keyHash.slice(0, 16)}`, label: row.description ?? 'Connected partner', scope: row.scope === 'read' ? 'read' : 'read_write' };
+  // Imported from the reference store = a PARTNER (Tapstitch/PODpartner/…), never
+  // first-party. Fenced to its own vendor's orders.
+  return { id: `wc:${keyHash.slice(0, 16)}`, label: row.description ?? 'Connected partner', scope: row.scope === 'read' ? 'read' : 'read_write', firstParty: false };
 }
 
 async function authenticate(req: FastifyRequest, reply: FastifyReply): Promise<void> {
@@ -164,6 +200,22 @@ function setPagingHeaders(reply: FastifyReply, total: number, perPage: number): 
   reply.header('X-WP-TotalPages', String(Math.max(1, Math.ceil(total / perPage))));
 }
 
+/**
+ * Woo incremental-sync date cursors. `after`/`before` filter date_created;
+ * `modified_after`/`modified_before` filter date_modified. A POD partner polls
+ * "orders modified since my last sync" — ignoring these made every poll return
+ * the FULL processing list, so the partner re-saw orders it had already
+ * de-duped away and could never pick up a correction. Values are ISO 8601.
+ */
+function wooDateWhere(q: Record<string, string | undefined>): { createdAt?: { gte?: Date; lte?: Date }; updatedAt?: { gte?: Date; lte?: Date } } {
+  const parse = (s?: string): Date | undefined => { if (!s) return undefined; const d = new Date(s); return Number.isNaN(d.getTime()) ? undefined : d; };
+  const cGte = parse(q.after), cLte = parse(q.before), mGte = parse(q.modified_after), mLte = parse(q.modified_before);
+  const w: { createdAt?: { gte?: Date; lte?: Date }; updatedAt?: { gte?: Date; lte?: Date } } = {};
+  if (cGte || cLte) w.createdAt = { ...(cGte ? { gte: cGte } : {}), ...(cLte ? { lte: cLte } : {}) };
+  if (mGte || mLte) w.updatedAt = { ...(mGte ? { gte: mGte } : {}), ...(mLte ? { lte: mLte } : {}) };
+  return w;
+}
+
 async function loadProducts(where: object, skip: number, take: number) {
   return db.product.findMany({
     where,
@@ -174,7 +226,29 @@ async function loadProducts(where: object, skip: number, take: number) {
   });
 }
 
+// The ONLY products a public/partner catalogue read may see. Matches the
+// storefront feed gate (storefront.ts): live lifecycle, public audience, not
+// trashed. A trashed product keeps its row (deletedAt set) so this is not
+// optional — the crewneck leak was a private/draft product served through the
+// keyless Store API. deletedAt:null is separated so a status filter can still
+// narrow WITHIN the public set without ever exposing trash.
+const PUBLIC_PRODUCT_GATE = { status: 'active' as ProductStatus, visibility: 'public', deletedAt: null };
+
 type ProductRow = Awaited<ReturnType<typeof loadProducts>>[number];
+
+/**
+ * The connector's OWN name for a variation axis, echoed back verbatim. A strict
+ * connector verifies the read-back against what it sent, and Printify's size
+ * axis is literally "Pin size": answering "Size" failed its post-publish check on
+ * every multi-variant product (single-variant ones have nothing to verify, which
+ * is why only those ever linked). Captured into variant.meta.attrNames on push;
+ * falls back to our generic label when a variant predates that capture.
+ */
+function axisName(v: { meta?: unknown }, key: 'color' | 'size', fallback: string): string {
+  const m = v.meta as { attrNames?: Record<string, unknown> } | null | undefined;
+  const n = m?.attrNames?.[key];
+  return typeof n === 'string' && n.trim() ? n : fallback;
+}
 
 function toWooProduct(p: ProductRow, currency: string) {
   const first = p.variants[0];
@@ -197,8 +271,23 @@ function toWooProduct(p: ProductRow, currency: string) {
   const colors = [...new Set(p.variants.map((v) => v.color).filter((x): x is string => !!x))];
   const sizes = [...new Set(p.variants.map((v) => v.size).filter((x): x is string => !!x))];
   const attributes: { id: number; name: string; slug: string; position: number; visible: boolean; variation: boolean; options: string[] }[] = [];
-  if (colors.length) attributes.push({ id: 0, name: 'Color', slug: 'color', position: attributes.length, visible: true, variation: variable, options: colors });
-  if (sizes.length) attributes.push({ id: 0, name: 'Size', slug: 'size', position: attributes.length, visible: true, variation: variable, options: sizes });
+  // Axis names as the connector itself named them (see axisName) — the parent's
+  // attribute list must agree with the variations' or the verification fails.
+  const colorName = p.variants.map((v) => axisName(v, 'color', '')).find(Boolean) || 'Color';
+  const sizeName = p.variants.map((v) => axisName(v, 'size', '')).find(Boolean) || 'Size';
+  // Echo the connector's option ORDER and its default attribute verbatim (both
+  // stored from its parent PUT in writeProduct). A strict connector compares
+  // these as sent; our creation-order guess ("3, 1.25, 2.25") read as a
+  // mismatch against the "1.25, 2.25, 3" it published.
+  const wc = (p.meta && typeof p.meta === 'object' ? p.meta : {}) as { wcAttrOptions?: Record<string, string[]>; wcDefaultAttributes?: unknown[] };
+  const ordered = (name: string, vals: string[]): string[] => {
+    const want = wc.wcAttrOptions?.[name];
+    if (!Array.isArray(want)) return vals;
+    const rank = new Map(want.map((o, i) => [o, i]));
+    return [...vals].sort((a, b) => (rank.get(a) ?? 1e9) - (rank.get(b) ?? 1e9));
+  };
+  if (colors.length) attributes.push({ id: 0, name: colorName, slug: 'color', position: attributes.length, visible: true, variation: variable, options: ordered(colorName, colors) });
+  if (sizes.length) attributes.push({ id: 0, name: sizeName, slug: 'size', position: attributes.length, visible: true, variation: variable, options: ordered(sizeName, sizes) });
 
   // The full WooCommerce v3 product shape. A strict connector validates every
   // field it knows, so the fields we don't track are emitted with WooCommerce's
@@ -275,7 +364,9 @@ function toWooProduct(p: ProductRow, currency: string) {
       ...gallery.filter((g) => g.url).map((g, i) => wooImage((p.wooId ?? 0) * 1000 + i + 1, g.url!, g.alt ?? '', g.alt ?? '', created, now, i + 1)),
     ],
     attributes,
-    default_attributes: [],
+    // Verbatim from the connector's parent PUT (see writeProduct) — Printify
+    // sends a default (e.g. Pin size = 3") and verifies it on read-back.
+    default_attributes: Array.isArray(wc.wcDefaultAttributes) ? wc.wcDefaultAttributes : [],
     variations: variable ? p.variants.map((v) => v.wooId ?? 0) : [],
     grouped_products: [],
     menu_order: 0,
@@ -290,7 +381,7 @@ function toWooProduct(p: ProductRow, currency: string) {
 // and name were the load-bearing omissions: a connector maps each pushed
 // variation back to its product by parent_id, and shows name; without them the
 // confirmation pass fails and the whole push reads as a sync error.
-type VariantRow = { wooId: number | null; sku: string | null; price: number; inventory: number; reserved: number; color: string | null; size: string | null; image: string | null; createdAt: Date };
+type VariantRow = { wooId: number | null; sku: string | null; price: number; inventory: number; reserved: number; color: string | null; size: string | null; image: string | null; createdAt: Date; meta?: unknown };
 function wooVariation(v: VariantRow, currency: string, parentWoo: number) {
   const vp = String(toMajor(v.price, currency));
   const tracked = isTracked(v as unknown as { stockStatus: string });
@@ -317,8 +408,8 @@ function wooVariation(v: VariantRow, currency: string, parentWoo: number) {
     image: v.image ? wooImage((v.wooId ?? 0) * 10, v.image, name, name, ts, ts) : null,
     gallery_image_ids: [],
     attributes: [
-      ...(v.color ? [{ id: 0, name: 'Color', slug: 'color', option: v.color }] : []),
-      ...(v.size ? [{ id: 0, name: 'Size', slug: 'size', option: v.size }] : []),
+      ...(v.color ? [{ id: 0, name: axisName(v, 'color', 'Color'), slug: 'color', option: v.color }] : []),
+      ...(v.size ? [{ id: 0, name: axisName(v, 'size', 'Size'), slug: 'size', option: v.size }] : []),
     ],
     menu_order: 0,
     meta_data: [],
@@ -349,6 +440,7 @@ const WC_V3_ROUTE_MAP: Record<string, { namespace: string; methods: string[] }> 
   '/wc/v3/products/shipping_classes': wcRoute(['GET']),
   '/wc/v3/orders': wcRoute(['GET', 'POST']),
   '/wc/v3/orders/(?P<id>[\\w-]+)': wcRoute(['GET', 'PUT']),
+  '/wc/v3/orders/(?P<order_id>[\\w-]+)/notes': wcRoute(['GET', 'POST']),
   '/wc/v3/customers': wcRoute(['GET']),
   '/wc/v3/coupons': wcRoute(['GET']),
   '/wc/v3/shipping/zones': wcRoute(['GET']),
@@ -378,10 +470,42 @@ const WC_DISCOVERY_ROUTES = {
 export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
   const authed = { preHandler: authenticate };
 
+  // LEGACY WooCommerce REST API (/wc-api/v3/…) — the pre-wp-json surface.
+  // Tapstitch's connect flow validates a store by GET /wc-api/v3/products/count
+  // (seen live: six connect attempts on 2026-08-12, each a fresh key, each
+  // 404ing here and failing the connection — the 11 dead "Tapstitch connection"
+  // credentials are this loop's residue). PODpartner's docs likewise tell the
+  // merchant to enable the "legacy REST API". Only the endpoints partners
+  // actually probe are implemented; shapes match Woo's legacy v3.
+  app.get('/wc-api/v3', authed, async (_req, reply) => {
+    const c = await settingsService.getCommerce();
+    reply.send({ store: { name: 'Sidemoney', URL: 'https://sidemoney.co', wc_version: '10.4.3', routes: {}, meta: { currency: c.currency ?? 'USD', timezone: 'UTC' } } });
+  });
+  app.get('/wc-api/v3/products/count', authed, async (_req, reply) => {
+    // Same gate as the catalogue read (GET /wc/v3/products), or this count
+    // includes non-public / soft-deleted-but-active rows and disagrees with the
+    // total a partner then pages, reading as an incomplete sync (audit).
+    const count = await db.product.count({ where: PUBLIC_PRODUCT_GATE });
+    reply.send({ count });
+  });
+  app.get('/wc-api/v3/orders/count', authed, async (req, reply) => {
+    // Scope the count too — an unscoped count leaked store-wide lifetime order
+    // volume to any partner (audit R6 minor). First-party sees all; a partner
+    // sees only its own.
+    const scope = await partnerOrderScope(req);
+    const count = await db.order.count({ where: scope ?? {} });
+    reply.send({ count });
+  });
+
   // A partner refers to a product/category/variation by the INTEGER wooId we
   // hand out; our own internal calls still use the cuid. Resolve either form so
   // a numeric id from a connector and a cuid from our admin both find the row.
-  const byWooOrCuid = (id: string) => (/^\d+$/.test(id) ? { wooId: Number(id) } : { id });
+  // wooId is a Prisma Int (32-bit): a numeric id beyond 2^31-1 makes Prisma throw
+  // a value-out-of-range error (surfacing as a 500, even on the public keyless
+  // Store API), so an over-range numeric is routed to the cuid column instead —
+  // it can't match, yielding a clean 404 rather than a 500 (audit).
+  const safeWooId = (id: string): number | null => (/^\d+$/.test(id) && Number(id) <= 2147483647 ? Number(id) : null);
+  const byWooOrCuid = (id: string) => { const n = safeWooId(id); return n !== null ? { wooId: n } : { id }; };
 
   // Flight recorder. POD sync fails on THEIR dashboard with no detail we can
   // see; this logs every wp-json response ≥400 with the request body, so the
@@ -1129,10 +1253,28 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
   app.get(`${PREFIX}/products`, authed, async (req, reply) => {
     const { skip, take, perPage } = paging(req);
     const q = req.query as Record<string, string | undefined>;
+    // Two different reads share this endpoint. A BROWSE-style catalogue pull
+    // must never receive trashed or private products and defaults to live
+    // (active). But an exact `?sku=` lookup is a CONNECTOR finding the row it
+    // already pushed so it can UPDATE it — and gating THAT by visibility:'public'
+    // or the active-status default hides a product staged as `members`/draft
+    // (e.g. a season not yet public). The connector then never finds its own
+    // product, falls back to id 0, dead-ends at /products/0/variations, and
+    // re-creates the product as a duplicate on every publish — this is exactly
+    // what produced the "Copy of Copy of…" pins. This endpoint is partner-
+    // authenticated (not public), and the WRITE-path dedup helper
+    // (`existingBySku`) is already ungated the same way, so a sku lookup matches
+    // by sku alone (still never trashed) to close that read/write asymmetry.
+    const bySku = !!q.sku;
     const where = {
+      deletedAt: null,
+      // Browse keeps the public gate; a sku lookup does not.
+      ...(bySku ? {} : { visibility: 'public' }),
+      // Explicit ?status= always wins; browse defaults to active; a sku lookup
+      // imposes no status default so drafts still match.
       ...(q.status && q.status !== 'any'
         ? { status: (q.status === 'publish' ? 'active' : 'draft') as ProductStatus }
-        : {}),
+        : bySku ? {} : { status: 'active' as ProductStatus }),
       ...(q.sku ? { variants: { some: { sku: q.sku } } } : {}),
       ...(q.search ? { name: { contains: q.search, mode: 'insensitive' as const } } : {}),
     };
@@ -1141,8 +1283,32 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
       loadProducts(where, skip, take),
       db.product.count({ where }),
     ]);
+    // A connector's `?sku=` lookup decides its whole publish path: found → it
+    // adopts that product's id and UPDATES; empty → it falls back to id 0 and
+    // dead-ends. Log exactly what we answered so a "went to /products/0" in
+    // nginx is explainable from our side, not guessed at.
+    const currency = commerce.currency ?? 'USD';
+    if (bySku) {
+      // Real WooCommerce answers `?sku=<variation sku>` with the VARIATION object
+      // (type "variation", carrying `parent_id`), NOT the parent product. A
+      // connector reads `parent_id` from that to learn which product to update.
+      // Handed the parent shape instead, Printify found no `parent_id`, resolved
+      // it to 0, and walked GET/PUT /products/0 until the publish died — every
+      // multi-variant publish, every time (2026-09-15 forensics: our lookup
+      // matched [185] and Printify still called /products/0). A simple product
+      // (one variant) still answers as the product, exactly as Woo does.
+      // Both branches are plain JSON for the wire; widen so flatMap unifies the
+      // variation and product shapes instead of rejecting the union.
+      const items = rows.flatMap((p): Record<string, unknown>[] => p.variants.length > 1
+        ? p.variants.filter((v) => v.sku === q.sku).map((v) => wooVariation(v, currency, p.wooId ?? 0) as Record<string, unknown>)
+        : [toWooProduct(p, currency) as Record<string, unknown>]);
+      req.log.info({ sku: q.sku, matched: rows.map((p) => p.wooId ?? 0), total, asVariation: rows.some((p) => p.variants.length > 1), items: items.length }, 'wc-sku-lookup');
+      setPagingHeaders(reply, items.length, perPage);
+      reply.send(items);
+      return;
+    }
     setPagingHeaders(reply, total, perPage);
-    reply.send(rows.map((p) => toWooProduct(p, commerce.currency ?? 'USD')));
+    reply.send(rows.map((p) => toWooProduct(p, currency)));
   });
 
   // PRODUCT TAXONOMY. A POD platform's sync fetches /products/categories and
@@ -1183,6 +1349,7 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post(`${PREFIX}/products/categories`, authed, async (req, reply) => {
+    if (!requireWrite(req, reply)) return; // a read-only key must not mutate taxonomy
     const b = (req.body ?? {}) as { name?: string; slug?: string; parent?: string | number };
     if (!b.name) { wooError(reply, 400, 'woocommerce_rest_missing_param', 'Missing parameter: name.'); return; }
     const slug = (b.slug && slugify(b.slug, 80)) || slugify(b.name, 80);
@@ -1206,6 +1373,7 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.post(`${PREFIX}/products/tags`, authed, async (req, reply) => {
+    if (!requireWrite(req, reply)) return; // a read-only key must not mutate taxonomy
     const b = (req.body ?? {}) as { name?: string; slug?: string };
     if (!b.name) { wooError(reply, 400, 'woocommerce_rest_missing_param', 'Missing parameter: name.'); return; }
     const slug = (b.slug && slugify(b.slug, 80)) || slugify(b.name, 80);
@@ -1239,10 +1407,12 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
   const asTerm = (attr: string, name: string) => ({ id: attrId(`${attr}:${name}`), name, slug: slugify(name), description: '', menu_order: 0, count: 0 });
 
   app.post(`${PREFIX}/products/attributes`, authed, async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
     const a = (req.body ?? {}) as { name?: string; slug?: string };
     reply.status(201).send(asAttr(a.name ?? 'Attribute', a.slug));
   });
   app.post(`${PREFIX}/products/attributes/batch`, authed, async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
     const b = (req.body ?? {}) as { create?: { name?: string; slug?: string }[]; update?: { id?: number; name?: string; slug?: string }[]; delete?: number[] };
     reply.send({
       create: (b.create ?? []).map((a) => asAttr(a.name ?? 'Attribute', a.slug)),
@@ -1252,6 +1422,7 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
   });
   for (const m of ['PUT', 'PATCH'] as const) {
     app.route({ method: m, url: `${PREFIX}/products/attributes/:id`, preHandler: authenticate, handler: async (req, reply) => {
+      if (!requireWrite(req, reply)) return;
       const a = (req.body ?? {}) as { name?: string; slug?: string };
       reply.send(a.name ? asAttr(a.name, a.slug) : { id: Number((req.params as { id: string }).id) || 0, name: 'Attribute', slug: '', type: 'select' });
     } });
@@ -1264,10 +1435,12 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     reply.send([]);
   });
   app.post(`${PREFIX}/products/attributes/:id/terms`, authed, async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
     const t = (req.body ?? {}) as { name?: string };
     reply.status(201).send(asTerm(String((req.params as { id: string }).id), t.name ?? ''));
   });
   app.post(`${PREFIX}/products/attributes/:id/terms/batch`, authed, async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
     const id = String((req.params as { id: string }).id);
     const b = (req.body ?? {}) as { create?: { name?: string }[]; update?: { id?: number; name?: string }[]; delete?: number[] };
     reply.send({
@@ -1485,7 +1658,9 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
   app.get(`${STORE}/products`, async (req, reply) => {
     const { skip, take, perPage } = paging(req);
     const q = req.query as Record<string, string | undefined>;
-    const where = q.search ? { name: { contains: q.search, mode: 'insensitive' as const } } : {};
+    // PUBLIC, keyless endpoint — hard-gate to active/public/not-trashed so it can
+    // never leak a draft/private/restricted/trashed product (the crewneck leak).
+    const where = { ...PUBLIC_PRODUCT_GATE, ...(q.search ? { name: { contains: q.search, mode: 'insensitive' as const } } : {}) };
     const commerce = await settingsService.getCommerce();
     const [rows, total] = await Promise.all([loadProducts(where, skip, take), db.product.count({ where })]);
     setPagingHeaders(reply, total, perPage);
@@ -1494,11 +1669,49 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
   app.get(`${STORE}/products/:id`, async (req, reply) => {
     const { id } = req.params as { id: string };
     const commerce = await settingsService.getCommerce();
-    // The Store API resolves by numeric wooId, cuid, OR slug.
-    const where = /^\d+$/.test(id) ? { wooId: Number(id) } : { OR: [{ id }, { slug: id }] };
-    const [row] = await loadProducts(where, 0, 1);
-    if (!row) { wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid product ID.'); return; }
-    reply.send(toStoreProduct(row, commerce.currency ?? 'USD'));
+    const currency = commerce.currency ?? 'USD';
+    // The Store API resolves by numeric wooId, cuid, OR slug — always inside the
+    // public gate, so a direct id/slug can't fetch a hidden product either.
+    // safeWooId guards the 32-bit range so an oversized numeric id (e.g.
+    // /products/99999999999) resolves as a slug/miss → clean 404, not a Prisma
+    // out-of-range 500 on this PUBLIC unauthenticated endpoint (audit).
+    const wid = safeWooId(id);
+    const idMatch = wid !== null ? { wooId: wid } : { OR: [{ id }, { slug: id }] };
+    const [row] = await loadProducts({ ...PUBLIC_PRODUCT_GATE, ...idMatch }, 0, 1);
+    if (row) { reply.send(toStoreProduct(row, currency)); return; }
+    // VARIATION ids. Our own product list advertises `variations: [{id: <variant
+    // wooId>}]`, and real WooCommerce serves those ids right back on this same
+    // endpoint — ours didn't, so any client walking our own advertised ids
+    // 404'd (seen live: a catalog crawler sweeping 1598–1657, 13× each).
+    if (wid !== null) {
+      const v = await db.productVariant.findUnique({
+        where: { wooId: wid },
+        include: { product: { include: { variants: true, categories: true, tags: true } } },
+      });
+      // Same public gate as the parent: never surface a variation whose product
+      // is draft/private/trashed through the keyless Store API.
+      if (v?.product && v.product.status === 'active' && v.product.visibility === 'public' && !v.product.deletedAt) {
+        const p = v.product;
+        const base = toStoreProduct(p as never, currency) as Record<string, unknown>;
+        const name = `${p.name}${[v.color, v.size].filter(Boolean).length ? ' - ' + [v.color, v.size].filter(Boolean).join(', ') : ''}`;
+        const img = v.image || p.image;
+        reply.send({
+          ...base,
+          id: v.wooId ?? 0, name, parent: p.wooId ?? 0, type: 'variation', variation: [v.color, v.size].filter(Boolean).join(', '),
+          sku: v.sku ?? '', prices: storePrices(v.price, currency),
+          images: img ? [{ id: (v.wooId ?? 0) * 10, src: img, thumbnail: img, srcset: '', sizes: '', name, alt: name }] : (base.images as unknown[]),
+          variations: [], has_options: false,
+          is_in_stock: availableOf(v) > 0,
+          stock_availability: { text: availableOf(v) > 0 ? 'In stock' : 'Out of stock', class: availableOf(v) > 0 ? 'in-stock' : 'out-of-stock' },
+          attributes: [
+            ...(v.color ? [{ id: 0, name: 'Color', taxonomy: null, has_variations: false, terms: [{ id: 0, name: v.color, slug: v.color }] }] : []),
+            ...(v.size ? [{ id: 0, name: 'Size', taxonomy: null, has_variations: false, terms: [{ id: 0, name: v.size, slug: v.size }] }] : []),
+          ],
+        });
+        return;
+      }
+    }
+    wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid product ID.');
   });
 
   app.get(`${PREFIX}/products/:id`, authed, async (req, reply) => {
@@ -1513,7 +1726,14 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
       // cuids), so answer it with a benign unpublished stub: the reconcile becomes
       // a no-op and the publish stops falsely erroring. A cuid we do not have
       // still 404s, because that IS a real "not found".
-      if (/^\d+$/.test(id)) {
+      // `0` is NOT a stale mapping — it is a connector's "no id yet" sentinel
+      // (Printify walks GET /0 → PUT /0 → /0/variations after an empty sku
+      // lookup). Answering it 200 kept Printify on a phantom until
+      // /0/variations/batch 404'd and the publish read as failed, every time.
+      // Real WooCommerce 404s /products/0, which is exactly what sends the
+      // connector down the CREATE path — where the POST dedupe returns the
+      // real product's id and the link finally sticks. Positive ids keep the stub.
+      if (/^\d+$/.test(id) && Number(id) > 0) {
         // Report the stale id as PUBLISHED, not draft. A POD platform polls this
         // to answer "is my publish done yet?" — a 'draft' answer reads as "not
         // done" and hangs the product on "still publishing" forever. 'publish'
@@ -1531,7 +1751,10 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
       wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid product ID.');
       return;
     }
-    reply.send(toWooProduct(row, commerce.currency ?? 'USD'));
+    const out = toWooProduct(row, commerce.currency ?? 'USD');
+    // Publish forensics (Printify only): the exact product read-back it verifies.
+    if (/printify/i.test(req.storeAuth?.label ?? '')) req.log.info({ product: id, body: JSON.stringify(out).slice(0, 8000) }, 'wc-outbound-product');
+    reply.send(out);
   });
 
   /**
@@ -1543,7 +1766,22 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     const commerce = await settingsService.getCommerce();
     const currency = commerce.currency ?? 'USD';
     const parent = await db.product.findFirst({ where: byWooOrCuid(id), select: { id: true, wooId: true } });
-    if (!parent) { wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid product ID.'); return; }
+    if (!parent) {
+      // SAME stale-numeric-id reconcile as GET /products/:id above — this branch
+      // was the one place it was missing, and the inconsistency is what dead-
+      // ended Printify: GET /products/0 answered 200 from the product stub, then
+      // THIS route 404'd on /products/0/variations, so the publish read as a hard
+      // failure and Printify re-created the product as a "Copy of …" on the next
+      // attempt (wooId 161-168 are all that). An unknown NUMERIC id is only ever
+      // a stale partner mapping (our own refs are cuids), so answer the benign
+      // empty variation set and let the poll complete; a cuid we do not have is a
+      // real not-found and still 404s.
+      // Same rule as GET /products/:id — `0` is "no id yet", never a stale one,
+      // and must 404 so the connector creates instead of dead-ending on a phantom.
+      if (/^\d+$/.test(id) && Number(id) > 0) { reply.send([]); return; }
+      wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid product ID.');
+      return;
+    }
     // MUST paginate + set X-WP-Total / X-WP-TotalPages. Without it every page
     // returned the FULL variation set, so a partner paging through (page 1, 2,
     // 3…) to confirm the push never hit an empty page and looped forever until
@@ -1554,7 +1792,10 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     setPagingHeaders(reply, total, perPage);
     const variants = await db.productVariant.findMany({ where: { productId: parent.id }, orderBy: { createdAt: 'asc' }, skip, take });
     const parentWoo = parent.wooId ?? 0;
-    reply.send(variants.map((v) => wooVariation(v, currency, parentWoo)));
+    const out = variants.map((v) => wooVariation(v, currency, parentWoo));
+    // Publish forensics (Printify only): the exact variations read-back it verifies.
+    if (/printify/i.test(req.storeAuth?.label ?? '')) req.log.info({ product: id, body: JSON.stringify(out).slice(0, 8000) }, 'wc-outbound-variations');
+    reply.send(out);
   });
 
   // ---------------------------------------------------------------------
@@ -1597,13 +1838,39 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
       idSet.add(attrId(want.charAt(0).toUpperCase() + want.slice(1)));
       idSet.add(attrId(want.toUpperCase()));
     }
+    // Tolerant name match. Printify's WooCommerce channel sends the axis under
+    // names the strict `n === want` check never saw — the taxonomy form
+    // ("pa_size"), plurals ("Sizes"), or a qualified label ("Pin size"). Every
+    // Printify pin batch on 2026-09-15 parsed as "?/?" while Tapstitch's parsed
+    // as "Red/S": the sizes landed blank, Printify's read-back verification saw
+    // no options, marked the publish failed, and kept no store link. Normalise
+    // (lowercase, drop a "pa_" prefix, letters only) and accept an exact OR a
+    // containing match, so "pa_size" / "sizes" / "pinsize" all read as size.
+    const norm = (s: string) => s.toLowerCase().replace(/^pa_/, '').replace(/[^a-z]/g, '');
     for (const a of attrs ?? []) {
-      const n = (a.name ?? '').toLowerCase();
-      if (names.some((want) => n === want)) return a.option ?? a.options?.[0] ?? null;
+      const n = norm(a.name ?? '');
+      if (n && names.some((want) => n === want || n.includes(want))) return a.option ?? a.options?.[0] ?? null;
       if (a.id != null && idSet.has(Number(a.id))) return a.option ?? a.options?.[0] ?? null;
     }
     return null;
   }
+
+  /** The connector's raw name for an axis (e.g. "Pin size"), matched the same
+   *  tolerant way as attrValue — persisted so the read-back can echo it. */
+  function attrName(attrs: WooAttr[] | undefined, ...names: string[]): string | null {
+    const norm = (s: string) => s.toLowerCase().replace(/^pa_/, '').replace(/[^a-z]/g, '');
+    for (const a of attrs ?? []) {
+      const n = norm(a.name ?? '');
+      if (n && a.name && names.some((want) => n === want || n.includes(want))) return a.name;
+    }
+    return null;
+  }
+  /** meta fragment carrying the connector's axis names, or nothing if it sent none. */
+  const attrNamesOf = (attrs: WooAttr[] | undefined): { attrNames?: Record<string, string> } => {
+    const color = attrName(attrs, 'color', 'colour');
+    const size = attrName(attrs, 'size');
+    return color || size ? { attrNames: { ...(color ? { color } : {}), ...(size ? { size } : {}) } } : {};
+  };
 
   /**
    * A slug that is free. Woo does the same thing (`t-shirt-2`), and without it
@@ -1625,11 +1892,111 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
    * come from" has no answer, and disconnecting a partner cannot find what it
    * published.
    */
+  // Trusted pull-only partner credential ids allowed to read the FULL order stream
+  // (see partnerOrderScope). Comma-separated StoreCredential ids in env; EMPTY by
+  // default, so no partner key reads cross-tenant orders unless an admin explicitly
+  // allowlists it. This is the deliberate replacement for the removed owns===0
+  // fail-open.
+  const ORDER_READER_ALLOWLIST = new Set(
+    (process.env.ORDER_READER_CREDENTIAL_IDS ?? '').split(',').map((s) => s.trim()).filter(Boolean),
+  );
+
   async function partnerVendor(req: FastifyRequest): Promise<string> {
-    const name = req.storeAuth?.label ?? 'Connected partner';
-    const existing = await db.vendor.findFirst({ where: { name } });
-    if (existing) return existing.id;
-    return (await db.vendor.create({ data: { name } })).id;
+    // Key on the IMMUTABLE credential id, never the human label. The label is not
+    // unique — every NULL-description compat key defaulted to "Connected partner",
+    // so multiple partners collapsed onto ONE vendor and, via vendorId order
+    // scoping, read each other's customer PII (audit C2). req.storeAuth.id is
+    // unique per credential (StoreCredential.id, or wc:<keyHash> for compat keys).
+    const credId = req.storeAuth?.id ?? null;
+    const label = (req.storeAuth?.label ?? 'Connected partner').trim() || 'Connected partner';
+    if (!credId) {
+      // No credential id (should not happen once authenticated) — legacy behaviour.
+      const existing = await db.vendor.findFirst({ where: { name: label } });
+      return existing ? existing.id : (await db.vendor.create({ data: { name: label } })).id;
+    }
+    const byCred = await db.vendor.findFirst({ where: { credentialId: credId }, select: { id: true } });
+    if (byCred) return byCred.id;
+    // One-time legacy adoption: a DISTINCTIVE (non-default) label vendor that has
+    // no credential yet is this partner's pre-existing vendor from before this
+    // change — claim it atomically so its already-synced products keep matching.
+    // NEVER adopt the shared "Connected partner" default (that is the collapse).
+    if (label !== 'Connected partner') {
+      const orphan = await db.vendor.findFirst({ where: { name: label, credentialId: null }, select: { id: true } });
+      if (orphan) {
+        const claimed = await db.vendor.updateMany({ where: { id: orphan.id, credentialId: null }, data: { credentialId: credId } });
+        if (claimed.count === 1) return orphan.id;
+        const mine = await db.vendor.findFirst({ where: { credentialId: credId }, select: { id: true } });
+        if (mine) return mine.id;
+      }
+    }
+    try {
+      return (await db.vendor.create({ data: { name: label, credentialId: credId } })).id;
+    } catch {
+      // unique(credentialId) race — the other writer won; return theirs.
+      const won = await db.vendor.findFirst({ where: { credentialId: credId }, select: { id: true } });
+      return won ? won.id : (await db.vendor.create({ data: { name: label } })).id;
+    }
+  }
+
+  // Per-partner order scoping. GET /orders + /orders/:id return full customer PII
+  // (email, name, shipping address) for every line. Without scoping, ANY store
+  // key reads EVERY order — so Printful's key can read Tapstitch's customers'
+  // addresses (audit). A POD partner should only ever see orders that contain one
+  // of ITS OWN lines: matched by the vendorId its synced products carry
+  // (writeProduct stamps vendorId) OR its fulfillmentProvider. Because fulfilment
+  // ROUTING already keys on those same fields, any order that legitimately
+  // belongs to a partner carries the matching line, so scoping can never hide an
+  // order the system would route to them — it only fences partners off each
+  // other's data.
+  //
+  // SAFE FALLBACK: scope ONLY a recognised POD-provider key (by its label brand).
+  // A store-wide / admin / unrecognised key returns null here and is NOT scoped,
+  // so this never darks an internal integration's order pull — it only constrains
+  // known partners. Returns a Prisma filter, or null for "do not scope".
+  async function partnerOrderScope(req: FastifyRequest): Promise<Prisma.OrderWhereInput | null> {
+    // TRUST BOUNDARY is the credential's firstParty flag (set only by the
+    // full-admin /store-keys path), NOT a partner-controlled label. A first-party
+    // (admin) key is unscoped; EVERY other key is fenced to its own vendor's
+    // orders. Fail CLOSED by default.
+    if (req.storeAuth?.firstParty) return null; // admin/first-party key → all orders
+    // EXPLICIT allowlist of trusted pull-only partner credentials that legitimately
+    // read the full order stream (a fulfilment integration that pulls /orders and
+    // has no vendor-tagged catalogue of its own — e.g. JetPrint). Configured by
+    // credential id via env (comma-separated), defaults EMPTY. This REPLACES the
+    // old `owns===0 => return null` do-not-dark guard, which handed full-store
+    // customer PII to ANY zero-catalogue key (audit R6 CRITICAL, a regression I
+    // introduced). An allowlisted reader is an explicit admin trust decision, not
+    // an accidental fail-open for every un-attributable key.
+    const credId = req.storeAuth?.id ?? null;
+    if (credId && ORDER_READER_ALLOWLIST.has(credId)) return null;
+    // Fence to the caller's OWN vendorId — the Vendor row keyed on THIS credential,
+    // which writeProduct stamps onto the products this partner synced. ALWAYS a
+    // filter, never null: a vendor that owns no tagged catalogue matches ZERO
+    // orders (fail closed), never every order. vendorId is a cuid, not a forgeable
+    // label-brand.
+    const vendorId = await partnerVendor(req);
+    return { items: { some: { variant: { is: { product: { is: { vendorId } } } } } } };
+  }
+
+  // Product-WRITE ownership, same trust boundary as partnerOrderScope. Product
+  // mutations (PUT/PATCH/DELETE/:id + batch) resolved the target by wooId/slug/sku
+  // with NO vendor check, so any read_write partner could rewrite ANOTHER
+  // partner's (or the store's) product price to 1¢ or force-delete the catalogue
+  // — the buy-for-pennies hole, at the partner API (audit C1). A first-party key
+  // is unscoped; every partner key is fenced to its own vendorId. Returns a
+  // Prisma Product filter fragment to AND into the lookup, or null (unscoped).
+  async function partnerProductScope(req: FastifyRequest): Promise<{ vendorId: string } | null> {
+    if (req.storeAuth?.firstParty) return null;
+    // ALWAYS fence a partner key to its own vendorId. The previous `owns===0 =>
+    // return null` do-not-dark guard fell OPEN when the caller's vendor owned
+    // nothing → any zero-catalogue read_write key could rewrite ANY product to 1¢
+    // or force-delete the catalogue (audit R6 CRITICAL, buy-for-pennies reopened).
+    // A partner's FIRST sync of a product is a POST /products (create), which
+    // stamps vendorId; subsequent UPDATEs of its OWN products then match. A foreign
+    // product simply 404s. (The old duplicate-on-resync concern for legacy untagged
+    // products is a recoverable data merge — never a reason to leave writes open.)
+    const vendorId = await partnerVendor(req);
+    return { vendorId };
   }
 
   /** Woo sends categories as [{id|name|slug}]; unknown ones are created. */
@@ -1687,12 +2054,45 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     // product's images by that id. Resolve the id back to the file we stored so
     // a full mockup gallery lands, not just a single inline design.
     const gallery: { src: string; alt?: string }[] = [];
+    // The product's OWN current images, addressable by the ids toWooProduct
+    // mints (wooId*1000 = primary, wooId*1000+1+k = gallery[k]). A connector
+    // re-references those ids on later PUTs — Printify attaches its mockups one
+    // PUT at a time as [{id:<primary>}, {src:<new mockup>}] and never resends
+    // the earlier ones. Resolving only wpMediaId (never our own ids) dropped the
+    // reference, so every PUT RESET the set to the single new image: the read-
+    // back never showed the mockups it uploaded and the publish read as failed.
+    const own = new Map<number, { src: string; alt?: string }>();
+    let ownRef = false;
+    if (id) {
+      const cur = await db.product.findUnique({ where: { id }, select: { wooId: true, name: true, image: true, images: true } });
+      const base = (cur?.wooId ?? 0) * 1000;
+      if (cur?.image) own.set(base, { src: cur.image, alt: cur.name });
+      const curGallery = Array.isArray(cur?.images) ? (cur!.images as { url?: string; alt?: string }[]) : [];
+      curGallery.forEach((g, k) => { if (g.url) own.set(base + 1 + k, { src: g.url, alt: g.alt }); });
+    }
     for (const im of body.images ?? []) {
-      if (im.src) { gallery.push({ src: im.src, alt: im.alt ?? im.name }); continue; }
+      // Pull the vendor's external image onto our own domain at push time, so a
+      // card never depends on a CDN that hotlink-blocks (Tapstitch/Aliyun 403s a
+      // Referer) or lets the url expire (Printify S3). Fails open to the original
+      // url. Covers main + gallery — both derive from gallery[].src below.
+      if (im.src) { gallery.push({ src: (await localizeImageUrl(im.src, im.alt ?? im.name)) ?? im.src, alt: im.alt ?? im.name }); continue; }
       if (im.id != null) {
+        const mine = own.get(Number(im.id));
+        if (mine) { ownRef = true; gallery.push({ src: mine.src, alt: im.alt ?? im.name ?? mine.alt }); continue; }
         const a = await db.mediaAsset.findFirst({ where: { meta: { path: ['wpMediaId'], equals: Number(im.id) } }, select: { url: true } });
         if (a) gallery.push({ src: a.url, alt: im.alt ?? im.name });
       }
+    }
+    // Accumulate, don't replace, when the connector anchored the update on one
+    // of our own image ids: keep everything it did NOT mention and add the new
+    // ones (deduped), so six single-mockup PUTs end with six mockups on the
+    // product — what a strict connector reads back to confirm the publish.
+    if (ownRef) {
+      const seen = new Set(gallery.map((g) => g.src));
+      for (const g of own.values()) if (!seen.has(g.src)) { gallery.push(g); seen.add(g.src); }
+      // Keep the existing primary first so the primary image (and its id) is stable.
+      const primary = own.get((await db.product.findUnique({ where: { id: id! }, select: { wooId: true } }))?.wooId! * 1000);
+      if (primary) { const i = gallery.findIndex((g) => g.src === primary.src); if (i > 0) gallery.unshift(...gallery.splice(i, 1)); }
     }
     const price = priceToMinor(body.regular_price ?? body.price, currency);
 
@@ -1715,6 +2115,20 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     };
 
     if (id) {
+      // Keep what a strict connector verifies on read-back — its option order
+      // and default attribute, verbatim. Printify sends both on the parent PUT
+      // and re-reads the product before marking the publish succeeded.
+      const attrOpts = Object.fromEntries((body.attributes ?? []).filter((a) => a.name && Array.isArray(a.options)).map((a) => [a.name as string, a.options as string[]]));
+      const defAttrs = (body as { default_attributes?: unknown }).default_attributes;
+      if (Object.keys(attrOpts).length || Array.isArray(defAttrs)) {
+        const cur = await db.product.findUnique({ where: { id }, select: { meta: true } });
+        const base = (cur?.meta && typeof cur.meta === 'object' ? cur.meta : {}) as Record<string, unknown>;
+        (data as Record<string, unknown>).meta = {
+          ...base,
+          ...(Object.keys(attrOpts).length ? { wcAttrOptions: attrOpts } : {}),
+          ...(Array.isArray(defAttrs) ? { wcDefaultAttributes: defAttrs } : {}),
+        };
+      }
       const updated = await db.product.update({ where: { id }, data });
       // A price on an update belongs on the existing variant, not a new one —
       // otherwise every price change grows another buy option on the page.
@@ -1776,7 +2190,16 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     const commerce = await settingsService.getCommerce();
     const currency = commerce.currency ?? 'USD';
 
-    const dupe = await existingBySku(body.sku, await partnerVendor(req));
+    const vendorId = await partnerVendor(req);
+    // Dedupe a RE-PUBLISH. A variable product's parent carries no SKU (the SKUs
+    // ride on the variations), so the SKU match above never fires for it and a
+    // connector that re-publishes the same design (Printify does, every time
+    // its previous publish attempt failed) grew a fresh duplicate parent each
+    // time — the Aug-10 "-<printifyId>" twins. Same vendor + same exact name on
+    // a live product IS that product: update it and hand back its existing id,
+    // so the connector records THIS id as the store link instead of a new one.
+    const dupe = (await existingBySku(body.sku, vendorId))
+      ?? (body.sku ? null : (await db.product.findFirst({ where: { vendorId, name: body.name, deletedAt: null }, orderBy: { createdAt: 'asc' }, select: { id: true } }))?.id ?? null);
     const saved = await writeProduct(req, body, currency, dupe ?? undefined);
     const [full] = await loadProducts({ id: saved.id }, 0, 1);
     reply.status(dupe ? 200 : 201).send(toWooProduct(full!, currency));
@@ -1791,6 +2214,9 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
         if (!requireWrite(req, reply)) return;
         const { id } = req.params as { id: string };
         const body = (req.body ?? {}) as WooProductBody;
+        // Publish forensics (Printify only): each parent PUT the connector sends
+        // (it fires several per publish — title, description, images, status…).
+        if (/printify/i.test(req.storeAuth?.label ?? '')) req.log.info({ product: id, method, body: JSON.stringify(req.body ?? {}).slice(0, 8000) }, 'wc-inbound-product');
         const commerce = await settingsService.getCommerce();
         const currency = commerce.currency ?? 'USD';
         // UPSERT, not a hard 404. A partner that first linked this product to a
@@ -1800,17 +2226,29 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
         // resolves the product the partner MEANS (by slug from its name, or a
         // variant SKU) and updates that, or creates it fresh — so "republish"
         // is idempotent and never errors on a store the product simply moved to.
-        let target = await db.product.findFirst({ where: byWooOrCuid(id), select: { id: true } });
+        // Fence resolution to the caller's OWN products (audit C1). A partner may
+        // only update a product it owns; the slug/sku fallbacks are scoped too, so
+        // a partner can't reach another's product by name/SKU. A miss on a foreign
+        // product falls through to create-its-own (if named) or 404 — never a
+        // cross-tenant write. A first-party key is unscoped.
+        const pscope = await partnerProductScope(req);
+        let target = await db.product.findFirst({ where: { ...byWooOrCuid(id), ...(pscope ?? {}) }, select: { id: true } });
         if (!target && body.name) {
-          target = await db.product.findFirst({ where: { slug: slugify(body.name) }, select: { id: true } });
+          target = await db.product.findFirst({ where: { slug: slugify(body.name), ...(pscope ?? {}) }, select: { id: true } });
         }
-        if (!target && body.sku) {
-          target = await db.product.findFirst({ where: { variants: { some: { sku: body.sku } } }, select: { id: true } });
+        // Not for id `0`: that is the connector saying "I have no id", and
+        // silently matching its parent by SKU here answered 200 while leaving
+        // the connector on `0` for every follow-up call. Let `0` fall through to
+        // a 404 so it takes the create path (deduped) and learns the real id.
+        if (!target && body.sku && !/^0+$/.test(id)) {
+          target = await db.product.findFirst({ where: { variants: { some: { sku: body.sku } }, ...(pscope ?? {}) }, select: { id: true } });
         }
         if (target) {
           await writeProduct(req, body, currency, target.id);
           const [full] = await loadProducts({ id: target.id }, 0, 1);
           reply.send(toWooProduct(full!, currency));
+        } else if (/^0+$/.test(id)) {
+          wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid product ID.');
         } else if (!body.name) {
           // A leftover id from the product's PREVIOUS store (the old reference site
           // WooCommerce) — not here, and no name to build from. If the partner is
@@ -1824,9 +2262,16 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
           }
           wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid product ID.');
         } else {
-          const saved = await writeProduct(req, body, currency);
+          // A PUT to an id we never issued, carrying a full product: the connector
+          // is re-publishing under a stale id. Before building a new product,
+          // dedupe exactly like POST — same vendor + same exact live name IS that
+          // product (variable parents carry no SKU, so name is the only key).
+          // Creating here is what produced the "Copy of Copy of…" pins.
+          const vendorId = await partnerVendor(req);
+          const same = body.name ? await db.product.findFirst({ where: { vendorId, name: body.name, deletedAt: null }, orderBy: { createdAt: 'asc' }, select: { id: true } }) : null;
+          const saved = await writeProduct(req, body, currency, same?.id);
           const [full] = await loadProducts({ id: saved.id }, 0, 1);
-          reply.status(201).send(toWooProduct(full!, currency));
+          reply.status(same ? 200 : 201).send(toWooProduct(full!, currency));
         }
       },
     });
@@ -1843,7 +2288,10 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     const { force } = req.query as { force?: string };
     const commerce = await settingsService.getCommerce();
     const currency = commerce.currency ?? 'USD';
-    const [full] = await loadProducts(byWooOrCuid(id), 0, 1);
+    // Owner-scoped (audit C1): a partner can only delete its OWN product; a
+    // foreign id is a clean 404, never a force-delete of another's catalogue.
+    const pscope = await partnerProductScope(req);
+    const [full] = await loadProducts({ ...byWooOrCuid(id), ...(pscope ?? {}) }, 0, 1);
     if (!full) {
       wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid product ID.');
       return;
@@ -1870,7 +2318,11 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     const body = (req.body ?? {}) as WooProductBody & { image?: WooImage };
     const commerce = await settingsService.getCommerce();
     const currency = commerce.currency ?? 'USD';
-    const parent = await db.product.findFirst({ where: byWooOrCuid(id), select: { id: true } });
+    // Fence the PARENT to the caller's vendor — a partner must not add a variation
+    // to a product it doesn't own (audit R6 CRITICAL: buy-for-pennies via an
+    // injected 1¢ variation on the flagship). First-party keys are unscoped.
+    const pscope = await partnerProductScope(req);
+    const parent = await db.product.findFirst({ where: { ...byWooOrCuid(id), ...(pscope ?? {}) }, select: { id: true } });
     if (!parent) {
       wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid product ID.');
       return;
@@ -1896,8 +2348,8 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
       size: attrValue(body.attributes, 'size'),
       // The variation's own mockup — this is what lets picking a colour swap the
       // photo. Woo carries it as a single `image: { src }` on the variation.
-      ...(body.image?.src ? { image: body.image.src } : {}),
-      meta: {},
+      ...(body.image?.src ? { image: (await localizeImageUrl(body.image.src)) ?? body.image.src } : {}),
+      meta: { ...attrNamesOf(body.attributes) },
     };
     const variant = carried
       ? await db.productVariant.update({ where: { id: carried.id }, data })
@@ -1919,10 +2371,18 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
   app.post(`${PREFIX}/products/:id/variations/batch`, authed, async (req, reply) => {
     if (!requireWrite(req, reply)) return;
     const { id } = req.params as { id: string };
+    // Publish forensics (Printify only): the exact batch body the connector sent.
+    // Its post-publish verification compares this against our read-back, and a
+    // "publishing failed" with every HTTP call 200 is only diagnosable from the
+    // two payloads side by side.
+    if (/printify/i.test(req.storeAuth?.label ?? '')) req.log.info({ product: id, body: JSON.stringify(req.body ?? {}).slice(0, 8000) }, 'wc-inbound-batch');
     const b = (req.body ?? {}) as { create?: (WooProductBody & { id?: string | number; image?: WooImage })[]; update?: (WooProductBody & { id?: string | number; image?: WooImage })[]; delete?: (string | number)[] };
     const commerce = await settingsService.getCommerce();
     const currency = commerce.currency ?? 'USD';
-    const parent = await db.product.findFirst({ where: byWooOrCuid(id), select: { id: true } });
+    // Fence the parent to the caller's vendor (audit R6 CRITICAL — variation batch
+    // could inject/rewrite variants on ANY product). First-party keys unscoped.
+    const pscope = await partnerProductScope(req);
+    const parent = await db.product.findFirst({ where: { ...byWooOrCuid(id), ...(pscope ?? {}) }, select: { id: true } });
     if (!parent) { wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid product ID.'); return; }
     // TEMP DIAGNOSTIC (green-joggers): what colourways does a connector actually
     // send, and in which bucket? A re-sync that puts a NEW colour in `update`
@@ -1931,6 +2391,10 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
       product: id,
       createColors: (b.create ?? []).map((v) => `${attrValue(v.attributes, 'color', 'colour') ?? '?'}/${attrValue(v.attributes, 'size') ?? '?'}`),
       updateColors: (b.update ?? []).map((v) => `${v.id}=${attrValue(v.attributes, 'color', 'colour') ?? '?'}/${attrValue(v.attributes, 'size') ?? '?'}`),
+      // RAW attribute shape, so a "?/?" above is diagnosable from the log alone:
+      // the exact name/id each connector sends per axis (Printify vs Tapstitch
+      // differ), not just whether our matcher recognised it.
+      attrShapes: [...(b.create ?? []), ...(b.update ?? [])].slice(0, 3).map((v) => (v.attributes ?? []).map((a) => `${a.name ?? ''}#${a.id ?? ''}=${a.option ?? a.options?.[0] ?? ''}`)),
       del: (b.delete ?? []).length,
     }, 'wc-variations-batch-inbound');
     const out = (v: { wooId: number | null; sku: string | null; price: number; inventory: number }) => ({
@@ -1942,9 +2406,20 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
         productId: parent.id, sku: v.sku ?? null, price: priceToMinor(v.regular_price ?? v.price, currency) ?? 0,
         ...mapStock(v), color: attrValue(v.attributes, 'color', 'colour'), size: attrValue(v.attributes, 'size'),
         // Per-variation mockup — this is what makes picking a colour swap the photo.
-        ...(v.image?.src ? { image: v.image.src } : {}),
-        meta: {},
+        ...(v.image?.src ? { image: (await localizeImageUrl(v.image.src)) ?? v.image.src } : {}),
+        meta: { ...attrNamesOf(v.attributes) },
       };
+      // A "create" whose SKU already exists on THIS parent is a re-publish of a
+      // variant we hold (the parent was deduped above, so the connector thinks
+      // it is new). Update that row — price, stock, and crucially the colour/
+      // size it may have failed to parse last time — instead of stacking a
+      // duplicate buy option on the product page.
+      const held = v.sku ? await db.productVariant.findFirst({ where: { productId: parent.id, sku: v.sku }, select: { id: true } }) : null;
+      if (held) {
+        const { productId: _p, meta: _m, ...upd } = data;
+        created.push(out(await db.productVariant.update({ where: { id: held.id }, data: upd })));
+        continue;
+      }
       created.push(out(await db.productVariant.create({ data })));
     }
     // Drop the parent-create placeholder AFTER the real variations exist, as one
@@ -1963,7 +2438,12 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     const updated = [];
     for (const v of b.update ?? []) {
       const price = priceToMinor(v.regular_price ?? v.price, currency);
-      let existing = v.id !== undefined ? await db.productVariant.findFirst({ where: byWooOrCuid(String(v.id)) }) : null;
+      // Pin to THIS product. variant wooIds come from ONE global SERIAL sequence,
+      // so they're guessable across every product/vendor; without productId a
+      // stale/colliding id resolves to ANOTHER product's variant and silently
+      // rewrites its price/stock (audit CRITICAL, cross-tenant). A foreign id now
+      // simply misses and is treated as a new colourway below.
+      let existing = v.id !== undefined ? await db.productVariant.findFirst({ where: { ...byWooOrCuid(String(v.id)), productId: parent.id } }) : null;
       if (!existing) {
         // A colourway ADDED to a live product arrives here as an "update" whose
         // id we've never issued. The old code skipped it, so a new colour pushed
@@ -1975,7 +2455,7 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
         const size = attrValue(v.attributes, 'size');
         existing = (color || size) ? await db.productVariant.findFirst({ where: { productId: parent.id, color, size } }) : null;
         if (!existing) {
-          const data = { productId: parent.id, sku: v.sku ?? null, price: price ?? 0, ...mapStock(v), color, size, ...(v.image?.src ? { image: v.image.src } : {}), meta: {} };
+          const data = { productId: parent.id, sku: v.sku ?? null, price: price ?? 0, ...mapStock(v), color, size, ...(v.image?.src ? { image: (await localizeImageUrl(v.image.src)) ?? v.image.src } : {}), meta: { ...attrNamesOf(v.attributes) } };
           updated.push(out(await db.productVariant.create({ data })));
           continue;
         }
@@ -1988,7 +2468,9 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     }
     const deleted = [];
     for (const rawId of b.delete ?? []) {
-      const existing = await db.productVariant.findFirst({ where: byWooOrCuid(String(rawId)) });
+      // Pin to THIS product — a global variant id must not delete another
+      // product's variant (audit CRITICAL).
+      const existing = await db.productVariant.findFirst({ where: { ...byWooOrCuid(String(rawId)), productId: parent.id } });
       if (!existing) continue;
       const ordered = await db.orderItem.findFirst({ where: { variantId: existing.id }, select: { id: true } });
       if (ordered) continue; // keep what a customer bought
@@ -2005,11 +2487,19 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
       preHandler: authenticate,
       handler: async (req, reply) => {
         if (!requireWrite(req, reply)) return;
-        const { variationId } = req.params as { id: string; variationId: string };
+        const { id: parentIdParam, variationId } = req.params as { id: string; variationId: string };
         const body = (req.body ?? {}) as WooProductBody;
         const commerce = await settingsService.getCommerce();
         const currency = commerce.currency ?? 'USD';
-        const variant = await db.productVariant.findFirst({ where: byWooOrCuid(variationId) });
+        // Resolve the PARENT and pin the variation to it. Without productId a
+        // global/guessable variation id under product A would mutate a variation
+        // of product B (audit CRITICAL, cross-tenant price/stock rewrite). AND
+        // fence the parent to the caller's vendor — a partner must not rewrite a
+        // variation's price to 1¢ on a product it doesn't own (audit R6 CRITICAL).
+        const pscope = await partnerProductScope(req);
+        const parent = await db.product.findFirst({ where: { ...byWooOrCuid(parentIdParam), ...(pscope ?? {}) }, select: { id: true } });
+        if (!parent) { wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid product ID.'); return; }
+        const variant = await db.productVariant.findFirst({ where: { ...byWooOrCuid(variationId), productId: parent.id } });
         if (!variant) {
           wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid variation ID.');
           return;
@@ -2035,8 +2525,14 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
 
   app.delete(`${PREFIX}/products/:id/variations/:variationId`, authed, async (req, reply) => {
     if (!requireWrite(req, reply)) return;
-    const { variationId } = req.params as { id: string; variationId: string };
-    const variant = await db.productVariant.findFirst({ where: byWooOrCuid(variationId) });
+    const { id: parentIdParam, variationId } = req.params as { id: string; variationId: string };
+    // Pin to the parent — a global variation id must not delete another product's
+    // variation (audit CRITICAL) — AND fence the parent to the caller's vendor so a
+    // partner can't delete another vendor's variations (audit R6 CRITICAL).
+    const pscope = await partnerProductScope(req);
+    const parent = await db.product.findFirst({ where: { ...byWooOrCuid(parentIdParam), ...(pscope ?? {}) }, select: { id: true } });
+    if (!parent) { wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid product ID.'); return; }
+    const variant = await db.productVariant.findFirst({ where: { ...byWooOrCuid(variationId), productId: parent.id } });
     if (!variant) {
       wooError(reply, 404, 'woocommerce_rest_product_invalid_id', 'Invalid variation ID.');
       return;
@@ -2061,6 +2557,9 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     const commerce = await settingsService.getCommerce();
     const currency = commerce.currency ?? 'USD';
     const vendorId = await partnerVendor(req);
+    // Owner scope for update/delete resolution (audit C1) — a partner may only
+    // edit/delete its own products in a batch. First-party keys unscoped.
+    const pscope = await partnerProductScope(req);
     const out: { create: unknown[]; update: unknown[]; delete: unknown[] } = { create: [], update: [], delete: [] };
 
     // One failure must not abandon the rest of the batch — Woo reports per
@@ -2078,17 +2577,27 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     for (const item of body.update ?? []) {
       try {
         if (!item.id) throw new Error('id is required to update');
-        await writeProduct(req, item, currency, item.id);
-        const [full] = await loadProducts({ id: item.id }, 0, 1);
+        // Partners now know the product by the integer wooId we emit as `id`, so
+        // a batch update carries that int, not our cuid. Resolve either — the
+        // single-product PUT already does this; the batch path did not, so every
+        // wooId-keyed update silently missed and looked like a failed sync.
+        const target = await db.product.findFirst({ where: { ...byWooOrCuid(String(item.id)), ...(pscope ?? {}) }, select: { id: true } });
+        if (!target) throw new Error('product not found');
+        await writeProduct(req, item, currency, target.id);
+        const [full] = await loadProducts({ id: target.id }, 0, 1);
         out.update.push(toWooProduct(full!, currency));
       } catch (err) {
         out.update.push({ error: { code: 'woocommerce_rest_cannot_edit', message: (err as Error).message } });
       }
     }
-    for (const id of body.delete ?? []) {
+    for (const rawId of body.delete ?? []) {
       try {
-        await db.product.update({ where: { id }, data: { status: 'draft' } });
-        out.delete.push({ id });
+        // Same wooId-or-cuid resolution as update/delete single: a delete keyed
+        // by the emitted integer id must not 404.
+        const target = await db.product.findFirst({ where: { ...byWooOrCuid(String(rawId)), ...(pscope ?? {}) }, select: { id: true, wooId: true } });
+        if (!target) throw new Error('product not found');
+        await db.product.update({ where: { id: target.id }, data: { status: 'draft' } });
+        out.delete.push({ id: target.wooId ?? target.id });
       } catch (err) {
         out.delete.push({ error: { code: 'woocommerce_rest_cannot_delete', message: (err as Error).message } });
       }
@@ -2110,6 +2619,17 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
   const WEBHOOK_TOPICS = new Set([
     'order.created', 'order.updated', 'order.deleted',
     'product.created', 'product.updated', 'product.deleted',
+    // Action topics — how real POD partners actually subscribe to "an order was
+    // paid". Verified against the working WooCommerce store (:10025): Tapstitch
+    // (HugePOD), Printify and Printful all register
+    // `action.woocommerce_order_status_processing`, NOT order.updated. Woo fires
+    // it on the pending->processing transition; the delivered body is
+    // {action, arg:<order id>} and the partner then PULLS /wc/v3/orders/<id>.
+    // Rejecting these topics forced partners onto the wrong webhook and nothing
+    // ever fulfilled. Order.updated (full payload) is what PODpartner/PodPluser use.
+    'action.woocommerce_order_status_processing',
+    'action.woocommerce_order_status_completed',
+    'action.woocommerce_update_options',
   ]);
 
   function toWooWebhook(w: { id: string; name: string; topic: string; deliveryUrl: string; status: string; createdAt: Date; updatedAt: Date }) {
@@ -2128,18 +2648,26 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     };
   }
 
+  // OWNERSHIP SCOPING: a partner may only see/touch webhooks IT registered.
+  // Without this, any valid store key could list, read, retarget, or delete
+  // every OTHER partner's webhooks (redirect a rival's order feed to attacker
+  // infra, or delete it so orders silently stop). Scope every read/write to the
+  // caller's credential id; a non-owned id is a 404, never someone else's row.
+  const ownerScope = (req: FastifyRequest) => ({ credentialId: req.storeAuth?.id ?? ' none' });
+
   app.get(`${PREFIX}/webhooks`, authed, async (req, reply) => {
     const { skip, take, perPage } = paging(req);
+    const where = ownerScope(req);
     const [rows, total] = await Promise.all([
-      db.storeWebhook.findMany({ skip, take, orderBy: { createdAt: 'desc' } }),
-      db.storeWebhook.count(),
+      db.storeWebhook.findMany({ where, skip, take, orderBy: { createdAt: 'desc' } }),
+      db.storeWebhook.count({ where }),
     ]);
     setPagingHeaders(reply, total, perPage);
     reply.send(rows.map(toWooWebhook));
   });
 
   app.get(`${PREFIX}/webhooks/:id`, authed, async (req, reply) => {
-    const row = await db.storeWebhook.findUnique({ where: { id: (req.params as { id: string }).id } });
+    const row = await db.storeWebhook.findFirst({ where: { id: (req.params as { id: string }).id, ...ownerScope(req) } });
     if (!row) { wooError(reply, 404, 'woocommerce_rest_webhook_invalid_id', 'Invalid webhook ID.'); return; }
     reply.send(toWooWebhook(row));
   });
@@ -2158,11 +2686,12 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     try { url = new URL(b.delivery_url ?? ''); } catch {
       wooError(reply, 400, 'woocommerce_rest_invalid_webhook_delivery_url', 'delivery_url is not a valid URL.'); return;
     }
-    if (url.protocol !== 'https:') {
-      wooError(reply, 400, 'woocommerce_rest_invalid_webhook_delivery_url', 'delivery_url must be HTTPS.'); return;
-    }
-    if (/^(localhost|127\.|10\.|192\.168\.|169\.254\.|\[?::1)/i.test(url.hostname) || /^172\.(1[6-9]|2\d|3[01])\./.test(url.hostname)) {
-      wooError(reply, 400, 'woocommerce_rest_invalid_webhook_delivery_url', 'delivery_url must be a public address.'); return;
+    // Full SSRF check: https + DNS-resolve + reject any private target. The old
+    // hostname regex was bypassable (decimal IPs, foo.internal, IPv6, or a
+    // public name pointing at a private address). Re-checked again at send time.
+    const ssrf = await assertPublicHttpsUrl(url.toString());
+    if (!ssrf.ok) {
+      wooError(reply, 400, 'woocommerce_rest_invalid_webhook_delivery_url', `delivery_url rejected: ${ssrf.reason}.`); return;
     }
 
     // Woo lets the partner supply the secret; if they do not, mint one and
@@ -2185,7 +2714,7 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     if (!requireWrite(req, reply)) return;
     const id = (req.params as { id: string }).id;
     const b = (req.body ?? {}) as { name?: string; status?: string; topic?: string };
-    const existing = await db.storeWebhook.findUnique({ where: { id } });
+    const existing = await db.storeWebhook.findFirst({ where: { id, ...ownerScope(req) } });
     if (!existing) { wooError(reply, 404, 'woocommerce_rest_webhook_invalid_id', 'Invalid webhook ID.'); return; }
     if (b.topic && !WEBHOOK_TOPICS.has(b.topic)) {
       wooError(reply, 400, 'woocommerce_rest_invalid_webhook_topic', 'Unsupported webhook topic.'); return;
@@ -2204,7 +2733,7 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
   app.delete(`${PREFIX}/webhooks/:id`, authed, async (req, reply) => {
     if (!requireWrite(req, reply)) return;
     const id = (req.params as { id: string }).id;
-    const existing = await db.storeWebhook.findUnique({ where: { id } });
+    const existing = await db.storeWebhook.findFirst({ where: { id, ...ownerScope(req) } });
     if (!existing) { wooError(reply, 404, 'woocommerce_rest_webhook_invalid_id', 'Invalid webhook ID.'); return; }
     await db.storeWebhook.delete({ where: { id } });
     reply.send({ ...toWooWebhook(existing), deleted: true });
@@ -2212,8 +2741,12 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
 
   /** Delivery history — "the partner says they never got the order" is otherwise unanswerable. */
   app.get(`${PREFIX}/webhooks/:id/deliveries`, authed, async (req, reply) => {
+    // Only the OWNER may read a webhook's delivery history (leaks order ids +
+    // vendor endpoints otherwise).
+    const hook = await db.storeWebhook.findFirst({ where: { id: (req.params as { id: string }).id, ...ownerScope(req) }, select: { id: true } });
+    if (!hook) { wooError(reply, 404, 'woocommerce_rest_webhook_invalid_id', 'Invalid webhook ID.'); return; }
     const rows = await db.webhookDelivery.findMany({
-      where: { webhookId: (req.params as { id: string }).id },
+      where: { webhookId: hook.id },
       orderBy: { createdAt: 'desc' },
       take: 50,
     });
@@ -2232,7 +2765,10 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     // A partner may send any string; only a real status becomes a filter.
     // Casting blindly would hand Prisma an invalid enum and 500 the sync.
     const wanted = asOrderStatus(q.status);
-    const where: Prisma.OrderWhereInput = wanted ? { status: wanted } : {};
+    // Fence a POD partner to its own orders (see partnerOrderScope). An admin /
+    // store-wide key is not scoped.
+    const scope = await partnerOrderScope(req);
+    const where: Prisma.OrderWhereInput = { ...(wanted ? { status: wanted } : {}), ...wooDateWhere(q), ...(scope ?? {}) };
     const commerce = await settingsService.getCommerce();
     const currency = commerce.currency ?? 'USD';
     const [rows, total] = await Promise.all([
@@ -2246,27 +2782,34 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
       db.order.count({ where }),
     ]);
     setPagingHeaders(reply, total, perPage);
-    reply.send(
-      rows.map((o) => ({
-        id: o.id,
-        number: o.number,
-        status: o.status,
-        currency: o.currency,
-        date_created: o.createdAt.toISOString(),
-        total: String(toMajor(o.total, currency)),
-        billing: { email: o.customer?.email ?? o.guestEmail ?? '' },
-        line_items: o.items.map((i) => ({
-          id: i.id,
-          name: i.variant?.product?.name ?? 'Item',
-          product_id: i.variant?.productId ?? null,
-          variation_id: i.variantId ?? null,
-          quantity: i.quantity,
-          sku: i.variant?.sku ?? '',
-          price: String(toMajor(i.priceAtTime, currency)),
-          total: String(toMajor(i.priceAtTime * i.quantity, currency)),
-        })),
-      })),
-    );
+    // FULL order objects, same shape as GET /orders/:id — real WooCommerce's
+    // list is the single object repeated, complete with billing AND shipping.
+    // The thin "sales report" shape this used to return had no ship-to at all:
+    // a partner that builds orders from its daily LIST pull (Tapstitch does)
+    // could match the products but never print a label.
+    reply.send(rows.map((o) => orderWebhookPayload(o)));
+  });
+
+  /**
+   * Single order fetch — what an `action.woocommerce_order_status_processing`
+   * partner (Tapstitch/HugePOD, Printify, Printful) calls right after the ping,
+   * using the order id from {action, arg} to pull the full order it must print.
+   * Resolves the integer wooId (what we now emit) or our cuid. Returns the full
+   * order INCLUDING the shipping address — a label can't be printed without it.
+   */
+  app.get(`${PREFIX}/orders/:id`, authed, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    const idWhere = ((w)=>w!==null?{ wooId: w }:{ id })(safeWooId(id));
+    // A partner pulling a specific order by id (after the action ping) must only
+    // reach ITS OWN order — otherwise a store key can read any order's PII by
+    // walking ids. findFirst + AND(scope) so a foreign order is a clean 404.
+    const scope = await partnerOrderScope(req);
+    const order = await db.order.findFirst({
+      where: scope ? { AND: [idWhere, scope] } : idWhere,
+      include: { customer: { select: { email: true, name: true } }, items: { include: { variant: { select: { id: true, wooId: true, sku: true, color: true, size: true, product: { select: { id: true, wooId: true, name: true, image: true } } } } } } },
+    });
+    if (!order) { wooError(reply, 404, 'woocommerce_rest_shop_order_invalid_id', 'Invalid order ID.'); return; }
+    reply.send(orderWebhookPayload(order));
   });
 
   /**
@@ -2279,7 +2822,17 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
     if (!requireWrite(req, reply)) return;
     const { id } = req.params as { id: string };
     const body = req.body as { status?: string };
-    const order = await db.order.findUnique({ where: { id } });
+    // Partners now know the order by its integer wooId (that is what we emit as
+    // `id`), so their write-back hits /orders/<wooId>. Resolve either the
+    // integer wooId or our cuid so "mark shipped" doesn't 404.
+    // SCOPED like the GET: a partner may only write-back (and read back, since
+    // the response is the full PII order object) ITS OWN order. Without this a
+    // read_write key POSTs an empty body to /orders/<any wooId> and reads every
+    // customer's billing/shipping/email by walking ids — the exact leak the GET
+    // fence closes, reopened on the PUT verb.
+    const idWhere = ((w)=>w!==null?{ wooId: w }:{ id })(safeWooId(id));
+    const scope = await partnerOrderScope(req);
+    const order = await db.order.findFirst({ where: scope ? { AND: [idWhere, scope] } : idWhere });
     if (!order) {
       wooError(reply, 404, 'woocommerce_rest_shop_order_invalid_id', 'Invalid order ID.');
       return;
@@ -2289,8 +2842,158 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
       wooError(reply, 400, 'woocommerce_rest_invalid_order_status', `Unknown order status "${body.status}".`);
       return;
     }
-    if (next) await db.order.update({ where: { id }, data: { status: next } });
-    reply.send({ id, status: next ?? order.status });
+    if (next && next !== order.status) {
+      // ALWAYS through the real transition path — never a raw column write.
+      // transition() owns the inventory effects (restock on cancel) and emits
+      // order.updated to every OTHER subscribed partner on a multi-vendor order.
+      // The old blanket catch-and-raw-write skipped both and could shove a paid
+      // 'processing' order back to 'pending' or force a graph-forbidden
+      // 'cancelled' with no restock — inventory + fulfilment silently drifting on
+      // a live store (audit). A forbidden move is now a clean Woo 409, not a
+      // silent forced column.
+      if (next === 'pending') {
+        // 'pending' is the pre-payment initial state, never a valid partner
+        // write-back target — an order cannot be un-paid back to pending.
+        wooError(reply, 409, 'woocommerce_rest_order_status_forbidden', 'An order cannot be moved back to pending.');
+        return;
+      }
+      const { orderService } = await import('../../services/order.service.js');
+      try {
+        await orderService.transition(order.id, { status: next });
+      } catch (err) {
+        wooError(reply, 409, 'woocommerce_rest_order_status_forbidden', err instanceof Error ? err.message : `Cannot move order to ${next}.`);
+        return;
+      }
+    }
+    // Real Woo answers a status write-back with the FULL updated order object;
+    // a strict partner reads fields off it (and errors on a two-field stub).
+    const updated = await db.order.findUnique({
+      where: { id: order.id },
+      include: { customer: { select: { email: true, name: true } }, items: { include: { variant: { select: { id: true, wooId: true, sku: true, color: true, size: true, product: { select: { id: true, wooId: true, name: true, image: true } } } } } } },
+    });
+    reply.send(updated ? orderWebhookPayload(updated) : { id: order.wooId ?? order.id, status: next ?? order.status });
+  });
+
+  /**
+   * Order notes — how POD partners deliver TRACKING. JetPrint, Tapstitch and
+   * kin POST /orders/{id}/notes with "Shipped via X, tracking 123…" (often as
+   * customer_note:true). Without this route the tracking number 404s into the
+   * void and the customer never learns their parcel exists. Notes land in
+   * order.meta.notes; anything that looks like tracking is also lifted into
+   * meta.tracking for the shipped email / admin to surface.
+   */
+  app.get(`${PREFIX}/orders/:id/notes`, authed, async (req, reply) => {
+    const { id } = req.params as { id: string };
+    // Scoped: notes carry customer prose + tracking; a partner reads only its own
+    // order's notes. (This route was authed-only, not even requireWrite.)
+    const idWhere = ((w)=>w!==null?{ wooId: w }:{ id })(safeWooId(id));
+    const scope = await partnerOrderScope(req);
+    const order = await db.order.findFirst({ where: scope ? { AND: [idWhere, scope] } : idWhere, select: { meta: true } });
+    if (!order) { wooError(reply, 404, 'woocommerce_rest_shop_order_invalid_id', 'Invalid order ID.'); return; }
+    const notes = ((order.meta as Record<string, unknown>)?.notes as { id: number; note: string; customer_note: boolean; date_created: string }[] | undefined) ?? [];
+    reply.send(notes.map((n) => ({ ...n, author: 'system', date_created_gmt: n.date_created })));
+  });
+  app.post(`${PREFIX}/orders/:id/notes`, authed, async (req, reply) => {
+    if (!requireWrite(req, reply)) return;
+    const { id } = req.params as { id: string };
+    const b = (req.body ?? {}) as { note?: string; customer_note?: boolean };
+    const text = String(b.note ?? '').slice(0, 2000);
+    if (!text) { wooError(reply, 400, 'woocommerce_rest_invalid_order_note', 'Note content is required.'); return; }
+    // Scoped: posting a tracking-shaped note CREATES a shipment, fires the
+    // customer "shipped" email and transitions the order — a cross-partner action
+    // on a live store if unscoped. A partner may only note its OWN order.
+    const idWhere = ((w)=>w!==null?{ wooId: w }:{ id })(safeWooId(id));
+    const scope = await partnerOrderScope(req);
+    const order = await db.order.findFirst({ where: scope ? { AND: [idWhere, scope] } : idWhere, select: { id: true, wooId: true, meta: true, status: true, shipAddress: true } });
+    if (!order) { wooError(reply, 404, 'woocommerce_rest_shop_order_invalid_id', 'Invalid order ID.'); return; }
+    const meta = (order.meta as Record<string, unknown>) ?? {};
+    const notes = (meta.notes as { id: number; note: string; customer_note: boolean; date_created: string }[] | undefined) ?? [];
+    const entry = { id: notes.length + 1, note: text, customer_note: !!b.customer_note, date_created: new Date().toISOString() };
+    // Lift a tracking number out of the note so it is queryable, not prose.
+    // A tracking number always contains DIGITS. The old pattern matched the
+    // first 8-30 alnum chars after the word "tracking", so "tracking
+    // unavailable" or "tracking: confirmed" was stored as a bogus tracking
+    // number and fired a shipped email with junk. Require ≥6 digits in the
+    // token (real carrier numbers are digit-heavy), plus the known carrier forms.
+    const keyed = /(?:tracking|track(?:ing)?\s*(?:no|number|#)?)[:\s#]*([A-Z0-9-]{8,30})/i.exec(text);
+    const keyedNum = keyed && (keyed[1]!.replace(/\D/g, '').length >= 6) ? keyed : null;
+    const tracked = keyedNum ?? /\b([A-Z]{2}\d{9}[A-Z]{2}|1Z[0-9A-Z]{16}|9\d{15,21})\b/.exec(text);
+    const urlMatch = /(https?:\/\/\S+)/.exec(text);
+    // Atomic append: two partners POSTing notes on the same order concurrently
+    // would each read-modify-write order.meta and the second clobbers the first.
+    // The default READ COMMITTED transaction did NOT prevent this — both readers
+    // saw the pre-update array and the later write won (audit M1). Run the
+    // read-modify-write at SERIALIZABLE and retry on a serialization conflict
+    // (Prisma P2034), so concurrent appends truly serialize.
+    let persisted = entry; // the note actually stored (correct id under concurrency)
+    for (let attempt = 0; ; attempt++) {
+      try {
+        await db.$transaction(async (tx) => {
+          const fresh = await tx.order.findUnique({ where: { id: order.id }, select: { meta: true } });
+          const fm = (fresh?.meta as Record<string, unknown>) ?? {};
+          const fnotes = (fm.notes as typeof notes | undefined) ?? [];
+          const fentry = { ...entry, id: fnotes.length + 1 };
+          persisted = fentry;
+          const nextMeta = {
+            ...fm,
+            notes: [...fnotes, fentry],
+            ...(tracked || urlMatch ? { tracking: { ...(fm.tracking as Record<string, unknown> ?? {}), ...(tracked ? { number: tracked[1] } : {}), ...(urlMatch ? { url: urlMatch[1] } : {}), note: text, at: fentry.date_created } } : {}),
+          };
+          await tx.order.update({ where: { id: order.id }, data: { meta: nextMeta as Prisma.InputJsonValue } });
+        }, { isolationLevel: 'Serializable' });
+        break;
+      } catch (err) {
+        // P2034 = serialization failure / deadlock; retry a few times before giving up.
+        if (attempt < 4 && err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2034') continue;
+        throw err;
+      }
+    }
+    // A tracking number IS the ship event. Materialize it: shipment row →
+    // the existing shipped email (carrier link, product images) → status flip.
+    // Only for orders actually in flight — a note replayed onto an old
+    // delivered order must not re-email the customer.
+    if (tracked && (order.status === 'processing' || order.status === 'shipped')) {
+      const num = tracked[1] as string;
+      const carrier = /^1Z/i.test(num) ? 'ups' : /^(9\d{15,21})$/.test(num) ? 'usps' : /^[A-Z]{2}\d{9}[A-Z]{2}$/.test(num) ? 'usps' : null;
+      // Reconcile, don't blindly create (audit C11). The old check-then-create was
+      // not atomic (concurrent/retried POSTs each passed !existing → two shipments
+      // + two emails) and it ignored a shipment the Counter flow may have already
+      // planned for this order (parallel row + second email for one parcel).
+      //   1. Already a shipment carrying THIS tracking → nothing to do (dedup).
+      //   2. An OPEN shipment (shippedAt null) → ATTACH the tracking + mark shipped,
+      //      claimed atomically (updateMany count===1) so only one caller emails.
+      //   3. None → create; a concurrent create loses on the unique
+      //      (orderId,trackingNumber) index (P2002) and does NOT email.
+      let notify: string | null = null; // shipment id to email, set ONLY by the winning claim/create
+      const withTracking = await db.orderShipment.findFirst({ where: { orderId: order.id, trackingNumber: num }, select: { id: true } });
+      if (!withTracking) {
+        const open = await db.orderShipment.findFirst({ where: { orderId: order.id, shippedAt: null }, orderBy: { createdAt: 'asc' }, select: { id: true } });
+        if (open) {
+          const claimed = await db.orderShipment.updateMany({ where: { id: open.id, shippedAt: null }, data: { status: 'shipped', trackingNumber: num, trackingCarrier: carrier, shippedAt: new Date() } });
+          if (claimed.count === 1) notify = open.id;
+        } else {
+          try {
+            const created = await db.orderShipment.create({
+              data: { orderId: order.id, status: 'shipped', trackingNumber: num, trackingCarrier: carrier, shippedAt: new Date(), shipAddress: (order.shipAddress ?? {}) as Prisma.InputJsonValue },
+            });
+            notify = created.id;
+          } catch (err) {
+            // Concurrent create won on the unique index — the other caller emails.
+            if (!(err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002')) throw err;
+          }
+        }
+      }
+      if (notify) {
+        void import('../../services/commerceEmail.service.js').then(({ commerceEmailService }) => commerceEmailService.sendShippedNotice(notify)).catch(() => { /* mail layer logs */ });
+        if (order.status === 'processing') {
+          const { orderService } = await import('../../services/order.service.js');
+          void orderService.transition(order.id, { status: 'shipped' }).catch(() => { /* graph guard */ });
+        }
+      }
+    }
+    // Return the note ACTUALLY persisted (correct id under concurrency), not the
+    // pre-transaction guess (audit).
+    reply.status(201).send({ ...persisted, author: 'system', date_created_gmt: persisted.date_created });
   });
 
   // ---------------------------------------------------------------------
@@ -2420,14 +3123,20 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
             wooError(reply, 400, 'printful_api_size_chart_empty', 'No size chart was provided');
             return;
           }
-          const product = await db.product.findUnique({ where: { id: productId } });
+          // Printful only ever sees the INTEGER wooId (that is what the bridge
+          // emits as product.id), so resolve wooId-or-cuid like the rest of this
+          // file — a raw cuid lookup 404'd every Printful size-chart push (audit).
+          // Owner-scoped (audit C1 class): a partner may only attach a size chart
+          // to its OWN product, not mutate another's by global id.
+          const chartScope = await partnerProductScope(req);
+          const product = await db.product.findFirst({ where: { ...byWooOrCuid(productId), ...(chartScope ?? {}) }, select: { id: true, meta: true } });
           if (!product) {
             wooError(reply, 400, 'printful_api_product_not_found', 'The product is not found');
             return;
           }
           const meta = (product.meta ?? {}) as Record<string, unknown>;
           await db.product.update({
-            where: { id: productId },
+            where: { id: product.id },
             data: { meta: { ...meta, [metaKey]: chart } as object },
           });
           reply.send({ product: { id: productId }, size_chart: chart });

@@ -110,17 +110,32 @@ export const milieuService = {
       const c = await db.customer.findUnique({ where: { id: customerId }, select: { id: true } });
       if (!c) throw new NotFoundError('Customer not found', 'customerId');
     }
+    // Was this a brand-new membership? (Decides whether the welcome fires — a
+    // re-assign of an existing member must never re-email them.)
+    const existed = await db.milieuMembership.findUnique({ where: { milieu_customer: { milieuId, customerId } }, select: { id: true } });
     const now = new Date();
     const expiresAt = defaultExpiry(milieu.memberDurationDays, now);
     // Admin assign also clears any pending flag — an operator explicitly
     // adding someone IS the approval (1.x: assigning grants the role and
     // benefits immediately; audit finding A8).
-    return db.milieuMembership.upsert({
+    const membership = await db.milieuMembership.upsert({
       where: { milieu_customer: { milieuId, customerId } },
       update: { assignedAt: now, expiresAt, source: input.source, reminderSentAt: null, pendingAt: null },
       create: { milieuId, customerId, assignedAt: now, expiresAt, source: input.source },
       include: { customer: { select: { id: true, email: true, name: true } } },
     });
+    // Auto-fire the Friends & Family welcome on a genuinely NEW membership only,
+    // for the F&F group. Fire-and-forget: the mailer logs its own failures, and
+    // sendFriendsFamilyWelcome already guards on a real email so social-login
+    // placeholders are skipped. (Owner asked for this to be automatic — 2026-09;
+    // it was previously owner-triggered to control invite timing.) Dynamic import
+    // avoids a milieu<->lifecycle import cycle.
+    if (!existed && milieu.slug === 'friends-family') {
+      void import('./lifecycle.service.js')
+        .then(({ lifecycleService }) => lifecycleService.sendFriendsFamilyWelcome(customerId!))
+        .catch(() => {});
+    }
+    return membership;
   },
 
   async revoke(milieuId: string, customerId: string) {

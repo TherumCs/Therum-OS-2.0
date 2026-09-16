@@ -93,6 +93,71 @@ export function shippable(order: RoutableOrder): string | null {
   return missing.length ? `missing ${missing.join(', ')}` : null;
 }
 
+// ── Timeout recovery (audit C3) ──────────────────────────────────────────────
+// A create POST that TIMES OUT after the vendor already created the order is the
+// double-production hole: the throw records ok:false with no reference, and the
+// hourly retry re-creates a SECOND billable/production order. These look the
+// order up by our external_id (order.number) so a timed-out create can recover
+// the real id and PRODUCE the existing order instead of re-creating it. Best-
+// effort: a null return means "not found / lookup failed", and only then is a
+// re-create safe.
+// Recovery is a THREE-valued question, and conflating two of the answers was the
+// live double-production hole (audit C3): 'found' (produce the existing order),
+// 'absent' (confirmed no vendor order — a re-create is safe), and 'unknown' (the
+// lookup itself failed / could not be completed — a re-create is NOT safe,
+// because the order may exist and we simply couldn't see it). The old code
+// returned null for BOTH 'absent' and 'unknown', so a transient Printify API
+// error during recovery was read as "not there, go ahead and create" and printed
+// a second billable order. Callers must create only on 'absent'.
+type RecoverResult = { status: 'found'; id: string } | { status: 'absent' } | { status: 'unknown' };
+
+async function printifyRecover(orderNumber: string): Promise<RecoverResult> {
+  const credential = await connectionService.credentialFor('printify');
+  if (!credential) return { status: 'unknown' }; // can't verify ⇒ must not assume absent
+  const [token, shopId] = credential.split('|');
+  if (!shopId) return { status: 'unknown' };
+  try {
+    for (let page = 1; page <= 5; page++) {
+      const r = await fetch(`https://api.printify.com/v1/shops/${shopId}/orders.json?limit=100&page=${page}`, { headers: { authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(15_000) });
+      if (!r.ok) return { status: 'unknown' }; // lookup FAILED — not the same as "not found"
+      const j = (await r.json()) as { data?: { id?: string; external_id?: string | null; metadata?: { order_number?: string } }[] };
+      const rows = j.data ?? [];
+      const hit = rows.find((o) => (o.metadata?.order_number ?? o.external_id) === orderNumber);
+      if (hit?.id) return { status: 'found', id: String(hit.id) };
+      if (rows.length < 100) return { status: 'absent' }; // reached the end of the list without a hit
+    }
+    // Scanned the 500 most recent and never reached the end — the order COULD be
+    // older/further down, so we genuinely don't know. Not 'absent'.
+    return { status: 'unknown' };
+  } catch { return { status: 'unknown' }; } // network/timeout — uncertain, never 'absent'
+}
+
+// THREE-valued, exactly like printifyRecover (audit C4). The old two-valued
+// version returned null for BOTH "confirmed absent" AND "lookup failed", and the
+// callers created a confirm=1 (billable, in-production) order on null — so a
+// transient Printful API error during recovery printed a SECOND paid order. Now:
+// 'found' (confirm/use it), 'absent' (safe to create), 'unknown' (defer, never
+// create). Paginates past the first 100 so an older order is not misread as absent.
+async function printfulRecover(orderNumber: string): Promise<RecoverResult> {
+  const credential = await connectionService.credentialFor('printful');
+  if (!credential) return { status: 'unknown' }; // can't verify ⇒ never assume absent
+  const [token, storeId] = credential.split('|');
+  const headers: Record<string, string> = { authorization: `Bearer ${token}` };
+  if (storeId) headers['X-PF-Store-Id'] = storeId;
+  try {
+    for (let offset = 0; offset < 500; offset += 100) {
+      const r = await fetch(`https://api.printful.com/orders?limit=100&offset=${offset}`, { headers, signal: AbortSignal.timeout(15_000) });
+      if (!r.ok) return { status: 'unknown' }; // lookup FAILED — not the same as "not found"
+      const j = (await r.json()) as { result?: { id?: number; external_id?: string | null }[] };
+      const rows = j.result ?? [];
+      const hit = rows.find((o) => o.external_id === orderNumber);
+      if (hit?.id) return { status: 'found', id: String(hit.id) };
+      if (rows.length < 100) return { status: 'absent' }; // reached the end of the list
+    }
+    return { status: 'unknown' }; // scanned the 500 most recent, never reached the end
+  } catch { return { status: 'unknown' }; }
+}
+
 async function pushPrintful(order: RoutableOrder, items: RoutableOrder['items'], opts?: { confirm?: boolean }): Promise<RouteResult> {
   const credential = await connectionService.credentialFor('printful');
   if (!credential) return { provider: 'printful', lines: items.length, ok: false, error: 'printful is not connected' };
@@ -111,21 +176,39 @@ async function pushPrintful(order: RoutableOrder, items: RoutableOrder['items'],
   // confirm=1 submits the order straight to production. Set ONLY for orders
   // that are already paid (via the confirm step below). The checkout-time draft
   // leaves it off, so an unpaid or test cart is never printed.
-  const res = await fetch(`https://api.printful.com/orders${opts?.confirm ? '?confirm=1' : ''}`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      // The store's own order number, so a human can match the two systems.
-      external_id: order.number,
-      recipient: recipient(order),
-      items: items.map((i) => ({
-        sync_variant_id: Number(i.variant!.sourceId),
-        quantity: i.quantity,
-        retail_price: String(toMajor(i.priceAtTime, order.currency)),
-      })),
-    }),
-    signal: AbortSignal.timeout(30_000),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`https://api.printful.com/orders${opts?.confirm ? '?confirm=1' : ''}`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        // The store's own order number, so a human can match the two systems.
+        external_id: order.number,
+        recipient: recipient(order),
+        items: items.map((i) => ({
+          sync_variant_id: Number(i.variant!.sourceId),
+          quantity: i.quantity,
+          retail_price: String(toMajor(i.priceAtTime, order.currency)),
+        })),
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (err) {
+    // Create THREW (timeout/network). On a CONFIRM (paid, confirm=1) the order
+    // may already be in production on Printful's side — re-creating it on retry
+    // is real-money double production (audit C3). Recover by external_id; if the
+    // order exists, return its id ok:true so the retry never re-creates. A draft
+    // (confirm off) costs nothing, so a re-draft on retry is harmless.
+    if (opts?.confirm) {
+      const recovered = await printfulRecover(order.number);
+      if (recovered.status === 'found') return { provider: 'printful', lines: items.length, ok: true, reference: recovered.id };
+      // 'absent' → the create genuinely didn't land (safe). 'unknown' → uncertain.
+      // Either way ok:false with NO reference so the retry re-checks and never
+      // blind-re-POSTs confirm=1 (double production).
+      return { provider: 'printful', lines: items.length, ok: false, error: `create threw${recovered.status === 'unknown' ? ' (recovery uncertain)' : ''}: ${(err as Error).message.slice(0, 130)}` };
+    }
+    return { provider: 'printful', lines: items.length, ok: false, error: `create threw: ${(err as Error).message.slice(0, 150)}` };
+  }
   const json = (await res.json().catch(() => ({}))) as { result?: { id?: number }; error?: { message?: string } };
   if (!res.ok) {
     return { provider: 'printful', lines: items.length, ok: false, error: json.error?.message ?? `HTTP ${res.status}` };
@@ -144,7 +227,9 @@ async function pushPrintify(order: RoutableOrder, items: RoutableOrder['items'])
   if (!shopId) return { provider: 'printify', lines: items.length, ok: false, error: 'printify shop id missing from the stored credential' };
 
   const r = recipient(order);
-  const res = await fetch(`https://api.printify.com/v1/shops/${shopId}/orders.json`, {
+  let res: Response;
+  try {
+    res = await fetch(`https://api.printify.com/v1/shops/${shopId}/orders.json`, {
     method: 'POST',
     headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -174,12 +259,64 @@ async function pushPrintify(order: RoutableOrder, items: RoutableOrder['items'])
       },
     }),
     signal: AbortSignal.timeout(30_000),
-  });
+    });
+  } catch (err) {
+    // Create THREW (timeout/network) — Printify may already have created the
+    // order. Re-creating on the hourly retry is real-money double production
+    // (audit C3). Recover by external_id; if found, PRODUCE the existing order
+    // and return its reference so the retry never re-creates. Only a genuine
+    // "not found" makes a re-create safe.
+    const recovered = await printifyRecover(order.number);
+    if (recovered.status === 'found') return printifyProduce(recovered.id, items.length);
+    // 'absent' → the create genuinely didn't land (safe). 'unknown' → we can't
+    // tell; either way return ok:false with NO reference so the retry re-checks,
+    // and never blind-re-creates on this path.
+    return { provider: 'printify', lines: items.length, ok: false, error: `create threw${recovered.status === 'unknown' ? ' (recovery uncertain)' : ''}: ${(err as Error).message.slice(0, 130)}` };
+  }
   const json = (await res.json().catch(() => ({}))) as { id?: string; errors?: unknown };
   if (!res.ok) {
     return { provider: 'printify', lines: items.length, ok: false, error: `HTTP ${res.status}` };
   }
-  return { provider: 'printify', lines: items.length, ok: true, reference: String(json.id ?? '') };
+  const printifyOrderId = String(json.id ?? '');
+  // CREATE alone leaves the order on-hold in Printify forever — it must be sent
+  // to PRODUCTION or nothing prints (and no code did this: there was no
+  // confirm/produce step anywhere). Only ever reached from the PAID edge now, so
+  // producing here is correct (never on an unpaid cart). A produce failure is
+  // non-fatal: the order exists in Printify and the worker retry re-produces.
+  if (printifyOrderId) {
+    try {
+      const prod = await fetch(`https://api.printify.com/v1/shops/${shopId}/orders/${printifyOrderId}/send_to_production.json`, {
+        method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, signal: AbortSignal.timeout(30_000),
+      });
+      if (!prod.ok) return { provider: 'printify', lines: items.length, ok: false, error: `created but send_to_production HTTP ${prod.status}`, reference: printifyOrderId };
+    } catch (err) {
+      return { provider: 'printify', lines: items.length, ok: false, error: `created but produce failed: ${(err as Error).message.slice(0, 120)}`, reference: printifyOrderId };
+    }
+  }
+  return { provider: 'printify', lines: items.length, ok: true, reference: printifyOrderId };
+}
+
+/**
+ * Send an ALREADY-CREATED Printify order to production. Used on retry when the
+ * create succeeded but send_to_production failed the first time — re-creating
+ * would double-produce (real money). Idempotent: producing an already-in-
+ * production order is a no-op on Printify's side.
+ */
+async function printifyProduce(reference: string, lines: number): Promise<RouteResult> {
+  const credential = await connectionService.credentialFor('printify');
+  if (!credential) return { provider: 'printify', lines, ok: false, error: 'printify is not connected', reference };
+  const [token, shopId] = credential.split('|');
+  if (!shopId) return { provider: 'printify', lines, ok: false, error: 'printify shop id missing', reference };
+  try {
+    const prod = await fetch(`https://api.printify.com/v1/shops/${shopId}/orders/${reference}/send_to_production.json`, {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, signal: AbortSignal.timeout(30_000),
+    });
+    if (!prod.ok && prod.status !== 400) return { provider: 'printify', lines, ok: false, error: `send_to_production HTTP ${prod.status}`, reference };
+    // 400 here is typically "already in production" — treat as produced.
+    return { provider: 'printify', lines, ok: true, reference };
+  } catch (err) {
+    return { provider: 'printify', lines, ok: false, error: `produce retry failed: ${(err as Error).message.slice(0, 120)}`, reference };
+  }
 }
 
 /**
@@ -244,6 +381,11 @@ async function pushContrado(order: RoutableOrder, items: RoutableOrder['items'])
   return { provider: 'contrado', lines: items.length, ok: true, reference: String(json.orderId ?? json.id ?? '') };
 }
 
+// Providers that create a REAL (billable, non-draft) order on push, so they are
+// deferred from checkout to the PAID edge (submitPaidOrder). Printful is NOT
+// here: it drafts at checkout and confirms at payment.
+const DEFERRED_PROVIDERS = new Set(['printify', 'contrado']);
+
 const PUSHERS: Record<string, (o: RoutableOrder, i: RoutableOrder['items']) => Promise<RouteResult>> = {
   printful: pushPrintful,
   printify: pushPrintify,
@@ -271,6 +413,16 @@ export async function routeOrder(order: RoutableOrder): Promise<RouteResult[]> {
 
   const results: RouteResult[] = [];
   for (const [provider, items] of groups) {
+    // DEFERRED providers submit a REAL, billable order immediately (no draft
+    // stage), so they must NOT be pushed at checkout on a still-unpaid order —
+    // that either bills you for abandoned carts or (with auto-approve off)
+    // strands paid orders on-hold. They are submitted at the PAID edge by
+    // submitPaidOrder(). Recorded as deferred so the audit knows they're pending
+    // payment, not missing.
+    if (DEFERRED_PROVIDERS.has(provider)) {
+      results.push({ provider, lines: items.length, ok: true, reference: 'deferred-to-payment' });
+      continue;
+    }
     const push = PUSHERS[provider];
     if (!push) {
       // A pull partner (Woo bridge) or one with no integration yet. Its lines
@@ -335,25 +487,58 @@ export async function confirmPrintfulOrder(order: RoutableOrder): Promise<RouteR
 
   let result: RouteResult;
   if (draft?.reference) {
-    const res = await fetch(`https://api.printful.com/orders/${encodeURIComponent(draft.reference)}/confirm`, {
-      method: 'POST',
-      headers,
-      signal: AbortSignal.timeout(30_000),
-    });
-    if (res.ok) {
-      result = { provider: 'printful', lines: items.length, ok: true, reference: draft.reference };
-    } else if (res.status === 404) {
-      // The draft is gone (deleted in Printful, or never really made) — create
-      // it already confirmed. Any OTHER error (e.g. already confirmed) is left
-      // as-is: re-creating would double-print.
-      result = await pushPrintful(order, items, { confirm: true });
-    } else {
-      const json = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
-      result = { provider: 'printful', lines: items.length, ok: false, error: json.error?.message ?? `confirm HTTP ${res.status}` };
+    try {
+      const res = await fetch(`https://api.printful.com/orders/${encodeURIComponent(draft.reference)}/confirm`, {
+        method: 'POST',
+        headers,
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (res.ok) {
+        result = { provider: 'printful', lines: items.length, ok: true, reference: draft.reference };
+      } else if (res.status === 404) {
+        // The draft id is gone (deleted in Printful, or never really made). Before
+        // re-creating confirm=1, RECOVER by external_id — the ORDER may already
+        // exist even though this draft id 404s (a prior create whose response was
+        // lost), and a blind re-create double-produces (audit C4).
+        const rec = await printfulRecover(order.number);
+        if (rec.status === 'found') result = { provider: 'printful', lines: items.length, ok: true, reference: rec.id };
+        else if (rec.status === 'unknown') result = { provider: 'printful', lines: items.length, ok: false, error: 'printful recovery uncertain — deferring re-create to avoid double production' };
+        else result = await pushPrintful(order, items, { confirm: true }); // 'absent' → safe to create
+      } else {
+        // A non-404 error is usually "already confirmed" — a re-confirm after a
+        // confirm that actually succeeded (its response was lost to a timeout).
+        // Recording ok:false here makes retryStuckPushes re-confirm every hour
+        // forever and the audit show a printing order as stuck (audit). Check the
+        // order's REAL status: if it is no longer a draft it is confirmed/in
+        // production, so record ok:true and let the retry stop.
+        const check = await fetch(`https://api.printful.com/orders/${encodeURIComponent(draft.reference)}`, { headers, signal: AbortSignal.timeout(15_000) }).catch(() => null);
+        const cj = check && check.ok ? ((await check.json().catch(() => ({}))) as { result?: { status?: string } }) : null;
+        const st = cj?.result?.status;
+        if (st && st !== 'draft') {
+          result = { provider: 'printful', lines: items.length, ok: true, reference: draft.reference };
+        } else {
+          const json = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
+          result = { provider: 'printful', lines: items.length, ok: false, error: json.error?.message ?? `confirm HTTP ${res.status}` };
+        }
+      }
+    } catch (err) {
+      // A TIMEOUT/network throw here used to bubble out of this fire-and-forget
+      // call and record NO route — so retryStuckPushes (which looks at the
+      // latest route) still saw the ok:true DRAFT row and never re-drove it: the
+      // paid order sat as an unconfirmed draft forever. Record an ok:false
+      // confirm row (keeping the draft reference) so the retry re-confirms it.
+      result = { provider: 'printful', lines: items.length, ok: false, error: `confirm threw: ${(err as Error).message.slice(0, 150)}`, reference: draft.reference };
     }
   } else {
-    // No draft was recorded — create it already confirmed.
-    result = await pushPrintful(order, items, { confirm: true });
+    // No draft was recorded — the normal PayPal-express case (address arrives
+    // post-payment, so no checkout draft). The order may ALREADY exist at Printful
+    // from a prior confirm=1 create whose response was lost, or a paid retry.
+    // RECOVER by external_id FIRST; a blind confirm=1 create here re-produces a
+    // billable order, and the hourly retry would do it again (audit C4).
+    const rec = await printfulRecover(order.number);
+    if (rec.status === 'found') result = { provider: 'printful', lines: items.length, ok: true, reference: rec.id };
+    else if (rec.status === 'unknown') result = { provider: 'printful', lines: items.length, ok: false, error: 'printful recovery uncertain — deferring confirm to avoid double production' };
+    else result = await pushPrintful(order, items, { confirm: true }); // 'absent' → safe to create
   }
 
   // Leave a trail so the admin can see the order was confirmed, not just drafted.
@@ -371,4 +556,88 @@ export async function confirmPrintfulOrder(order: RoutableOrder): Promise<RouteR
     .catch(() => { /* history is best-effort, never fatal */ });
 
   return result;
+}
+
+/**
+ * Submit a PAID order to every push vendor — the single paid-edge entry point.
+ *
+ * Printful: confirm its draft (confirmPrintfulOrder). Printify + Contrado:
+ * create-and-produce NOW (deferred from checkout so an unpaid cart is never
+ * billed and a paid order is never left on-hold), with the address that PayPal
+ * express only supplies after payment. DUP-SAFE: a provider that already has a
+ * real vendor order id (an ok route whose reference is a genuine id, not
+ * 'deferred-to-payment') is skipped, so the hourly retry never double-orders.
+ * Never throws — a factory hiccup must not unwind a captured payment.
+ */
+export async function submitPaidOrder(order: RoutableOrder): Promise<RouteResult[]> {
+  const groups = linesByProvider(order);
+  if (!groups.size) return [];
+  const results: RouteResult[] = [];
+
+  // Printful is idempotent via its own draft-reference confirm.
+  if (groups.has('printful')) {
+    const pf = await confirmPrintfulOrder(order).catch((err) => ({ provider: 'printful', lines: groups.get('printful')!.length, ok: false, error: (err as Error).message.slice(0, 200) } as RouteResult));
+    if (pf) results.push(pf);
+  }
+
+  for (const provider of ['printify', 'contrado'] as const) {
+    const items = groups.get(provider);
+    if (!items?.length) continue;
+    // Dedup on ANY route that already carries a real vendor id — ok true OR
+    // false. A create that succeeded but whose send_to_production failed records
+    // ok:false WITH the reference; re-running create would DOUBLE-PRODUCE (real
+    // money). So: a genuine vendor id already exists ⇒ never create again.
+    const prior = await db.fulfillmentRoute.findFirst({
+      where: { orderId: order.id, provider, reference: { not: null, notIn: ['deferred-to-payment', ''] } },
+      orderBy: { createdAt: 'desc' },
+      select: { reference: true, ok: true },
+    });
+    if (prior?.ok) { results.push({ provider, lines: items.length, ok: true, reference: prior.reference! }); continue; }
+    if (prior?.reference) {
+      // Created before, produce failed — RE-PRODUCE the existing order, never
+      // re-create. (Contrado has no separate produce step; its forceInsert:false
+      // create is vendor-side idempotent, so re-calling push is safe for it.)
+      if (provider === 'printify') { results.push(await printifyProduce(prior.reference, items.length)); continue; }
+    }
+    const blocked = shippable(order);
+    if (blocked) { results.push({ provider, lines: items.length, ok: false, error: `not shippable: ${blocked}` }); continue; }
+    // PRE-CREATE backend dedup (audit C3). No local reference does NOT guarantee
+    // the vendor has no order: a checkout-time create whose response was lost to
+    // a timeout leaves no reference, and pushPrintify's in-catch recovery can
+    // miss (order past page 5, or the recovery GET itself timed out). Query the
+    // vendor by external_id one more time here before creating — if it exists,
+    // PRODUCE it instead of creating a second (double production, real money).
+    if (provider === 'printify') {
+      const existing = await printifyRecover(order.number);
+      if (existing.status === 'found') { results.push(await printifyProduce(existing.id, items.length)); continue; }
+      if (existing.status === 'unknown') {
+        // Recovery could not confirm whether a prior create landed. Creating now
+        // risks a SECOND billable production (audit C3). Defer: record ok:false so
+        // retryStuckPushes re-checks next cycle (when the vendor API recovers, the
+        // recover call returns 'found' and we produce, or 'absent' and we create).
+        results.push({ provider, lines: items.length, ok: false, error: 'printify recovery uncertain — deferring create to avoid double production' });
+        continue;
+      }
+      // 'absent' → confirmed no vendor order exists → the create below is safe.
+    }
+    const push = PUSHERS[provider];
+    try { results.push(await push!(order, items)); }
+    catch (err) { results.push({ provider, lines: items.length, ok: false, error: (err as Error).message.slice(0, 200) }); }
+  }
+
+  // Record the paid-edge attempts. Printful records its OWN route on a SUCCESSFUL
+  // confirm (confirmPrintfulOrder), so we skip its ok rows to avoid a duplicate.
+  // But if its confirm THREW (token/key drift is a known live condition), no route
+  // is written at all — and dropping the ok:false printful result here left the
+  // paid order with only its ok:true checkout draft, which retryStuckPushes skips
+  // forever: money captured, nothing printed, every dashboard green (audit R6
+  // CRITICAL). So record the FAILED printful result too, giving the hourly retry a
+  // stuck row to re-drive.
+  const toRecord = results.filter((r) => r.provider !== 'printful' || !r.ok);
+  if (toRecord.length) {
+    await db.fulfillmentRoute.createMany({
+      data: toRecord.map((r) => ({ orderId: order.id, provider: r.provider, lines: r.lines, ok: r.ok, reference: r.reference ?? null, error: r.error ? `paid: ${r.error}` : null })),
+    }).catch(() => { /* best-effort */ });
+  }
+  return results;
 }

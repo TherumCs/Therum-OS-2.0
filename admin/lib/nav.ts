@@ -63,6 +63,28 @@ export function buildNav(commerceActive: boolean, portfolioActive: boolean, stud
         // A mini-Nexus scoped to the store: who takes the money, who ships,
         // where products sync from. The full vault stays under Studio.
         { href: '/connections', label: 'Connections', icon: 'db' },
+        // The catalog, formatted for Meta/Instagram + Google — Counter's own
+        // built-in product feed (a CTX-Feed equivalent), managed from here.
+        { href: '/feeds', label: 'Feeds', icon: 'webhook' },
+      ],
+    });
+  }
+
+  if (commerceActive) {
+    // Flow — the store's email + SMS engine (subscribers, campaigns,
+    // automations, signup forms), named like Counter and Nexus: one word for
+    // the thing it is. Its own section because it is a product, not a
+    // Counter sub-page — and because everything under it has a real backend.
+    sections.push({
+      id: 'flow',
+      label: 'Flow',
+      items: [
+        { href: '/marketing?tab=subscribers', label: 'Subscribers', icon: 'users' },
+        { href: '/marketing?tab=campaigns', label: 'Campaigns', icon: 'bell' },
+        { href: '/marketing?tab=automations', label: 'Automations', icon: 'clock' },
+        { href: '/marketing?tab=forms', label: 'Forms', icon: 'page' },
+        { href: '/marketing?tab=calendar', label: 'Calendar', icon: 'import' },
+        { href: '/marketing?tab=settings', label: 'Settings', icon: 'settings' },
       ],
     });
   }

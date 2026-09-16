@@ -13,11 +13,11 @@ import { buildNav } from './site.js';
 import { resolveCategoryPath, resolveCategoryFilter, categoryAndDescendantIds, categoryFacets } from '../../counter/categoryTree.js';
 import { settingsService } from '../../services/settings.service.js';
 import { productGrid, PRODUCT_GRID_FALLBACK_CSS, CARD_EVOLVE_RUNTIME, CARD_REVEAL_RUNTIME, colourToHex, sortSizes, type CardPreset } from '../../site/productGrid.js';
-import { resolveCustomer } from '../../counter/customerSession.js';
+import { resolveCustomer, viewerForRequest } from '../../counter/customerSession.js';
 import { milieuService } from '../../services/milieu.service.js';
 import { clusterService } from '../../services/cluster.service.js';
 import { categoryPageFor } from '../../site/categoryPages.js';
-import { weaveDepartment, renderCollection, CATEGORY_TPL_CSS } from '../../site/categoryTemplates.js';
+import { weaveDepartment, renderCollection, renderCallouts, renderSections, renderFeaturedRail, CALLOUT_RUNTIME, FEATURED_RUNTIME, CATEGORY_TPL_CSS } from '../../site/categoryTemplates.js';
 import { logger } from '../../lib/logger.js';
 
 // The shop fetches the WHOLE matching set (up to this cap) rather than one
@@ -52,12 +52,28 @@ function categoryPills(cats: CatWithParent[]): { name: string; slug: string }[] 
 // Only these presets render a rating, so only they pay for the query.
 const PRESET_NEEDS_RATING = new Set<CardPreset>(['sneaker', 'data']);
 
+// A pre-order product (meta.preorder) advertises when it goes on sale. Format
+// its meta.preorderShipAfter date once, here, for the card pill (short "Oct 10")
+// and the PDP pill (long "October 10th"). Returns null on a missing/invalid date
+// so the caller falls back to a plain "Pre-order".
+function fmtPreorder(dateStr: string): { short: string; long: string } | null {
+  const d = new Date(dateStr);
+  if (isNaN(d.getTime())) return null;
+  const day = d.getUTCDate();
+  const ord = day % 10 === 1 && day !== 11 ? 'st' : day % 10 === 2 && day !== 12 ? 'nd' : day % 10 === 3 && day !== 13 ? 'rd' : 'th';
+  return {
+    short: `${d.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' })} ${day}`,
+    long: `${d.toLocaleString('en-US', { month: 'long', timeZone: 'UTC' })} ${day}${ord}`,
+  };
+}
+
 // `product.meta` is free-form JSON — an import, a bridge or an API caller can
 // write anything into it. A per-product card override is read back through
 // this rather than cast, so a junk value renders the store default instead of
 // a class name straight out of someone's payload.
 const CARD_MEDIA_VALUES = ['still', 'fade', 'gallery', 'motion'] as const;
 const CARD_PRESET_VALUES = ['editorial', 'retail', 'detailed', 'sneaker', 'data'] as const;
+const CARD_FIT_VALUES = ['cover', 'contain'] as const;
 function pickEnum<T extends string>(value: unknown, allowed: readonly T[]): T | null {
   return typeof value === 'string' && (allowed as readonly string[]).includes(value) ? (value as T) : null;
 }
@@ -69,7 +85,7 @@ import { wishlistMarkup } from '../../site/wishlist.js';
 import { orderTrackingMarkup, ORDER_TRACKING_CSS, ORDER_TRACKING_RUNTIME } from '../../site/orderTracking.js';
 import { availableOf, stockLabel } from '../../counter/availability.js';
 import { ROLES, roleBySlug, rolePage, CAREERS_CSS, CAREERS_RUNTIME, CAREERS_INBOX, CV_MAX_BYTES, CV_TYPES } from '../../site/careers.js';
-import { viewerFor, visibleWhere, canOpenDirectly, GATE_INCLUDE } from '../../counter/visibility.js';
+import { visibleWhere, canOpenDirectly, GATE_INCLUDE } from '../../counter/visibility.js';
 
 // Counter C4 — the five public storefront surfaces, server-rendered from the
 // same Fastify process as the API (same origin, so the client runtime's
@@ -259,7 +275,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
   // rather than dropping to the API's JSON not-found.
   const notFoundStore = async (reply: FastifyReply, heading: string): Promise<void> => {
     reply.status(404);
-    html(reply, await page(`${heading} — Therum Store`,
+    html(reply, await page(`${heading} — The Sidemoney Company`,
       `<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">${esc(heading)}</h1>` +
       `<p class="page-sub">It may have been renamed or removed.</p>` +
       `<p style="margin-top:12px"><a class="btn ghost sm" href="/shop">Back to the shop</a></p></div>`, '', PRIVATE_PAGE));
@@ -326,7 +342,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
      * of member pricing: switching member pricing off must not hand the
      * restricted catalogue to everyone.
      */
-    const gateViewer = await viewerFor((await resolveCustomer(req))?.id ?? null);
+    const gateViewer = await viewerForRequest(req);
     const memberPct = shopper && (await capabilityService.isEnabled('memberships'))
       ? (await milieuService.discountFor(shopper.id))?.pct ?? 0
       : 0;
@@ -365,8 +381,12 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
      * visitor, which is most traffic — shares the single 'public' key, so the
      * common case still gets one cache entry.
      */
-    const audienceKey = gateViewer.milieuIds.length || gateViewer.customerId
-      ? `${gateViewer.customerId ?? ''}|${[...gateViewer.milieuIds].sort().join(',')}`
+    // isStaff is in the key too: an operator sees the `members` tier a signed-out
+    // visitor does not, so sharing the 'public' entry would serve one of them the
+    // other's catalogue. All operators see the same extra set, so they share one
+    // 'staff' key rather than fragmenting the cache per admin.
+    const audienceKey = gateViewer.milieuIds.length || gateViewer.customerId || gateViewer.isStaff
+      ? `${gateViewer.customerId ?? ''}|${gateViewer.isStaff ? 'staff' : ''}|${[...gateViewer.milieuIds].sort().join(',')}`
       : 'public';
     const catalogKey = JSON.stringify({
       q, tag, color, size, brand, sort,
@@ -592,6 +612,9 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
           // sends the shopper to the PDP rather than guessing for them.
           hasOptions: p.variants.length > 1,
           quickVariantId: p.variants.length === 1 ? (p.variants[0]?.id ?? null) : null,
+          // External / affiliate product (e.g. a Foot Locker exclusive): the card
+          // links OUT to meta.externalUrl and offers no on-site purchase.
+          externalUrl: (p.meta && typeof p.meta === 'object' ? ((p.meta as Record<string, unknown>).externalUrl ?? null) : null) as string | null,
           // availableOf, NOT raw inventory. A print-on-demand line carries
           // inventory 0 and stockStatus 'in_stock', so counting the column
           // made every POD product read as SOLD OUT on its card — which also
@@ -625,11 +648,19 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
           // API caller can put anything into.
           mediaOverride: pickEnum((p.meta as Record<string, unknown> | null)?.cardMedia, CARD_MEDIA_VALUES),
           presetOverride: pickEnum((p.meta as Record<string, unknown> | null)?.cardPreset, CARD_PRESET_VALUES),
+          // Per-product image fit (meta.cardFit): a jersey shot that must not be
+          // cropped shows 'contain' while the grid default stays 'cover'.
+          fitOverride: pickEnum((p.meta as Record<string, unknown> | null)?.cardFit, CARD_FIT_VALUES),
           // No column for a was-price; a store that has never set one simply
           // never shows a discount, rather than a faked strike-through.
           compareAt: typeof (p.meta as { compareAtPrice?: unknown } | null)?.compareAtPrice === 'number'
             ? (p.meta as { compareAtPrice: number }).compareAtPrice
             : null,
+          // Pre-order (meta.preorder): the card shows a pill with the on-sale
+          // date. Ready-made here so the card just prints it.
+          preorderLabel: (p.meta as Record<string, unknown> | null)?.preorder === true
+            ? (() => { const t = fmtPreorder(String((p.meta as Record<string, unknown>).preorderShipAfter ?? '')); return t ? `Pre-order · Ships ${t.short}` : 'Pre-order'; })()
+            : undefined,
         };
       });
     const cardCfg = {
@@ -727,7 +758,32 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
         // categories can now legitimately both be called "T-Shirts", so a flat
         // name list shows the same word twice with no way to tell them apart,
         // and a bare slug no longer identifies which one was clicked.
-        filterOn('category') ? { label: 'Category', options: cats.map((c) => opt(c.label, qs({ category: category === c.path ? '' : c.path }), category === c.path)) } : null,
+        // On a CATEGORY PAGE the Category filter is that page's own subtypes
+        // (Accessories → Pins / Wallets / Duffels / Hats / Socks …), labelled by
+        // their own name and limited to ones with live products — not the
+        // whole store tree with breadcrumbs, which is what a shopper on
+        // /c/accessories was being offered (Women's › T-Shirts, Playmoney …).
+        // Scope by the PAGE's category (the URL), not the active filter, so
+        // picking "Pins" still leaves Wallets/Hats one tap away. /shop keeps the
+        // full tree. An "All <Category>" option clears the sub-filter.
+        filterOn('category') ? await (async () => {
+          const pageCat = preset.category ?? '';
+          const pageNode = pageCat ? cats.find((c) => c.path === pageCat) ?? null : null;
+          if (!pageNode) return { label: 'Category', options: cats.map((c) => opt(c.label, qs({ category: category === c.path ? '' : c.path }), category === c.path)) };
+          const kids = cats.filter((c) => c.path.startsWith(`${pageCat}/`) && c.path.split('/').length === pageCat.split('/').length + 1);
+          const live = await db.product.findMany({ where: { status: 'active', deletedAt: null, categories: { some: { id: { in: kids.map((k) => k.id) } } } }, select: { categories: { select: { id: true } } } });
+          const count = new Map<string, number>();
+          for (const p of live) for (const c of p.categories) count.set(c.id, (count.get(c.id) ?? 0) + 1);
+          const shown = kids.filter((k) => (count.get(k.id) ?? 0) > 0);
+          const onSub = category !== '' && category !== pageCat;
+          return {
+            label: 'Category',
+            options: [
+              opt(`All ${pageNode.name}`, qs({ category: '' }), !onSub),
+              ...shown.map((k) => opt(`${k.name} (${count.get(k.id)})`, qs({ category: category === k.path ? '' : k.path }), category === k.path)),
+            ],
+          };
+        })() : null,
         filterOn('tags') ? { label: 'Tags', options: tags.map((t) => opt(t.name, qs({ tag: tag === t.slug ? '' : t.slug }), tag === t.slug)) } : null,
         filterOn('color') ? { label: 'Color', swatches: true, options: colors.length > 1 ? colors.map((c) => ({ ...opt(c, qs({ color: color.toLowerCase() === c.toLowerCase() ? '' : c }), color.toLowerCase() === c.toLowerCase()), swatch: c, swatchCodes: colorHex.get(c) ?? [] })) : [] } : null,
         // Sizes render as a chip grid — a set to scan, not a list to read.
@@ -816,8 +872,16 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
       + '@media(prefers-reduced-motion:reduce){.cat-hero{transition:none}.cat-hero__t,.cat-hero__s,.cat-hero__s2{animation:none}}'
       + '</style>';
     const catHero = catPage
-      ? `${CAT_CSS}<section class="cat-hero cat-hero--open${catPage.heroLight ? ' cat-hero--light' : ''}"${catPage.heroImage ? ` style="background-image:${catPage.heroLight ? '' : 'linear-gradient(rgba(0,0,0,0) 30%,rgba(0,0,0,.6)),'}url('${esc(catPage.heroImage)}');background-position:${catPage.heroPos ?? 'center 30%'}"` : ''}>`
-        + `${catPage.heroLogo ? `<img class="cat-hero__logo" src="${esc(catPage.heroLogo)}" alt="${esc(pageTitle)}">` : ''}<div class="cat-hero__in"><h1 class="cat-hero__t">${esc(pageTitle)}</h1>${catPage.tagline ? `<p class="cat-hero__s">${esc(catPage.tagline)}</p>` : ''}${catPage.blurb ? `<p class="cat-hero__s2">${esc(catPage.blurb)}</p>` : ''}</div></section>`
+      ? catPage.heroBare && catPage.heroImage
+        // Self-contained header art — the title and logo are already IN the image
+        // (e.g. the Sixers arena billboard). Render the image alone: no overlaid
+        // <h1>/tagline/logo that would double up the wordmark. A *subtle* top/bottom
+        // dark scrim (lightest across the mid-band where the billboard sits) deepens
+        // the night sky and masks webp compression banding without dimming the art.
+        // aria-label carries the name since the baked-in text is not machine-readable.
+        ? `${CAT_CSS}<section class="cat-hero cat-hero--open" aria-label="${esc(pageTitle)}" style="background-image:linear-gradient(180deg,rgba(0,0,0,.34),rgba(0,0,0,.10) 38%,rgba(0,0,0,.10) 66%,rgba(0,0,0,.28)),url('${esc(catPage.heroImage)}');background-position:${catPage.heroPos ?? 'center'}"></section>`
+        : `${CAT_CSS}<section class="cat-hero cat-hero--open${catPage.heroLight ? ' cat-hero--light' : ''}"${catPage.heroImage ? ` style="background-image:${catPage.heroLight ? '' : 'linear-gradient(rgba(0,0,0,0) 30%,rgba(0,0,0,.6)),'}url('${esc(catPage.heroImage)}');background-position:${catPage.heroPos ?? 'center 30%'}"` : ''}>`
+          + `${catPage.heroLogo ? `<img class="cat-hero__logo" src="${esc(catPage.heroLogo)}" alt="${esc(pageTitle)}">` : ''}<div class="cat-hero__in"><h1 class="cat-hero__t">${esc(pageTitle)}</h1>${catPage.tagline ? `<p class="cat-hero__s">${esc(catPage.tagline)}</p>` : ''}${catPage.blurb ? `<p class="cat-hero__s2">${esc(catPage.blurb)}</p>` : ''}</div></section>`
       : '';
     // Scroll runtime: measure the real header height into --navh, then toggle the
     // collapsed state past 16px of scroll. rAF-throttled, passive, reversible at
@@ -841,10 +905,20 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     const bodyMarkup = isCollection
       ? `${useTpl ? CATEGORY_TPL_CSS : ''}${quickBuyOnCards ? quickBuySheetMarkup() : ''}${products.length ? catBody : emptyState}${pager}`
       : `${toolbar}${quickBuyOnCards ? quickBuySheetMarkup() : ''}${useTpl ? CATEGORY_TPL_CSS : ''}${products.length ? catBody : emptyState}${pager}`;
-    html(reply, await page(`${pageTitle} — Therum Store`, `
+    // Landing-page callouts (jersey stories, Zappos-style): between the hero and
+    // the product grid, on a category with `callouts` configured. Empty → ''.
+    const calloutsMarkup = renderCallouts(catPage?.callouts);
+    const sectionsMarkup = renderSections(catPage?.sections);
+    // Featured rail: this category's products in a horizontal carousel, under the
+    // jersey carousel and above the full grid. Placeholder cards while empty.
+    const railMarkup = catPage?.featuredRail ? renderFeaturedRail(gridProducts, cardCfg) : '';
+    html(reply, await page(`${pageTitle} — The Sidemoney Company`, `
       ${catHero || (preset.title ? await heading(pageTitle) : '')}
-      ${bodyMarkup}
-    `, `${SHOP_TOOLBAR_RUNTIME}${quickBuyOnCards ? CHECKOUT_FLOW_RUNTIME : ''}${counter.cardEvolve && counter.cardAction !== 'none' ? CARD_EVOLVE_RUNTIME : ''}${counter.cardReveal === 'none' ? '' : CARD_REVEAL_RUNTIME}${CAT_HERO_RUNTIME}`, {
+      ${sectionsMarkup}
+      ${calloutsMarkup}
+      ${railMarkup}
+      <div id="shop-grid">${bodyMarkup}</div>
+    `, `${SHOP_TOOLBAR_RUNTIME}${quickBuyOnCards ? CHECKOUT_FLOW_RUNTIME : ''}${counter.cardEvolve && counter.cardAction !== 'none' ? CARD_EVOLVE_RUNTIME : ''}${counter.cardReveal === 'none' ? '' : CARD_REVEAL_RUNTIME}${CAT_HERO_RUNTIME}${calloutsMarkup ? CALLOUT_RUNTIME : ''}${railMarkup ? FEATURED_RUNTIME : ''}`, {
       description: preset.title
         ? `Shop ${preset.title} at ${process.env.SITE_NAME || ''}.`
         : `Shop every drop from ${process.env.SITE_NAME || ''}.`,
@@ -867,6 +941,11 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
   // instead of separate products.
   const feedHandler = async (req: FastifyRequest, reply: FastifyReply): Promise<void> => {
     const origin = originOf(req);
+    // Which channel is fetching, from the path — so a click carries its source
+    // (th_src) and a sale off Meta/Google attributes back to that channel
+    // (order.meta.source). One handler, many channels: only the tag differs.
+    const feedUrl = req.url ?? '';
+    const channel = feedUrl.includes('google') ? 'google' : feedUrl.includes('facebook') ? 'meta' : 'feed';
     const products = await db.product.findMany({
       // PUBLIC only. A private or restricted product (e.g. a bespoke made for
       // one customer) must never surface in the public Instagram/Google catalog
@@ -875,7 +954,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
       select: {
         id: true, slug: true, name: true, description: true, image: true, images: true,
         vendor: { select: { name: true } },
-        categories: { select: { slug: true, name: true } },
+        categories: { select: { slug: true, name: true, parent: { select: { name: true } } } },
         // stock fields + per-variant images so availability is REAL (not always
         // "in stock") and each variant carries its own photos.
         variants: { select: { id: true, sku: true, color: true, size: true, price: true, image: true, images: true, stockStatus: true, inventory: true, reserved: true } },
@@ -887,9 +966,20 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     const items: string[] = [];
     for (const p of products) {
       const desc = stripTags(p.description as string | null) || p.name;
-      const brand = p.vendor?.name || process.env.SITE_NAME || '';
-      const productType = p.categories.map((c) => c.name).join(' > ');
-      const pdpLink = `${origin}/product/${p.slug}`;
+      // The STORE is the brand a shopper sees on Meta — NOT the fulfilment
+      // vendor's connection label (that leaked "PodPluser connection" as brand).
+      const brand = process.env.SITE_NAME || 'The Sidemoney Company';
+      // One product_type PER category as a real parent>child path — not every
+      // category flattened into a single fake "Men's > Women's > …" hierarchy.
+      const productTypes = Array.from(new Set(
+        p.categories.map((c) => (c.parent?.name ? `${c.parent.name} > ${c.name}` : c.name)),
+      ));
+      // Apparel gender signal from the gendered categories (most items sit in
+      // BOTH Men's and Women's now, so → unisex).
+      const inMens = p.categories.some((c) => c.name === "Men's" || c.parent?.name === "Men's");
+      const inWomens = p.categories.some((c) => c.name === "Women's" || c.parent?.name === "Women's");
+      const gender = inMens && inWomens ? 'unisex' : inMens ? 'male' : inWomens ? 'female' : 'unisex';
+      const pdpLink = `${origin}/product/${p.slug}?th_src=${channel}`;
       const primary = p.image || (Array.isArray(p.images) && (p.images[0] as { url?: string } | undefined)?.url) || '';
       const toAbs = (u: string): string => (u.startsWith('http') ? u : `${origin}${u}`);
       for (const v of p.variants) {
@@ -924,7 +1014,10 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
         else parts.push('<g:identifier_exists>no</g:identifier_exists>');
         if (v.color) parts.push(`<g:color>${esc(v.color)}</g:color>`);
         if (v.size) parts.push(`<g:size>${esc(v.size)}</g:size>`);
-        if (productType) parts.push(`<g:product_type>${esc(productType)}</g:product_type>`);
+        for (const pt of productTypes) parts.push(`<g:product_type>${esc(pt)}</g:product_type>`);
+        // Google taxonomy + apparel signals help Meta place the item correctly.
+        parts.push(`<g:google_product_category>${esc('Apparel & Accessories')}</g:google_product_category>`);
+        if (v.size) { parts.push(`<g:gender>${gender}</g:gender>`); parts.push('<g:age_group>adult</g:age_group>'); }
         // No fabricated shipping line: the feed advertised a flat 10.00 USD the
         // store does not charge. Shipping is configured at the channel account
         // level (free / variable / provider rates), so it is omitted here.
@@ -946,6 +1039,9 @@ ${items.join('\n')}
   };
   app.get('/feed/facebook.xml', feedHandler);
   app.get('/feed/products.xml', feedHandler);
+  // Google Merchant Center reads the same Google-namespace RSS; the path drives
+  // the attribution tag (th_src=google). Counter's Feeds page hands out this URL.
+  app.get('/feed/google.xml', feedHandler);
 
 
   // Cross-device checkout: a QR of a same-origin storefront path, so a desktop
@@ -1016,13 +1112,22 @@ ${items.join('\n')}
     // response as a product that does not exist, because a distinct "members
     // only" page would confirm it exists to someone who should not know.
     // 'private' passes here on purpose: unlisted means the link still works.
-    if (p && !canOpenDirectly(p, await viewerFor((await resolveCustomer(req))?.id ?? null))) {
+    if (p && !canOpenDirectly(p, await viewerForRequest(req))) {
       reply.status(404);
       return html(reply, await page('Not found', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Product not found</h1><p class="page-sub"><a href="/shop" style="color:var(--ac-btn)">Back to the shop</a></p></div>', '', PRIVATE_PAGE));
     }
     if (!p || p.status !== 'active' || p.deletedAt) {
       reply.status(404);
       return html(reply, await page('Not found', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Product not found</h1><p class="page-sub"><a href="/shop" style="color:var(--ac-btn)">Back to the shop</a></p></div>', '', PRIVATE_PAGE));
+    }
+
+    // An external (affiliate) product — a Foot Locker exclusive — has no page
+    // here: every road to it goes to the retailer. The card already links out;
+    // this closes the direct-URL / "Explore" road, which used to render a full
+    // PDP with our own Add to cart on a product we do not sell.
+    const externalUrl = p.meta && typeof p.meta === 'object' && !Array.isArray(p.meta) ? (p.meta as Record<string, unknown>).externalUrl : null;
+    if (typeof externalUrl === 'string' && /^https?:\/\//.test(externalUrl)) {
+      return reply.header('Cache-Control', 'no-store').redirect(externalUrl, 302);
     }
 
     // A clustered product renders as ONE merged page: the picker below is
@@ -1168,7 +1273,7 @@ ${items.join('\n')}
       ? `<div class="gallery">
           <div class="thumb gallery-main" id="gallery-main">${gallery[0]?.type === 'video'
             ? `<video controls muted playsinline src="${esc(gallery[0].url)}"${gallery[0].poster ? ` poster="${esc(gallery[0].poster)}"` : ''}></video>`
-            : `<img src="${esc(gallery[0]?.url ?? '')}" alt="${esc(gallery[0]?.alt ?? p.name)}">`}</div>
+            : `<img src="${esc(gallery[0]?.url ?? '')}" alt="${esc(gallery[0]?.alt ?? p.name)}">`}<button type="button" class="pdp-zoom-btn" data-zoom-open aria-label="Expand image">⛶</button></div>
           ${/*
               The strip is rendered whenever the product has more than one shot
               OR any variant carries its own — a synced print-on-demand product
@@ -1216,6 +1321,8 @@ ${items.join('\n')}
     // item shows its flat price. Display only — checkout recomputes the real
     // discount, and the two agree because both read the same membership.
     const pdpNoMember = !!(p.meta && typeof p.meta === 'object' && !Array.isArray(p.meta) && (p.meta as Record<string, unknown>).noMemberDiscount === true);
+    const pdpPreorder = !!(p.meta && typeof p.meta === 'object' && !Array.isArray(p.meta) && (p.meta as Record<string, unknown>).preorder === true);
+    const pdpPreorderLong = pdpPreorder ? (fmtPreorder(String((p.meta as Record<string, unknown>).preorderShipAfter ?? ''))?.long ?? '') : '';
     const pdpShopper = counterCfg.memberPricing === 'off' || pdpNoMember ? null : await resolveCustomer(req);
     const pdpMemberPct = pdpShopper && (await capabilityService.isEnabled('memberships'))
       ? ((await milieuService.discountFor(pdpShopper.id))?.pct ?? 0)
@@ -1223,7 +1330,7 @@ ${items.join('\n')}
     const memberPriceOf = (cents: number) => (pdpMemberPct > 0 ? Math.round(cents * (1 - pdpMemberPct / 100)) : cents);
     const price = money(memberPriceOf(firstAvailable?.price ?? variants[0]?.price ?? 0));
 
-    html(reply, await page(`${p.name} — Therum Store`, `
+    html(reply, await page(`${p.name} — The Sidemoney Company`, `
       <div class="pdp-topbar">
         <a class="pdp-back" href="/shop" onclick="if(document.referrer.indexOf(location.host)>-1&&history.length>1){history.back();return false;}">‹ Back</a>
         ${/* Save + Share sit opposite the back button, up top. The wishlist
@@ -1245,6 +1352,7 @@ ${items.join('\n')}
         <div class="pdp__info">
           ${taxonomyPills ? `<div class="taxonomy-row pdp-cats">${taxonomyPills}</div>` : ''}
           <h1 class="page-title product-title">${esc(p.name)}</h1>
+          ${pdpPreorder ? `<div class="pdp-preorder" style="display:inline-block;margin:2px 0 14px;padding:8px 15px;background:var(--ac,#e83b3b);color:#fff;border-radius:999px;font:700 11px/1 'Manrope',sans-serif;letter-spacing:.12em;text-transform:uppercase">Pre-order now${pdpPreorderLong ? ` · Ships ${pdpPreorderLong}` : ''}</div>` : ''}
           <div class="price-big price" id="price">${price}</div>
           <div class="stock-note" id="stock">${firstAvailable ? esc(firstAvailable.stock) : 'Sold out'}</div>
           ${/* Three boxes: Colour and Size open filter-style panels and collapse
@@ -1259,7 +1367,7 @@ ${items.join('\n')}
             <button class="btn" id="checkout" ${firstAvailable && !hasChoice ? '' : 'disabled'}>${!firstAvailable ? 'Sold out' : 'Checkout'}</button>
           </div>`
             : `<button class="btn" id="add" ${firstAvailable && !hasChoice ? '' : 'disabled'}>${!firstAvailable ? 'Sold out' : 'Add to cart'}${pdpStyle === 'editorial' && !hasChoice ? ` · <span id="btn-price">${price}</span>` : ''}</button>`}
-          ${p.description ? `<div class="product-desc">${esc(p.description).replace(/\n/g, '<br>')}</div>` : ''}
+          ${p.description ? `<div class="product-desc">${/<[a-z][^>]*>/i.test(p.description) ? p.description : esc(p.description).replace(/\n/g, '<br>')}</div>` : ''}
         </div>
       </div>
       <section class="pdp-reviews" data-reviews data-product-id="${p.id}">
@@ -1392,10 +1500,23 @@ function bindThumbs(){
     document.querySelectorAll('.gallery-thumb').forEach(x=>x.classList.remove('sel'));
     b.classList.add('sel');
     const main=document.getElementById('gallery-main');
+    if(!main)return;
+    // Build via DOM APIs, never innerHTML: dataset values are already HTML-
+    // attribute-DECODED by the browser, so re-interpolating them into an
+    // innerHTML string re-parses them as markup — a catalog image url/alt with a
+    // quote or tag then injects (audit H4). Setting the .src PROPERTY assigns a
+    // URL, it is never parsed as HTML.
+    main.textContent='';
     if(b.dataset.type==='video'){
-      main.innerHTML='<video controls muted playsinline autoplay src="'+b.dataset.src+'"'+(b.dataset.poster?' poster="'+b.dataset.poster+'"':'')+'></video>';
+      const v=document.createElement('video');
+      v.controls=true;v.muted=true;v.playsInline=true;v.autoplay=true;
+      v.src=b.dataset.src||'';
+      if(b.dataset.poster)v.poster=b.dataset.poster;
+      main.appendChild(v);
     }else{
-      main.innerHTML='<img src="'+b.dataset.src+'" alt="">';
+      const im=document.createElement('img');
+      im.src=b.dataset.src||'';im.alt='';
+      main.appendChild(im);
     }
     matchFrames();
   }));
@@ -1403,10 +1524,60 @@ function bindThumbs(){
 bindThumbs();
 matchFrames();
 stripArrows();
+// Click-to-zoom lightbox: grow the hero in the viewport, arrows page the gallery
+// front/back, X / Esc / backdrop closes. Built once, lazily, appended to body.
+(function(){
+  var main=document.getElementById('gallery-main'); if(!main) return;
+  var lb,lbImg,lbCount,list=[],idx=0;
+  function shots(){
+    var t=[].slice.call(document.querySelectorAll('.gallery-thumb')).filter(function(b){return b.dataset.type!=='video'&&b.dataset.src;});
+    if(t.length) return t.map(function(b){return b.dataset.src;});
+    var m=main.querySelector('img'); return m?[m.getAttribute('src')]:[];
+  }
+  function build(){
+    if(lb) return;
+    lb=document.createElement('div'); lb.className='pdp-lightbox';
+    lb.innerHTML='<button class="pdp-lb-close" type="button" aria-label="Close">×</button>'
+      +'<button class="pdp-lb-arrow prev" type="button" aria-label="Previous image">‹</button>'
+      +'<img alt="">'
+      +'<button class="pdp-lb-arrow next" type="button" aria-label="Next image">›</button>'
+      +'<div class="pdp-lb-count"></div>';
+    document.body.appendChild(lb);
+    lbImg=lb.querySelector('img'); lbCount=lb.querySelector('.pdp-lb-count');
+    lb.querySelector('.pdp-lb-close').addEventListener('click',close);
+    lb.querySelector('.prev').addEventListener('click',function(e){e.stopPropagation();step(-1);});
+    lb.querySelector('.next').addEventListener('click',function(e){e.stopPropagation();step(1);});
+    lb.addEventListener('click',function(e){ if(e.target===lb) close(); });
+  }
+  function render(){
+    lbImg.src=list[idx]||''; var multi=list.length>1;
+    lb.querySelector('.prev').style.display=multi?'':'none';
+    lb.querySelector('.next').style.display=multi?'':'none';
+    lbCount.textContent=multi?(idx+1)+' / '+list.length:'';
+  }
+  function step(d){ idx=(idx+d+list.length)%list.length; render(); }
+  function open(){
+    build(); list=shots(); if(!list.length) return;
+    var cur=main.querySelector('img'); var src=cur?cur.getAttribute('src'):'';
+    idx=list.indexOf(src);
+    if(idx<0){ idx=0; for(var i=0;i<list.length;i++){ if(src&&(src.indexOf(list[i])>-1||list[i].indexOf(src)>-1)){ idx=i; break; } } }
+    render(); lb.classList.add('open'); document.documentElement.style.overflow='hidden';
+  }
+  function close(){ if(lb){ lb.classList.remove('open'); document.documentElement.style.overflow=''; } }
+  main.addEventListener('click',function(e){
+    // Leave the video's own controls alone unless the explicit zoom button is hit.
+    if(main.querySelector('video') && !e.target.closest('.pdp-zoom-btn')) return;
+    open();
+  });
+  document.addEventListener('keydown',function(e){
+    if(!lb||!lb.classList.contains('open')) return;
+    if(e.key==='Escape') close(); else if(e.key==='ArrowLeft') step(-1); else if(e.key==='ArrowRight') step(1);
+  });
+})();
 // The product-level gallery, kept so a variant's shots can be shown in front
 // of it instead of throwing the other angles away.
-const PRODUCT_SHOTS=${JSON.stringify(gallery.filter((g) => g.type === 'image').map((g) => ({ url: g.url, alt: g.alt })))};
-const VARIANTS=${JSON.stringify(variants)};
+const PRODUCT_SHOTS=${JSON.stringify(gallery.filter((g) => g.type === 'image').map((g) => ({ url: g.url, alt: g.alt }))).replace(/</g, '\\u003c')};
+const VARIANTS=${JSON.stringify(variants).replace(/</g, '\\u003c')};
 var HAS_COLOR=${colors.length > 1},HAS_SIZE=${sizes.length > 1};
 // Member percentage for this viewer (0 = full price / opted-out). Applied to
 // every displayed price; checkout recomputes the real charge.
@@ -1586,12 +1757,21 @@ function renderStrip(shots){
   // is already preloaded, so swapping the src of the live element is instant,
   // while replacing the element forces a fresh layout/decode that reads as a
   // lag between the swatch click and the photo changing.
-  if(main){var mi=main.querySelector('img');if(mi){mi.src=shots[0].url;mi.alt=shots[0].alt||'';}else{main.innerHTML='<img src="'+shots[0].url+'" alt="'+(shots[0].alt||'')+'">';}}
+  // .src/.alt are PROPERTY assignments (never HTML-parsed); the else-branch and
+  // the strip below build nodes via the DOM so a catalog url/alt with a quote or
+  // tag can't inject (audit H4).
+  if(main){var mi=main.querySelector('img');if(mi){mi.src=shots[0].url;mi.alt=shots[0].alt||'';}else{var im0=document.createElement('img');im0.src=shots[0].url;im0.alt=shots[0].alt||'';main.textContent='';main.appendChild(im0);}}
   if(!strip)return;
-  strip.innerHTML=shots.map(function(g,i){
-    return '<button type="button" class="gallery-thumb'+(i===0?' sel':'')+'" data-src="'+g.url+'" data-type="image" aria-label="'+(g.alt||'')+'">'+
-           '<img src="'+g.url+'" alt="'+(g.alt||'')+'" loading="lazy"></button>';
-  }).join('');
+  strip.textContent='';
+  shots.forEach(function(g,i){
+    var btn=document.createElement('button');
+    btn.type='button';btn.className='gallery-thumb'+(i===0?' sel':'');
+    btn.setAttribute('data-src',g.url);btn.setAttribute('data-type','image');
+    btn.setAttribute('aria-label',g.alt||'');
+    var thumb=document.createElement('img');
+    thumb.src=g.url;thumb.alt=g.alt||'';thumb.loading='lazy';
+    btn.appendChild(thumb);strip.appendChild(btn);
+  });
   bindThumbs();
   matchFrames();
   stripArrows();
@@ -1661,12 +1841,12 @@ if(_co)_co.addEventListener('click',async function(e){if(!sel)return;var b=e.cur
 
   app.get('/cart', async (_req, reply) => {
     if (!(await commerceOn())) return html(reply, closedPage());
-    html(reply, await flowPage('Cart — Therum Store', 'Cart', 'cart'));
+    html(reply, await flowPage('Cart — The Sidemoney Company', 'Cart', 'cart'));
   });
 
   app.get('/checkout', async (_req, reply) => {
     if (!(await commerceOn())) return html(reply, closedPage());
-    html(reply, await flowPage('Checkout — Therum Store', 'Checkout', 'checkout'));
+    html(reply, await flowPage('Checkout — The Sidemoney Company', 'Checkout', 'checkout'));
   });
 
   // ── The other two header icons ────────────────────────────────────────
@@ -1686,7 +1866,7 @@ if(_co)_co.addEventListener('click',async function(e){if(!sel)return;var b=e.cur
       reply,
       // No page-title heading on Account — the signed-in greeting / sign-in
       // card is the page's own header; a separate "Account" h1 was redundant.
-      await page('Account — Therum Store', `${await slotBody('account', accountMarkup(wishlistMarkup(), gApp?.clientId ?? ''))}`, ACCOUNT_RUNTIME, PRIVATE_PAGE),
+      await page('Account — The Sidemoney Company', `${await slotBody('account', accountMarkup(wishlistMarkup(), gApp?.clientId ?? ''))}`, ACCOUNT_RUNTIME, PRIVATE_PAGE),
       ACCOUNT_PAGE_CSP,
     );
   });
@@ -1697,11 +1877,11 @@ if(_co)_co.addEventListener('click',async function(e){if(!sel)return;var b=e.cur
     // rendering an empty list a shopper can never fill.
     if (!(await settingsService.getCounter()).wishlistEnabled) {
       reply.status(404);
-      return html(reply, await page('Wishlist — Therum Store', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Not found</h1></div>', '', PRIVATE_PAGE));
+      return html(reply, await page('Wishlist — The Sidemoney Company', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Not found</h1></div>', '', PRIVATE_PAGE));
     }
     // No runtime argument: WISHLIST_RUNTIME ships on every store page already,
     // because the heart on a product card needs it too.
-    html(reply, await page('Wishlist — Therum Store', `${await heading('Wishlist')}${wishlistMarkup()}`, '', PRIVATE_PAGE));
+    html(reply, await page('Wishlist — The Sidemoney Company', `${await heading('Wishlist')}${wishlistMarkup()}`, '', PRIVATE_PAGE));
   });
 
   // Order tracking. Linked from the footer and previously a 404 — the page
@@ -1732,7 +1912,7 @@ if(_co)_co.addEventListener('click',async function(e){if(!sel)return;var b=e.cur
   app.get('/order-tracking', async (req, reply) => {
     if (!(await commerceOn())) return html(reply, closedPage());
     html(reply, await page(
-      'Track your order — Therum Store',
+      'Track your order — The Sidemoney Company',
       `<style>${ORDER_TRACKING_CSS}</style>${orderTrackingMarkup()}`,
       ORDER_TRACKING_RUNTIME,
       {
@@ -1756,7 +1936,7 @@ if(_co)_co.addEventListener('click',async function(e){if(!sel)return;var b=e.cur
     const { order: number, token } = req.query as { order?: string; token?: string };
     const notFound = async (): Promise<void> => {
       reply.status(404);
-      html(reply, await page('Order — Therum Store', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Order not found</h1><p class="page-sub">Check the link from your receipt email.</p></div>', '', PRIVATE_PAGE));
+      html(reply, await page('Order — The Sidemoney Company', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Order not found</h1><p class="page-sub">Check the link from your receipt email.</p></div>', '', PRIVATE_PAGE));
     };
     if (!number || !token) return await notFound();
     const order = await db.order.findUnique({
@@ -1775,7 +1955,7 @@ if(_co)_co.addEventListener('click',async function(e){if(!sel)return;var b=e.cur
     const rows = order.items.map((i) => `
       <div class="row muted"><span>${i.quantity} × ${esc(i.variant?.product?.name ?? 'Item')}${i.variant?.sku ? ` (${esc(i.variant.sku)})` : ''}</span><span class="num">${money(i.priceAtTime * i.quantity, order.currency)}</span></div>`).join('');
 
-    html(reply, await page(`Order ${esc(order.number)} — Therum Store`, `
+    html(reply, await page(`Order ${esc(order.number)} — The Sidemoney Company`, `
       <div style="max-width:560px;margin:0 auto">
         <div class="panel" style="text-align:center;margin-bottom:20px">
           <div style="font-size:40px;margin-bottom:8px">${paid ? '✅' : '🕒'}</div>

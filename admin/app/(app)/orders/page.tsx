@@ -1,7 +1,7 @@
 import { apiGet } from '../../../lib/api';
 import { BASE_PATH } from '../../../lib/session';
 import { money, type Paged, type Order } from '../../../lib/types';
-import { transitionOrder } from '../../actions';
+import { transitionOrder, setProduction } from '../../actions';
 import { ListControls, ListPager, type SortOption } from '../ListControls';
 
 export const dynamic = 'force-dynamic';
@@ -106,7 +106,25 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                       list of orders was a list of dead ends — you could advance
                       an order's status but never open it to see what was in it. */}
                   <a href={`${BASE_PATH}/orders/${o.id}`} style={{ fontWeight: 600 }}>{o.number}</a>
-                  <div className="sub">{o.items.length} item(s)</div>
+                  {/* Who + where, right under the number — the list was a wall of
+                      order codes with no way to tell whose order it was without
+                      opening each one. Name/email/address ride along on the list
+                      response already (Order scalars + customer relation). */}
+                  {(() => {
+                    const ship = (o.shipAddress ?? {}) as Record<string, string>;
+                    const cname = ship.name || o.customer?.name || '';
+                    const cemail = o.customer?.email || o.guestEmail || '';
+                    const addr = ['line1', 'line2', 'city', 'region', 'postalCode', 'country']
+                      .map((k) => ship[k]).filter((v) => v && v.trim()).join(', ');
+                    return (
+                      <div className="sub" style={{ marginTop: 2, lineHeight: 1.45 }}>
+                        <div>{o.items.length} item(s)</div>
+                        {cname && <div style={{ fontWeight: 600 }}>{cname}</div>}
+                        {cemail && <div>{cemail}</div>}
+                        {addr && <div style={{ opacity: 0.7 }}>{addr}</div>}
+                      </div>
+                    );
+                  })()}
                 </td>
                 <td>
                   <span className={'pill pill-' + o.status}>{o.status}</span>
@@ -117,6 +135,16 @@ export default async function OrdersPage({ searchParams }: { searchParams: Promi
                 <td>{money(o.total)}</td>
                 <td className="actions">
                   <a className="th-btn th-btn--xs" href={`${BASE_PATH}/orders/${o.id}`}>Open</a>
+                  {/* Set the whole order into production straight from the list.
+                      Only offered on a processing (paid) order that still has a
+                      line not yet in production — the endpoint emails the
+                      customer once per line. Per-line control lives in the order. */}
+                  {o.status === 'processing'
+                    && o.items.some((i) => (i.productionStatus ?? 'pending') === 'pending') && (
+                    <form action={setProduction.bind(null, o.id, 'in_production')}>
+                      <button className="ghost">in production</button>
+                    </form>
+                  )}
                   {(NEXT[o.status] ?? []).map((s) => (
                     <form key={s} action={transitionOrder.bind(null, o.id, s)}>
                       <button className="ghost">{s}</button>

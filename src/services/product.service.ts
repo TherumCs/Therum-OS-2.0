@@ -234,8 +234,25 @@ export const productService = {
    */
   async purgeStaleVendorDrafts(graceMinutes = 15) {
     const cutoff = new Date(Date.now() - graceMinutes * 60_000);
+    // NEVER touch a vendor-OWNED product (vendorId set). This purge hard-deletes,
+    // and a vendor whose create→publish is slower than the grace window (or is
+    // mid-sync) would have a LIVE product destroyed — this actually happened to
+    // real products (132/133). Restrict to orphan import residue: a draft with a
+    // sourceId but NO owning vendor. A genuinely stuck vendor draft is a harmless
+    // cosmetic leftover the vendor's own next publish flips to active; deleting a
+    // live vendor product is catastrophic, so we never do it here.
+    //
+    // ALSO require fulfillmentProvider:null. A CATALOG-SYNCED product (Printful/
+    // Printify/…) is created with sourceId set and NO vendorId, so it matched the
+    // filter above exactly — and its updatedAt only refreshes while the hourly
+    // provider fetch keeps returning it. The moment a provider sync throws for an
+    // hour (an expired Printful token — a documented live state — a decrypt drift,
+    // any 4xx/5xx), every draft of that provider's catalogue goes stale and was
+    // hard-deleted (audit CRITICAL #1). A product a connected provider owns is
+    // NEVER orphan residue: gate on fulfillmentProvider:null so only true import
+    // leftovers (no provider, no vendor) are ever eligible.
     const stale = await db.product.findMany({
-      where: { status: 'draft', deletedAt: null, sourceId: { not: null }, updatedAt: { lt: cutoff } },
+      where: { status: 'draft', deletedAt: null, sourceId: { not: null }, vendorId: null, fulfillmentProvider: null, updatedAt: { lt: cutoff } },
       select: { id: true, name: true },
     });
     for (const p of stale) await db.product.delete({ where: { id: p.id } });

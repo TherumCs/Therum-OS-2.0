@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import { BASE_PATH } from '../../lib/session';
 
@@ -286,7 +286,12 @@ export function DashboardTabs({ data, studioAgent }: { data: DashData; studioAge
   const [palette, setPalette] = useState(false);
   const [layouts, setLayouts] = useState<Record<string, W[]>>(DEFAULTS);
   const [customTabs, setCustomTabs] = useState<string[]>([]);
-  const [refreshedAt] = useState(() => Date.now());
+  const [refreshedAt, setRefreshedAt] = useState(() => Date.now());
+  // Refresh must do BOTH: re-pull the server data (router.refresh — the page is
+  // force-dynamic + fetches no-store, so this really re-fetches) AND stamp the
+  // time so the "Refreshed … ago" label actually moves. Without the stamp the
+  // data updated silently and the button read as dead.
+  const doRefresh = useCallback(() => { setRefreshedAt(Date.now()); router.refresh(); }, [router]);
 
   useEffect(() => {
     try {
@@ -313,7 +318,7 @@ export function DashboardTabs({ data, studioAgent }: { data: DashData; studioAge
   const persist = (next: Record<string, W[]>) => { setLayouts(next); try { localStorage.setItem('dsh_layouts_v2', JSON.stringify(next)); } catch { /* ignore */ } };
   const persistTabs = (next: string[]) => { setCustomTabs(next); try { localStorage.setItem('dsh_tabs_v2', JSON.stringify(next)); } catch { /* ignore */ } };
 
-  const ctx: Ctx = useMemo(() => ({ studioAgent, refresh: () => router.refresh(), refreshedLabel: timeAgo(new Date(refreshedAt).toISOString()) + ' ago' }), [studioAgent, router, refreshedAt]);
+  const ctx: Ctx = useMemo(() => ({ studioAgent, refresh: doRefresh, refreshedLabel: timeAgo(new Date(refreshedAt).toISOString()) + ' ago' }), [studioAgent, doRefresh, refreshedAt]);
   const cur = layouts[tab] ?? [];
   const setCur = (next: W[]) => persist({ ...layouts, [tab]: next });
 
@@ -329,7 +334,7 @@ export function DashboardTabs({ data, studioAgent }: { data: DashData; studioAge
       <div className="dsh-top">
         <div><div className="dsh-eyebrow">{data.storeName}</div><h1 className="dsh-h1">{ttl[0]}</h1><p className="dsh-sub">{ttl[1]}</p></div>
         <div className="dsh-topact">
-          <button className="dsh-btn" onClick={() => router.refresh()}>↻ Refresh</button>
+          <button className="dsh-btn" onClick={doRefresh}>↻ Refresh</button>
           <button className={'dsh-btn' + (edit ? ' on' : '')} onClick={() => setEdit(!edit)}>{edit ? 'Done' : 'Edit layout'}</button>
           {edit && <button className="dsh-btn" onClick={() => setCur(DEFAULTS[tab] ? [...DEFAULTS[tab]] : [])}>Reset</button>}
         </div>

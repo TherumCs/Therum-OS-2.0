@@ -785,6 +785,36 @@ export function headerCartRuntime(cfg: HeaderCartConfig = HEADER_CART_DEFAULTS):
   } else {
     document.addEventListener('keydown', function(e){ if (e.key === 'Escape') close(); });
   }
+
+  // ── Account icon on the mobile header ────────────────────────────────────
+  // The ported chrome only carries the account link inside .c-header__menu-bottom,
+  // which siteHtml hides (dead ported menu + its double cart) — so the visible
+  // mobile bar has cart + search but no way to reach sign-in, while desktop keeps
+  // its own account icon. Only when NO account icon is currently visible, add one
+  // beside the visible cart. Re-synced on resize, since which header shows — and
+  // therefore whether an account icon is already visible — changes with width.
+  (function(){
+    var SVG = '<svg viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="vertical-align:middle"><circle cx="12" cy="8" r="4"></circle><path d="M4 20c0-3.7 3.6-6.5 8-6.5s8 2.8 8 6.5"></path></svg>';
+    function vis(el){ if (!el) return false; var r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0; }
+    function sync(){
+      var stray = document.querySelector('.th-m-acct');
+      // A real account icon already visible (desktop header)? Drop any injected one.
+      if ([].slice.call(document.querySelectorAll('.c-header__button-link--account')).some(vis)) { if (stray) stray.remove(); return; }
+      var cart = [].slice.call(document.querySelectorAll('a.js-cart-sidebar-open, .c-header__button-link.js-cart-sidebar-open')).filter(vis)[0];
+      if (!cart) return;
+      var item = cart.closest('.c-header__cart') || cart;
+      var bar = item.parentNode;
+      if (!bar || bar.querySelector('.th-m-acct')) return;
+      var a = document.createElement('a');
+      a.className = 'c-header__button-link th-m-acct';
+      a.href = '/account';
+      a.setAttribute('aria-label', 'Account');
+      a.innerHTML = SVG;
+      bar.insertBefore(a, item);
+    }
+    sync();
+    var t; window.addEventListener('resize', function(){ clearTimeout(t); t = setTimeout(sync, 150); });
+  })();
 })();
 `;
 }

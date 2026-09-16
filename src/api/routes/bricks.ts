@@ -8,6 +8,7 @@ import { settingsService } from '../../services/settings.service.js';
 import { bricksAddonService } from '../../services/bricksAddon.service.js';
 import { isCanvasNode } from '../../lib/render.js';
 import { ConflictError } from '../../lib/errors.js';
+import { requireBundle, requireFullAdmin } from '../../middleware/bundle.js';
 
 const ImportInput = z.object({
   title: z.string().min(1).max(240),
@@ -37,7 +38,11 @@ export async function bricksRoutes(app: FastifyInstance): Promise<void> {
     }
   });
 
-  app.post('/bricks/import', async (req, reply) => {
+  // Content creation is a 'write' mutation (matches content.ts); the addon
+  // install/toggle/remove routes unpack a zip onto the FILESYSTEM and are
+  // full-admin only (matches extensions.ts). GET status/export stay authenticated
+  // but ungated. These were all plain-authenticate before (audit).
+  app.post('/bricks/import', { preHandler: requireBundle('write') }, async (req, reply) => {
     const input = ImportInput.parse(req.body);
     let elements;
     try {
@@ -66,7 +71,7 @@ export async function bricksRoutes(app: FastifyInstance): Promise<void> {
   // The media step for content imported BEFORE a mediaBaseUrl was known (or
   // when the source site only came online later): download every external
   // image in the canvas into the media library and rewrite the srcs in place.
-  app.post('/bricks/localize-media/:contentId', async (req, reply) => {
+  app.post('/bricks/localize-media/:contentId', { preHandler: requireBundle('write') }, async (req, reply) => {
     const { contentId } = req.params as { contentId: string };
     const input = LocalizeInput.parse(req.body);
     const item = await contentService.get(contentId);
@@ -88,7 +93,7 @@ export async function bricksRoutes(app: FastifyInstance): Promise<void> {
     reply.send(await bricksAddonService.status());
   });
 
-  app.post('/bricks/addons', async (req, reply) => {
+  app.post('/bricks/addons', { preHandler: requireFullAdmin }, async (req, reply) => {
     const file = await (req as unknown as { file: () => Promise<{ filename: string; toBuffer: () => Promise<Buffer> } | undefined> }).file();
     if (!file) throw new ConflictError('Attach a .zip file to install.', 'file');
     if (!/\.zip$/i.test(file.filename)) {
@@ -110,13 +115,13 @@ export async function bricksRoutes(app: FastifyInstance): Promise<void> {
     reply.send(await bricksAddonService.install(file.filename, buffer));
   });
 
-  app.patch('/bricks/addons/:slug', async (req, reply) => {
+  app.patch('/bricks/addons/:slug', { preHandler: requireFullAdmin }, async (req, reply) => {
     const { slug } = req.params as { slug: string };
     const { enabled } = z.object({ enabled: z.boolean() }).parse(req.body);
     reply.send(await bricksAddonService.setEnabled(slug, enabled));
   });
 
-  app.delete('/bricks/addons/:slug', async (req, reply) => {
+  app.delete('/bricks/addons/:slug', { preHandler: requireFullAdmin }, async (req, reply) => {
     const { slug } = req.params as { slug: string };
     reply.send(await bricksAddonService.remove(slug));
   });

@@ -75,6 +75,14 @@ export const stripeGateway: PaymentGateway = {
       'automatic_payment_methods[enabled]': 'true',
       'automatic_payment_methods[allow_redirects]': 'never',
       description: `Order ${order.number}`,
+      // Carry the order id (+ number) the same way createIntent does. Without it,
+      // if an in-page charge succeeds at Stripe but markPaid never runs (crash /
+      // network blip), the payment_intent.succeeded webhook can resolve the order
+      // neither by txnId (not written yet) nor by payload.orderId (from metadata)
+      // — the reconciliation safety net is dead for exactly those orphaned
+      // charges. metadata makes the fallback always able to find the order.
+      'metadata[order_id]': order.id,
+      'metadata[order_number]': order.number,
     };
     if (vault?.customerId) params.customer = vault.customerId;
     if (vault?.save && vault.customerId) params.setup_future_usage = 'off_session';

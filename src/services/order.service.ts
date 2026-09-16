@@ -2,9 +2,10 @@ import { randomBytes } from 'node:crypto';
 import { Prisma, type OrderStatus } from '@prisma/client';
 import { db } from '../lib/db.js';
 import { emit } from '../counter/webhookDelivery.js';
-import { routeOrder, confirmPrintfulOrder } from '../counter/fulfillmentRouting.js';
+import { routeOrder, confirmPrintfulOrder, submitPaidOrder } from '../counter/fulfillmentRouting.js';
 import { orderWebhookPayload } from '../counter/orderWebhookPayload.js';
 import { hookBus } from '../lib/hooks.js';
+import { logger } from '../lib/logger.js';
 import { NotFoundError, ConflictError, ValidationError } from '../lib/errors.js';
 import { milieuService } from './milieu.service.js';
 import { capabilityService } from './capability.service.js';
@@ -17,8 +18,11 @@ import { orderByOf } from '../schemas/listing.js';
 const TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   pending: ['processing', 'cancelled', 'failed'],
   processing: ['shipped', 'cancelled', 'failed'],
-  shipped: ['delivered'],
-  delivered: [],
+  // A full refund can land on a shipped OR delivered order (customer returns,
+  // chargebacks) — those must be able to reach cancelled so the refund's status
+  // change doesn't throw AFTER the money was already returned.
+  shipped: ['delivered', 'cancelled'],
+  delivered: ['cancelled'],
   failed: [],
   cancelled: [],
 };
@@ -28,14 +32,28 @@ const orderInclude = {
   // and nothing else — the admin could not name what was bought, let alone
   // link to it, which made the order page a list of prices with no products.
   // Colour and size come too, because "TEE-L" is not what a human ordered.
+  // orderBy id asc so line order is STABLE — the webhook per-partner line filter
+  // (scopeOrderDelivery) matches this payload's line_items positionally, and an
+  // OrderItem UPDATE must not silently re-order them (audit R6).
   items: {
+    orderBy: { id: 'asc' },
     include: {
       variant: {
         select: {
-          id: true, sku: true, price: true, color: true, size: true,
+          // variant.sourceId is the PROVIDER's variant id (Printful sync_variant_id,
+          // Printify variant_id). routeOrder skips any line without it, so omitting
+          // it here silently dropped EVERY line from routing — no order ever reached
+          // a factory. It must be loaded for fulfillment to work at all.
+          // variant.wooId / product.wooId are the INTEGER WooCommerce ids the
+          // partner recorded when it synced our catalogue. The order webhook must
+          // reference the order's lines by THOSE ids — a partner maps its own
+          // product to woo id 1644, so an order that says product_id=<cuid> can't
+          // be matched and the partner silently fulfils nothing (200 / data:null).
+          id: true, wooId: true, sku: true, price: true, color: true, size: true, sourceId: true,
           // fulfillmentProvider is selected because order routing reads it to
-          // decide which factory gets each line.
-          product: { select: { id: true, name: true, slug: true, image: true, fulfillmentProvider: true, sourceId: true } },
+          // decide which factory gets each line. product.sourceId is the Printify
+          // shop-product id (distinct from the variant id).
+          product: { select: { id: true, wooId: true, name: true, slug: true, image: true, fulfillmentProvider: true, sourceId: true } },
         },
       },
     },
@@ -62,6 +80,32 @@ function generateNumber(): string {
   const d = new Date();
   const stamp = `${d.getUTCFullYear()}${String(d.getUTCMonth() + 1).padStart(2, '0')}${String(d.getUTCDate()).padStart(2, '0')}`;
   return `${ORDER_PREFIX}-${stamp}-${randomBytes(5).toString('hex')}`; // ~40 bits entropy, not guessable
+}
+
+/**
+ * True when a frozen pending order still matches the cart being checked out —
+ * same line items (variant→quantity multiset) and same shipping/tax. Used to
+ * tell a genuine idempotent retry (return the existing order) from a cart the
+ * shopper edited after a decline/abandon (rebuild it). Discount is intentionally
+ * NOT compared: it is a deterministic function of the lineup, and a coupon is
+ * applied AFTER create, so comparing it would false-trigger. (audit C1/C2)
+ */
+function sameLineup(
+  existing: { items: { variantId: string; quantity: number }[]; shippingTotal: number; taxTotal: number },
+  input: { items: { variantId: string; quantity: number }[]; shippingTotal?: number; taxTotal?: number },
+): boolean {
+  if ((input.shippingTotal ?? 0) !== existing.shippingTotal) return false;
+  if ((input.taxTotal ?? 0) !== existing.taxTotal) return false;
+  const tally = (items: { variantId: string; quantity: number }[]): Map<string, number> => {
+    const m = new Map<string, number>();
+    for (const it of items) m.set(it.variantId, (m.get(it.variantId) ?? 0) + it.quantity);
+    return m;
+  };
+  const a = tally(existing.items);
+  const b = tally(input.items);
+  if (a.size !== b.size) return false;
+  for (const [k, v] of a) if (b.get(k) !== v) return false;
+  return true;
 }
 
 export const orderService = {
@@ -114,7 +158,34 @@ export const orderService = {
   async create(input: CreateOrderInput) {
     if (input.idempotencyKey) {
       const existing = await db.order.findUnique({ where: { idempotencyKey: input.idempotencyKey }, include: orderInclude });
-      if (existing) return existing;
+      if (existing) {
+        // A settled order (paid/processing/…) is returned verbatim — a genuine
+        // idempotent double-submit, or a post-payment re-POST.
+        if (existing.status !== 'pending') return existing;
+        // The cart that owns this idempotency key (`cart_<id>`) is deliberately
+        // left EDITABLE after checkout so a declined/abandoned payment can retry
+        // (see cart.service.checkout + markPaid's cart clear). That means the
+        // shopper can edit the cart and re-POST /checkout against a FROZEN
+        // pending order. Returning it verbatim then charges — and discounts (a
+        // coupon re-quoted against the now-different cart) — the WRONG basket:
+        // C1 (inflate the cart → coupon zeroes a tiny order) and C2 (trim the
+        // cart after a decline → charged the old, larger amount). So: if the
+        // frozen order still matches the current cart, it is a true retry —
+        // return it. If it has DRIFTED, fail the stale order (releasing its
+        // reservations via the normal transition path), free the idempotency
+        // key, and fall through to mint a fresh order that matches what the
+        // shopper is actually looking at. (audit C1/C2)
+        if (sameLineup(existing, input)) return existing;
+        await this.transition(existing.id, { status: 'failed' }).catch(() => { /* paid mid-flight → C4 refuses; handled by the re-read below */ });
+        // Only free the key + rebuild if the stale order actually FAILED (its
+        // reservations are now released). If it could not be failed — a payment
+        // landed mid-flight, so transition() refused (C4) and it is now
+        // paid/processing — return it settled rather than charging a rebuild.
+        const after = await db.order.findUnique({ where: { id: existing.id }, select: { status: true } });
+        if (after?.status !== 'failed') return existing;
+        await db.order.update({ where: { id: existing.id }, data: { idempotencyKey: null } });
+        // fall through: create a fresh order below, taking the freed key.
+      }
     }
 
     const variantIds = input.items.map((i) => i.variantId);
@@ -205,6 +276,11 @@ export const orderService = {
           memberLabel = '';
         }
         const total = subtotal - memberAmount;
+        // The CHARGED amount — items minus discount PLUS shipping and tax. Both
+        // order.total and payment.amount must be this exact figure; payment.amount
+        // used the pre-shipping/tax `total`, understating every payment record
+        // versus what the card was actually charged (order.total).
+        const chargedTotal = total + (input.shippingTotal ?? 0) + (input.taxTotal ?? 0);
 
         return tx.order.create({
           data: {
@@ -226,7 +302,7 @@ export const orderService = {
             shippingTotal: input.shippingTotal ?? 0,
             taxTotal: input.taxTotal ?? 0,
             shippingMethod: input.shippingMethod ?? null,
-            total: total + (input.shippingTotal ?? 0) + (input.taxTotal ?? 0),
+            total: chargedTotal,
             ...(memberAmount > 0
               ? {
                   discountPct: memberPct,
@@ -245,7 +321,7 @@ export const orderService = {
                 priceAtTime: priceById.get(i.variantId) ?? 0,
               })),
             },
-            payment: { create: { status: 'pending', amount: total } },
+            payment: { create: { status: 'pending', amount: chargedTotal } },
           },
           include: orderInclude,
         });
@@ -274,12 +350,35 @@ export const orderService = {
 
   async transition(id: string, input: TransitionOrderInput) {
     const result = await db.$transaction(async (tx) => {
-      const order = await tx.order.findUnique({ where: { id }, include: { items: true } });
+      // Lock the order row FIRST. transition() reads the status, checks the graph
+      // in JS, then applies inventory effects (the cancelled/failed restock is an
+      // UNCONDITIONAL inventory += qty). Two concurrent transitions (e.g. a
+      // refund→cancelled racing an admin/partner cancel) both read status
+      // 'processing', both pass the graph check, and both restock — a 1-unit line
+      // becomes 2 and the store oversells (audit). SELECT … FOR UPDATE serializes
+      // them: the second blocks until the first commits, then re-reads the now
+      // 'cancelled' status and the graph check rejects it.
+      await tx.$queryRaw`SELECT id FROM orders WHERE id = ${id} FOR UPDATE`;
+      const order = await tx.order.findUnique({ where: { id }, include: { items: true, payment: { select: { status: true } } } });
       if (!order) throw new NotFoundError('Order not found', 'id');
 
       const to = input.status;
       if (!TRANSITIONS[order.status].includes(to)) {
         throw new ConflictError(`Cannot transition order from ${order.status} to ${to}`, 'status');
+      }
+      // A PAID order can never be marked 'failed'. 'failed' means the payment
+      // never succeeded; a captured payment contradicts it. This is read live
+      // inside the transaction (not from a caller's stale snapshot), which is
+      // what closes the sweepStalePending race: sweepStalePending snapshots
+      // payment.status in its findMany and can call transition(failed) on an
+      // order that was paid AFTER the snapshot but before the loop — flipping a
+      // charged, in-production order to 'failed' and phantom-restocking it. The
+      // sweep swallows this ConflictError, so a raced payment is simply left
+      // alone (it is now 'processing' and no longer swept). Refund-driven
+      // 'cancelled' is deliberately still allowed — that is a real refund, not
+      // an abandonment sweep. (audit C4)
+      if (to === 'failed' && order.payment?.status === 'paid') {
+        throw new ConflictError('A paid order cannot be failed — it has been charged.', 'status');
       }
 
       // Inventory effects of each transition.
@@ -332,12 +431,90 @@ export const orderService = {
     // would announce a status change to every partner and then let a rollback
     // un-happen it — and a fulfilment partner that has already started
     // printing cannot un-print.
+    //
+    // TWO shapes, because partners subscribe two different ways (verified against
+    // the live WooCommerce store):
+    //  - order.updated  → PODpartner/PodPluser: the full order object.
+    //  - action.woocommerce_order_status_processing → Tapstitch(HugePOD)/Printify/
+    //    Printful: fired on the pending→processing (paid) flip, body {action,arg:id},
+    //    then the partner pulls /wc/v3/orders/<id>. This is THE trigger POD
+    //    factories act on; without it nothing they subscribed to ever arrived.
     emit({
       topic: 'order.updated',
       resourceId: result.full.id,
       payload: orderWebhookPayload(result.full),
     });
+    if (input.status === 'processing') {
+      emit({
+        topic: 'action.woocommerce_order_status_processing',
+        resourceId: result.full.id,
+        payload: { action: 'woocommerce_order_status_processing', arg: result.full.wooId ?? result.full.id },
+      });
+      // "Ordered → automatically into production." Every paid line starts its
+      // production stage the moment the order is confirmed, instead of waiting
+      // for someone to click "All in production" in Counter. setItemProduction is
+      // idempotent per line (skips lines already at the stage) and emails the
+      // customer exactly once per real move. Fire-and-forget: a mail or DB hiccup
+      // must never unwind the committed transition.
+      void this.setItemProduction(result.full.id, { status: 'in_production' }).catch(() => { /* service logs its own failures */ });
+    }
+    // Release any coupon this order was holding when it TERMINATES without a
+    // sale. reserveForOrder increments usage_count + the per-user cap at
+    // checkout; only the refund path released them, so a declined/abandoned/
+    // cancelled order permanently burned a single-use or limited-quantity code
+    // (audit). Idempotent + a no-op when the order carried no coupon. Lazy import
+    // avoids an order↔coupon cycle; fire-and-forget so it never unwinds the
+    // committed transition.
+    if (input.status === 'cancelled' || input.status === 'failed') {
+      void import('./coupon.service.js').then(({ couponService }) => couponService.releaseForOrder(id)).catch(() => { /* best-effort */ });
+    }
     return result.stripped;
+  },
+
+  /**
+   * Set the PER-LINE production stage for some (or all) of an order's items.
+   * A multi-vendor order has each product at its own stage, so this is keyed on
+   * order ITEMS, not the order. Entering 'in_production' emails the customer once
+   * per line ("your <product> is being made"); productionNotifiedAt guards the
+   * re-send. The order-level status is untouched — it stays the overall roll-up.
+   */
+  async setItemProduction(orderId: string, input: { itemIds?: string[]; status: 'pending' | 'in_production' | 'shipped' | 'delivered' | 'cancelled' }) {
+    const VALID = ['pending', 'in_production', 'shipped', 'delivered', 'cancelled'];
+    if (!VALID.includes(input.status)) throw new ValidationError(`Unknown production status "${input.status}".`, 'status');
+    const order = await db.order.findUnique({ where: { id: orderId }, include: { items: { select: { id: true, productionStatus: true, productionNotifiedAt: true } } } });
+    if (!order) throw new NotFoundError('Order not found', 'id');
+    const requested = new Set(input.itemIds ?? []);
+    const targets = order.items.filter((i) => (requested.size ? requested.has(i.id) : true));
+    if (!targets.length) throw new ValidationError('No matching order items.', 'itemIds');
+    // Stages a customer should hear about. pending/cancelled just set the stage.
+    const NOTIFY = new Set(['in_production', 'shipped', 'delivered']);
+    if (!NOTIFY.has(input.status)) {
+      await db.orderItem.updateMany({ where: { id: { in: targets.map((i) => i.id) }, orderId }, data: { productionStatus: input.status } });
+      return this.get(orderId);
+    }
+    // Customer-facing stage. The status flip IS the atomic claim: guarding each
+    // write on `productionStatus != status` means two concurrent / double-clicked
+    // calls can't both win a line, so the customer is emailed EXACTLY ONCE per
+    // real transition (fixes the old read-then-write double-email race). Per line
+    // because updateMany returns only a count, and we must email precisely the
+    // lines that actually moved this call.
+    const won: string[] = [];
+    for (const it of targets) {
+      if (it.productionStatus === input.status) continue; // already at this stage → no move, no email
+      const { count } = await db.orderItem.updateMany({
+        where: { id: it.id, orderId, productionStatus: { not: input.status } },
+        data: { productionStatus: input.status, productionNotifiedAt: new Date() },
+      });
+      if (count === 1) won.push(it.id);
+    }
+    if (won.length) {
+      const origin = process.env.PUBLIC_ORIGIN ?? null;
+      const stage = input.status as 'in_production' | 'shipped' | 'delivered';
+      void import('./commerceEmail.service.js')
+        .then(({ commerceEmailService }) => commerceEmailService.sendStageNotice(orderId, won, stage, origin))
+        .catch(() => { /* mail layer logs its own failures */ });
+    }
+    return this.get(orderId);
   },
 
   /**
@@ -352,9 +529,15 @@ export const orderService = {
     if (!contact || (!contact.email && !contact.shipAddress)) return;
     const order = await db.order.findUnique({ where: { id }, select: { guestEmail: true, shipAddress: true } });
     if (!order) return;
+    // shipAddress defaults to Json `{}` — which is TRUTHY, so `!order.shipAddress`
+    // was ALWAYS false and the PayPal-captured address was never written: the
+    // formless PayPal order stayed address-less, and every downstream shipment
+    // failed shippable(). Test for genuine emptiness, not falsiness.
+    const cur = order.shipAddress as Record<string, unknown> | null;
+    const hasAddr = !!cur && typeof cur === 'object' && Object.keys(cur).length > 0;
     const data: Prisma.OrderUpdateInput = {};
     if (contact.email && !order.guestEmail) data.guestEmail = contact.email;
-    if (contact.shipAddress && !order.shipAddress) data.shipAddress = contact.shipAddress as Prisma.InputJsonValue;
+    if (contact.shipAddress && !hasAddr) data.shipAddress = contact.shipAddress as Prisma.InputJsonValue;
     if (Object.keys(data).length > 0) await db.order.update({ where: { id }, data });
   },
 
@@ -362,28 +545,36 @@ export const orderService = {
    * Fail never-charged pending orders older than `hours`, releasing their
    * stock reservations through the normal transition() path. A pending order
    * is a shopper mid-checkout — 24h is generous even for BNPL redirects
-   * (Stripe expires those sessions far sooner). Orders whose payment carries
-   * a txnId are NEVER swept: that is money already taken and a human problem;
-   * they are surfaced in the return instead. Without this sweep an abandoned
-   * checkout on a tracked variant (the 1-in-stock jerseys) froze the unit
-   * forever and real buyers saw "Insufficient stock".
+   * (Stripe expires those sessions far sooner). Orders whose payment is
+   * actually CAPTURED (status 'paid') are NEVER swept: that is money already
+   * taken and a human problem; they are surfaced in the return instead.
+   *
+   * The gate is payment.STATUS, not txnId presence: createIntent stamps a txnId
+   * at intent-CREATION while status stays 'pending' (no capture yet). Gating on
+   * txnId meant a shopper who merely clicked a payment method then abandoned
+   * kept the tracked unit reserved FOREVER — the 1-in-stock jersey froze on
+   * ordinary cart abandonment, the exact leak this sweep exists to prevent, and
+   * it error-spammed "CHARGED stuck" for orders where no money moved.
    */
   async sweepStalePending(hours = 24): Promise<{ failed: string[]; chargedStuck: string[] }> {
     const cutoff = new Date(Date.now() - hours * 3_600_000);
     const stale = await db.order.findMany({
       where: { status: 'pending', createdAt: { lt: cutoff } },
-      select: { id: true, number: true, payment: { select: { txnId: true } } },
+      select: { id: true, number: true, payment: { select: { status: true } } },
     });
     const failed: string[] = [];
     const chargedStuck: string[] = [];
     for (const o of stale) {
-      if (o.payment?.txnId) { chargedStuck.push(o.number); continue; }
+      if (o.payment?.status === 'paid') { chargedStuck.push(o.number); continue; }
       try {
         await this.transition(o.id, { status: 'failed' });
         failed.push(o.number);
       } catch {
-        // A racing shopper may have just paid — leave the order alone; the
-        // next sweep will see the txnId and skip it.
+        // A racing shopper may have just paid between the findMany snapshot and
+        // now: transition() re-reads payment.status live and REFUSES to fail a
+        // paid order (audit C4), throwing here. Leave it alone — it is paid and
+        // moving forward, and the sweep only ever touches 'pending' orders, so
+        // it will not be revisited.
       }
     }
     return { failed, chargedStuck };
@@ -393,18 +584,96 @@ export const orderService = {
   async markPaid(id: string, txnId: string | null, method: string | null, pspResponse: Prisma.InputJsonValue) {
     const order = await db.order.findUnique({ where: { id }, select: { id: true, status: true, idempotencyKey: true } });
     if (!order) throw new NotFoundError('Order not found', 'id');
-    await db.payment.update({
-      where: { orderId: id },
+    // ATOMIC paid-edge claim. The live WooPayments card rail settles an order
+    // via TWO near-simultaneous paths (in-page redirect-finish AND the engine
+    // bridge webhook). The old code flipped payment then gated every side effect
+    // on a stale status read, so both callers passed the gate → DUPLICATE receipt
+    // + owner emails and, worse, submitPaidOrder ran twice and created the
+    // Printify production order TWICE (real money). The payment row is the lock:
+    // flip pending→paid conditionally; exactly one caller gets count===1 and runs
+    // the side effects. Every other concurrent/retried call returns the settled
+    // order and does nothing.
+    const settled = await db.payment.updateMany({
+      where: { orderId: id, status: { not: 'paid' } },
       data: { status: 'paid', txnId, method, pspResponse },
     });
-    const result = order.status === 'pending' ? await this.transition(id, { status: 'processing' }) : await this.get(id);
+    if (settled.count !== 1) {
+      // Already settled by another path — do NOT re-fire emails/fulfilment.
+      return this.get(id);
+    }
+    // The money is captured. The pending→processing transition confirms
+    // inventory, and it THROWS if a tracked variant was re-synced to 0 between
+    // reserve and pay (routine for dropship SKUs). Letting that throw here left
+    // the payment 'paid' but the order stuck 'pending' with NO receipt, NO
+    // fulfilment, NO cart clear — a silently-broken paid order. A captured
+    // payment must always move forward: on a confirm shortfall, force the order
+    // to processing, flag it for manual stock reconcile, and continue the
+    // paid-edge side effects. Inventory drift is an ops problem, never a reason
+    // to strand a sale.
+    // We won the settle claim, so THIS call owns the paid edge. Advance the
+    // order (transition confirms inventory + emits the vendor webhooks); a
+    // confirm shortfall must not strand a captured payment, so force it forward
+    // and flag for reconcile.
+    let result;
+    try {
+      result = await this.transition(id, { status: 'processing' });
+    } catch (err) {
+      // transition() throws for TWO very different reasons, and conflating them
+      // shipped terminated orders (audit CRITICAL). Re-read the LIVE status:
+      //  - order is TERMINAL (cancelled/failed): the order was cancelled/failed
+      //    while the payment was still pending, then a late/async settlement
+      //    (PayPal/BNPL/delayed webhook) landed here. The old catch assumed
+      //    "inventory shortfall" and force-wrote status='processing', then
+      //    submitPaidOrder + emails ran below — creating a real billable vendor
+      //    production order and SHIPPING goods on an order the customer cancelled.
+      //    NEVER do that. Leave it terminal, flag for an ops refund (the payment
+      //    row is 'paid' so the refund path can act), and STOP the paid edge.
+      //  - order is still 'pending': a genuine confirm/inventory shortfall — the
+      //    original force-forward path below is correct.
+      const live = await db.order.findUnique({ where: { id }, select: { status: true, meta: true } });
+      if (live && live.status !== 'pending') {
+        logger.error({ orderId: id, status: live.status, txnId }, 'PAYMENT captured on a TERMINAL order — NOT fulfilling/shipping; flagged for refund');
+        const meta = { ...((live.meta as Record<string, unknown>) ?? {}), paymentOnTerminalOrder: { status: live.status, txnId, at: new Date().toISOString(), refundNeeded: true } };
+        await db.order.update({ where: { id }, data: { meta: meta as Prisma.InputJsonValue } }).catch(() => { /* best-effort flag */ });
+        return this.get(id); // no cart clear, no fulfilment, no emails
+      }
+      logger.error({ err, orderId: id }, 'CHARGED order failed inventory confirm — forcing processing + settling inventory deterministically');
+      // The confirm transaction rolled back, so NOTHING was applied: for EVERY
+      // line `reserved` is still incremented and `inventory` is untouched. A
+      // bare status write here (the old behaviour) left `reserved` leaked on
+      // every line forever — availableOf = inventory - reserved then drifts and
+      // silently pushes sellable variants toward phantom out-of-stock (audit
+      // H3). Settle inventory deterministically instead: release the reservation
+      // on every line (clamped at 0 so drift self-heals) and decrement tracked
+      // stock where it can satisfy the line (also clamped), then force the order
+      // forward. This is exactly what a successful confirm would have done,
+      // tolerant of the tracked line that was re-synced short.
+      await db.$transaction(async (tx) => {
+        const o = await tx.order.findUnique({ where: { id }, select: { items: true, meta: true } });
+        for (const item of o?.items ?? []) {
+          await tx.$executeRaw`
+            UPDATE product_variants SET
+              inventory = CASE WHEN stock_status = 'tracked' THEN GREATEST(inventory - ${item.quantity}, 0) ELSE inventory END,
+              reserved  = GREATEST(reserved - ${item.quantity}, 0)
+            WHERE id = ${item.variantId}`;
+        }
+        const meta = { ...((o?.meta as Record<string, unknown>) ?? {}), inventoryReconcile: { reason: 'confirm-shortfall-at-paid', settled: true, at: new Date().toISOString() } };
+        await tx.order.update({ where: { id }, data: { status: 'processing', meta: meta as Prisma.InputJsonValue } });
+      });
+      // The forced 'processing' skips transition()'s webhook emits, so fire the
+      // paid-vendor pings here too — a pull/webhook POD partner (Tapstitch) must
+      // still learn the order is paid, not wait for the hourly retry.
+      const forced = await db.order.findUnique({ where: { id }, include: orderInclude });
+      if (forced) {
+        emit({ topic: 'order.updated', resourceId: forced.id, payload: orderWebhookPayload(forced) });
+        emit({ topic: 'action.woocommerce_order_status_processing', resourceId: forced.id, payload: { action: 'woocommerce_order_status_processing', arg: forced.wooId ?? forced.id } });
+      }
+      result = await this.get(id);
+    }
 
-    // Auto-confirm fulfilment: the money is in, so submit this order's Printful
-    // draft to production. Only at the pending→paid edge, so a retried webhook
-    // doesn't re-submit; fire-and-forget, because a factory being down must
-    // never unwind a captured payment — the same rule routeOrder() follows at
-    // checkout.
-    if (order.status === 'pending') {
+    // Paid-edge side effects — run exactly ONCE, because only the settle-claim
+    // winner reaches here (a concurrent/retried markPaid returned early above).
+    {
       // Clear the shopper's cart HERE — the confirmed-payment edge — not at
       // order creation (cart.service.checkout leaves it alive so a declined or
       // abandoned payment can retry the same cart). The cart token is the
@@ -414,8 +683,13 @@ export const orderService = {
       const cartToken = order.idempotencyKey?.startsWith('cart_') ? order.idempotencyKey.slice(5) : null;
       if (cartToken) void import('./cart.service.js').then(({ cartService }) => cartService.clear(cartToken)).catch(() => { /* TTL cleans it up */ });
 
+      // Submit to EVERY push vendor at the paid edge — Printful (confirm draft),
+      // Printify + Contrado (create + send to production, deferred from checkout
+      // so unpaid carts aren't billed and the address PayPal express only
+      // provides post-payment is present). Dup-safe + retried hourly by the
+      // worker if a vendor blips.
       const routable = await db.order.findUnique({ where: { id }, include: orderInclude });
-      if (routable) void confirmPrintfulOrder(routable).catch(() => { /* recorded in fulfillment_routes */ });
+      if (routable) void submitPaidOrder(routable).catch(() => { /* recorded in fulfillment_routes */ });
 
       // Order emails — receipt to the shopper, heads-up to the store owner.
       // Fired HERE, at the single pending→paid edge that EVERY settlement path

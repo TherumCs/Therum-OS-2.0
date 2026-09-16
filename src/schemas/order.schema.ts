@@ -23,8 +23,11 @@ export const ShipAddressInput = z.object({
   line1: z.string().min(1).max(200),
   line2: z.string().max(200).optional(),
   city: z.string().min(1).max(120),
-  region: z.string().max(120).optional(),
-  postalCode: z.string().max(32).optional(),
+  // A two-letter region is a subdivision code (PA, NY, ON) and is stored
+  // uppercased: a shopper typed "Pa" on order 100074 and the POD partner's
+  // strict parser never created the order. Longer regions pass through as typed.
+  region: z.string().max(120).optional().transform((r) => (r && /^[A-Za-z]{2}$/.test(r.trim()) ? r.trim().toUpperCase() : r?.trim())),
+  postalCode: z.string().max(32).optional().transform((p) => p?.trim()),
   // ISO-3166 alpha-2. Uppercased on the way in so 'us' and 'US' are one value.
   country: z.string().length(2).transform((c) => c.toUpperCase()),
   phone: z.string().max(40).optional(),

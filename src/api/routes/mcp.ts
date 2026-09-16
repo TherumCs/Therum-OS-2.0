@@ -30,7 +30,31 @@ async function requireMcpAuth(req: FastifyRequest & { mcpScope?: string }, reply
   }
   try {
     await req.jwtVerify();
-    req.mcpScope = 'write'; // a real admin session can do what the admin can
+    // jwtVerify only checks signature/expiry — it does NOT inspect `role`. A
+    // 2FA 'pending2fa' challenge token (same secret, minted after a correct
+    // password but BEFORE the second factor) would otherwise pass here and be
+    // handed a full 'write' session, bypassing 2FA entirely. Only the two real
+    // session roles may proceed; anything else fails closed (mirrors
+    // middleware/auth.ts). Scope follows the role, not a hardcoded 'write'.
+    const u = req.user as { sub?: string; role?: string } | undefined;
+    const role = u?.role;
+    if (role !== 'admin' && role !== 'custom') {
+      reply.status(401).send({ error: { code: 'unauthorized', message: 'Authentication required.' } });
+      return;
+    }
+    // Scope follows real capability, NOT a blanket 'write'. A full 'admin' gets
+    // write. A 'custom' role only gets write if its live bundles include a
+    // write-capable one — a read-only custom admin must not gain write via MCP
+    // when it can't in the normal API. When unsure, read (fail closed); a custom
+    // admin needing MCP writes uses a write-scoped API token.
+    if (role === 'admin') {
+      req.mcpScope = 'write';
+    } else {
+      const WRITE_BUNDLES = new Set(['storefront-manager', 'manage-settings', 'catalog-manager', 'fulfillment-manager', 'write']);
+      const { roleService } = await import('../../services/role.service.js');
+      const access = await roleService.resolveAccess(u!.sub!);
+      req.mcpScope = (access.bundles ?? []).some((b) => WRITE_BUNDLES.has(b)) ? 'write' : 'read';
+    }
   } catch {
     reply.status(401).send({ error: { code: 'unauthorized', message: 'Authentication required.' } });
   }

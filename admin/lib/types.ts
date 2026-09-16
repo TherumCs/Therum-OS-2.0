@@ -18,6 +18,8 @@ export interface OrderItem {
   id: string;
   quantity: number;
   priceAtTime: number;
+  // Per-line production stage (multi-vendor orders advance each line alone).
+  productionStatus?: string | null;
   variant: { sku: string | null } | null;
 }
 export interface Order {
@@ -28,6 +30,11 @@ export interface Order {
   currency: string;
   items: OrderItem[];
   payment: { status: string } | null;
+  // Who the order is for + where it ships — the list showed only a number.
+  // These ride along on the list response as Order scalars/relations already.
+  guestEmail?: string | null;
+  shipAddress?: Record<string, string> | null;
+  customer?: { id: string; email: string; name: string | null } | null;
 }
 export interface Extension {
   id: string;

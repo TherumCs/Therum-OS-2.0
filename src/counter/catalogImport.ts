@@ -343,7 +343,7 @@ export function isFetchableUrl(raw: string): boolean {
   return true;
 }
 
-async function importImage(url: string, alt: string): Promise<string | null> {
+export async function importImage(url: string, alt: string): Promise<string | null> {
   if (!isFetchableUrl(url)) return null;
   try {
     const res = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(15_000) });
@@ -354,10 +354,55 @@ async function importImage(url: string, alt: string): Promise<string | null> {
     if (!buf.length || buf.length > MAX_IMAGE_BYTES) return null;
     const name = decodeURIComponent(new URL(url).pathname.split('/').pop() || 'image');
     const asset = await mediaService.upload({ filename: name.includes('.') ? name : `${name}.jpg`, mimetype: type.split(';')[0] ?? 'image/jpeg', buffer: buf }, alt);
-    return (asset as { url?: string }).url ?? null;
+    const a = asset as { id: string; url?: string; meta?: Record<string, unknown> | null };
+    // Tag the stored asset with its SOURCE url so localizeImageUrl can reuse
+    // this file when the same external url arrives again (a re-sync, or a POD
+    // partner re-PUTting the product to flip draft->publish) instead of
+    // re-downloading and creating a duplicate asset. Best-effort: never fail
+    // the import over the tag.
+    await db.mediaAsset.update({ where: { id: a.id }, data: { meta: { ...(a.meta ?? {}), sourceUrl: url } } }).catch(() => {});
+    return a.url ?? null;
   } catch {
     return null;
   }
+}
+
+// Per-process cache: a single vendor push CREATEs then PUTs a product several
+// times, and a re-sync repeats the whole thing — all carrying the same image
+// URLs. Keyed by source URL so each distinct image is fetched at most once.
+const localizeCache = new Map<string, string>();
+
+/**
+ * Pull ONE external image URL onto our own media and return the local URL, or
+ * return the input unchanged.
+ *
+ * WHY this exists: vendors push their images as external `{src}` URLs and we
+ * used to store them verbatim. Those CDNs are not ours to rely on — HugePOD/
+ * Tapstitch's Aliyun bucket 403s any request that carries a `Referer` (so the
+ * image loads from curl but is broken in every browser), and Printify's S3
+ * mockup links go 403 once the mockup is regenerated. Either way the card shows
+ * a broken image. Localizing at push time makes every card independent of the
+ * vendor CDN.
+ *
+ * Fail-OPEN by contract: SSRF-blocked, non-image, oversized, or unreachable all
+ * return the ORIGINAL url so a single flaky image can never fail the product
+ * push itself. Site-relative / already-local URLs pass straight through.
+ */
+export async function localizeImageUrl(src: string | null | undefined, alt = ''): Promise<string | null | undefined> {
+  if (typeof src !== 'string' || !/^https?:\/\//i.test(src)) return src;
+  const hit = localizeCache.get(src);
+  if (hit) return hit;
+  // Cluster-safe dedup: a PM2 cluster spreads one push's create+PUTs across
+  // processes, so the per-process cache alone would still re-download. Reuse the
+  // asset already localized from this exact source url (tagged by importImage).
+  try {
+    const existing = await db.mediaAsset.findFirst({ where: { meta: { path: ['sourceUrl'], equals: src } }, select: { url: true } });
+    if (existing?.url) { localizeCache.set(src, existing.url); return existing.url; }
+  } catch { /* lookup failed — fall through and just fetch it */ }
+  const local = await importImage(src, alt);
+  if (!local) return src;
+  localizeCache.set(src, local);
+  return local;
 }
 
 /**

@@ -1,7 +1,9 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { requireCapability } from '../../middleware/capability.js';
+import { requireFullAdmin } from '../../middleware/bundle.js';
 import { customerAuth } from '../../counter/customerAuth.js';
+import { listAccountEmails, setPrimaryEmail, removeEmail } from '../../counter/customerEmail.js';
 import { socialSignIn, SOCIAL_PROVIDERS } from '../../counter/socialSignIn.js';
 import { storeCredentials } from '../../counter/storeCredentials.js';
 import { shipmentService } from '../../counter/shipmentService.js';
@@ -26,6 +28,10 @@ import { TooManyRequestsError } from '../../lib/errors.js';
 import * as catalogImport from '../../counter/catalogImport.js';
 import * as catalogFiles from '../../counter/catalogFiles.js';
 import { requireBundle } from '../../middleware/bundle.js';
+import { verifyUnsubscribeToken } from '../../lib/unsubscribe.js';
+import { resolveCustomerByEmail } from '../../counter/customerEmail.js';
+import { marketingService } from '../../services/marketing.service.js';
+import { campaignSendService } from '../../services/campaignSend.service.js';
 
 // Counter — HTTP surface.
 //
@@ -87,6 +93,73 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
       create: { email, source: 'coming-soon' },
     });
     reply.status(201).send({ ok: true });
+  });
+
+  // Real unsubscribe. The email footer's "Unsubscribe" used to point at /account
+  // and do nothing; a marketing email now carries a signed, per-recipient link
+  // here (and the RFC 8058 List-Unsubscribe / List-Unsubscribe-Post headers, so
+  // Gmail/Apple Mail show a native button that POSTs here). Both verbs honour the
+  // same HMAC — only the server can mint a valid token, so nobody opts a stranger
+  // out by editing a URL — and both set the durable meta.noMarketing flag the
+  // broadcast + review sweeps already respect, and drop any coming-soon signup.
+  async function applyUnsubscribe(rawEmail: unknown, rawToken: unknown, rawSend?: unknown): Promise<boolean> {
+    const email = String(rawEmail ?? '').trim().toLowerCase();
+    const token = String(rawToken ?? '');
+    if (!email || !verifyUnsubscribeToken(email, token)) return false;
+    // `s` = the campaign send this link came from, so the opt-out is counted
+    // against the campaign that caused it. Optional; older links have none.
+    if (rawSend) void campaignSendService.unsubscribed(String(rawSend)).catch(() => {});
+    const resolved = await resolveCustomerByEmail(email, { verifiedOnly: false });
+    if (resolved) {
+      const cust = await db.customer.findUnique({ where: { id: resolved.id }, select: { meta: true } });
+      const meta = (cust?.meta && typeof cust.meta === 'object' && !Array.isArray(cust.meta) ? cust.meta : {}) as Record<string, unknown>;
+      await db.customer.update({ where: { id: resolved.id }, data: { meta: { ...meta, noMarketing: true } } });
+    }
+    // Honouring the opt-out for a coming-soon-only address means removing it.
+    await db.emailSignup.deleteMany({ where: { email } });
+    // And the marketing module's own consent record, which every campaign reads.
+    await marketingService.unsubscribe(email, { source: 'link' });
+    return true;
+  }
+
+  function unsubPage(ok: boolean): string {
+    const msg = ok
+      ? '<h1>You&rsquo;re unsubscribed</h1><p>You will no longer receive marketing email from us. Order and account emails still reach you.</p>'
+      : '<h1>Link expired</h1><p>This unsubscribe link is invalid or has expired. If you keep receiving marketing you did not ask for, reply to any of our emails and we will remove you.</p>';
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Unsubscribe</title>`
+      + `<style>body{margin:0;background:#fafafa;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;color:#0a0a0a}`
+      + `.c{max-width:520px;margin:12vh auto;padding:36px 28px;background:#fff;border:1px solid #e7e7e7;border-radius:14px;text-align:center}`
+      + `h1{font-size:22px;margin:0 0 12px}p{color:#4a4a4a;line-height:1.6;font-size:15px;margin:0}</style></head>`
+      + `<body><div class="c">${msg}</div></body></html>`;
+  }
+
+  // Mail clients send the one-click POST as `application/x-www-form-urlencoded`
+  // (`List-Unsubscribe=One-Click`), which this API answers 415 for out of the
+  // box — so Gmail's native Unsubscribe button silently failed. Scoped to this
+  // plugin, same as the Shopify install form; the rest of the API still
+  // rejects form posts.
+  app.addContentTypeParser('application/x-www-form-urlencoded', { parseAs: 'string' }, (_req, body, done) => {
+    try {
+      done(null, Object.fromEntries(new URLSearchParams(body as string)));
+    } catch (err) {
+      done(err as Error, undefined);
+    }
+  });
+
+  // One-click (RFC 8058): the mail client POSTs with no interaction. Body is
+  // `List-Unsubscribe=One-Click`; the recipient is identified by the signed query.
+  app.post('/shop/unsubscribe', async (req, reply) => {
+    const q = req.query as Record<string, string | undefined>;
+    await applyUnsubscribe(q.e, q.t, q.s);
+    // RFC 8058: a 2xx is the acknowledgement; body is irrelevant to the client.
+    reply.status(200).send({ ok: true });
+  });
+
+  // Human click from the footer link → a small confirmation page.
+  app.get('/shop/unsubscribe', async (req, reply) => {
+    const q = req.query as Record<string, string | undefined>;
+    const ok = await applyUnsubscribe(q.e, q.t, q.s);
+    reply.type('text/html').send(unsubPage(ok));
   });
 
   // Shipping options for a cart + destination. Live vendor rates (Printful et al.)
@@ -191,6 +264,14 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
       destination: z.string().min(3).max(200),
       kind: z.enum(['phone', 'email']),
     }).parse(req.body);
+    // Per-IP throttle, mirroring forgot-password. requestCode's only limiter is
+    // per-DESTINATION (5/15min), so a single IP cycling a fresh destination each
+    // call bypasses it entirely and email-bombs arbitrary inboxes from the
+    // store's own sending domain (burning the transport's reputation, which also
+    // kills transactional mail). Same {sent:true} shape whether or not it fires,
+    // so no oracle is introduced.
+    const ipRl = await checkRateLimit(`customer-code-ip:${req.ip}`, 15, 900);
+    if (!ipRl.allowed) { reply.send({ sent: true }); return; }
     const { code, ...rest } = await customerAuth.requestCode({ ...input, ip: req.ip });
     void code; // handed to the delivery transport, never to the client
     reply.send({ sent: true, ...rest });
@@ -200,12 +281,22 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
   // address — no account-existence oracle).
   app.post('/shop/account/password/forgot', async (req, reply) => {
     const input = z.object({ email: z.string().email() }).parse(req.body);
-    void lifecycleService.sendPasswordResetCode(input.email);
+    // Throttle issuance per-IP AND per-destination: unlimited posting here both
+    // brute-generates codes and email-BOMBS the victim's inbox. Same response
+    // regardless (no oracle). Per-destination cap of 5/15min matches the code
+    // request throttle; the send only proceeds when BOTH allow.
+    const ipRl = await checkRateLimit(`pwreset-ip:${req.ip}`, 15, 900);
+    const toRl = await checkRateLimit(`pwreset-dest:${input.email.trim().toLowerCase()}`, 5, 900);
+    if (ipRl.allowed && toRl.allowed) void lifecycleService.sendPasswordResetCode(input.email);
     reply.send({ sent: true });
   });
 
   // Reset with the mailed code, then sign in.
   app.post('/shop/account/password/reset', async (req, reply) => {
+    // Per-IP throttle so an attacker can't cycle fresh codes to defeat the
+    // per-code attempt cap and brute the 6-digit space across many codes.
+    const rl = await checkRateLimit(`pwreset-verify:${req.ip}`, 20, 900);
+    if (!rl.allowed) throw new TooManyRequestsError('Too many attempts — try again shortly.', rl.retryAfterSeconds);
     const input = z.object({ email: z.string().email(), code: z.string().length(6), password: z.string().min(8).max(200) }).parse(req.body);
     const out = await customerAuth.resetPasswordWithCode({ email: input.email, code: input.code, newPassword: input.password, ip: req.ip });
     reply.send(publicSession(out));
@@ -232,7 +323,11 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
       code: z.string().length(6),
       name: z.string().max(120).optional(),
     }).parse(req.body);
-    const out = await customerAuth.verifyCode({ ...input, userAgent: req.headers['user-agent'], ip: req.ip });
+    // If the caller is already signed in (the just-registered account confirming
+    // its own email), pass the session so verifyCode can PROMOTE that account's
+    // pending email in place rather than the capture-guard delete+create (C5).
+    const signedIn = await resolveCustomer(req);
+    const out = await customerAuth.verifyCode({ ...input, userAgent: req.headers['user-agent'], ip: req.ip, sessionCustomerId: signedIn?.id ?? null });
     reply.send(publicSession(out));
   });
 
@@ -259,6 +354,8 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
       firstName: customer.firstName ?? null,
       lastName: customer.lastName ?? null,
       address,
+      // The account's ≤3 login emails (verified state + which is primary).
+      emails: await listAccountEmails(customer.id),
       identities: await customerAuth.identitiesFor(customer.id),
       // Active membership tier name (e.g. "Friends & Family"), or null — drives
       // the membership pill on the account overview. Same active-membership
@@ -287,7 +384,26 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
     }
     const { token } = z.object({ token: z.string().min(1).max(8000) }).parse(req.body);
 
-    const profile = await socialSignIn.verify(provider as (typeof SOCIAL_PROVIDERS)[number], token);
+    let profile: Awaited<ReturnType<typeof socialSignIn.verify>>;
+    try {
+      profile = await socialSignIn.verify(provider as (typeof SOCIAL_PROVIDERS)[number], token);
+    } catch (err) {
+      // TEMP DIAGNOSTIC (remove after capture): decode the token's claims
+      // WITHOUT trusting them, only to log why a real provider token was
+      // rejected — verify() collapses every failure to one opaque message.
+      try {
+        const seg = token.split('.');
+        const hd = JSON.parse(Buffer.from(seg[0] ?? '', 'base64url').toString('utf8')) as Record<string, unknown>;
+        const pl = JSON.parse(Buffer.from(seg[1] ?? '', 'base64url').toString('utf8')) as Record<string, unknown>;
+        req.log.error(
+          { oauthDiag: true, provider, reason: (err as Error).message, kid: hd.kid, alg: hd.alg, aud: pl.aud, iss: pl.iss, exp: pl.exp, nowSec: Math.floor(Date.now() / 1000), emailVerified: pl.email_verified },
+          'OAUTH VERIFY DIAG',
+        );
+      } catch (e2) {
+        req.log.error({ oauthDiag: true, decodeErr: (e2 as Error).message }, 'OAUTH VERIFY DIAG (decode failed)');
+      }
+      throw err;
+    }
     const out = await customerAuth.signInWithOAuth({
       ...profile,
       userAgent: req.headers['user-agent'],
@@ -309,7 +425,10 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
   app.delete('/shop/account/identities/:identityId', async (req, reply) => {
     const customer = await requireCustomer(req);
     const { identityId } = req.params as { identityId: string };
-    reply.send(await customerAuth.unlinkIdentity(customer.id, identityId, req.ip));
+    // Re-auth proof (password, or a code for passwordless accounts) — removing a
+    // verified sign-in method needs more than a session (audit C3).
+    const proof = (req.body ?? {}) as { password?: string; code?: string };
+    reply.send(await customerAuth.unlinkIdentity(customer.id, identityId, req.ip, proof));
   });
 
   // ── The shopper's own account ─────────────────────────────────────────
@@ -528,11 +647,14 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
     const input = z.object({
       email: z.string().email().max(320),
       password: z.string().max(200).optional(),
+      // Re-auth code for a passwordless account (sent to an EXISTING verified
+      // email), so a stolen session can't add an attacker inbox (audit C3).
+      code: z.string().max(12).optional(),
     }).parse(req.body);
     const rl = await checkRateLimit(`emchange:${req.ip}`, 5, 900);
     if (!rl.allowed) throw new TooManyRequestsError('Too many attempts — try again shortly.', rl.retryAfterSeconds);
     const out = await customerAuth.requestEmailChange({
-      customerId: customer.id, newEmail: input.email, password: input.password, ip: req.ip,
+      customerId: customer.id, newEmail: input.email, password: input.password, code: input.code, ip: req.ip,
     });
     reply.send({ sent: true, to: out.to });
   });
@@ -547,6 +669,22 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
       customerId: customer.id, newEmail: input.email, code: input.code, ip: req.ip,
     });
     reply.send({ changed: true, email: out.email });
+  });
+
+  // Promote a VERIFIED email to primary (moves outbound account mail to it).
+  app.post('/shop/account/email/primary', async (req, reply) => {
+    const customer = await requireCustomer(req);
+    const input = z.object({ email: z.string().email().max(320) }).parse(req.body);
+    await setPrimaryEmail(customer.id, input.email);
+    reply.send({ ok: true, emails: await listAccountEmails(customer.id) });
+  });
+
+  // Remove an email (never the primary or the last remaining one).
+  app.post('/shop/account/email/remove', async (req, reply) => {
+    const customer = await requireCustomer(req);
+    const input = z.object({ email: z.string().email().max(320) }).parse(req.body);
+    await removeEmail(customer.id, input.email);
+    reply.send({ ok: true, emails: await listAccountEmails(customer.id) });
   });
 
   // ── Addresses ─────────────────────────────────────────────────────────
@@ -778,19 +916,22 @@ function publicSession(out: { customer: { id: string; email: string; name: strin
 // and Tapstitch connect by pulling from your store against a WooCommerce- or
 // Shopify-shaped API, so what they need is a key THIS store issues.
 export async function storeKeyRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/store-keys', { preHandler: app.authenticate }, async (_req, reply) => {
+  app.get('/store-keys', { preHandler: [app.authenticate, requireFullAdmin] }, async (_req, reply) => {
     reply.send({ keys: await storeCredentials.list() });
   });
 
-  app.post('/store-keys', { preHandler: app.authenticate }, async (req, reply) => {
+  app.post('/store-keys', { preHandler: [app.authenticate, requireFullAdmin] }, async (req, reply) => {
     const input = z
       .object({ label: z.string().min(1).max(80), scope: z.enum(['read', 'read_write']).default('read_write') })
       .parse(req.body);
+    // FIRST-PARTY key: admin-issued (this route is requireFullAdmin), for the
+    // merchant's own tooling, so it is allowed to see all orders. Partner keys
+    // (wc-auth) are NOT first-party and stay fenced to their own vendor.
     // The secret is in THIS response and nowhere else, ever.
-    reply.status(201).send(await storeCredentials.issue(input.label, input.scope));
+    reply.status(201).send(await storeCredentials.issue(input.label, input.scope, true));
   });
 
-  app.delete('/store-keys/:id', { preHandler: app.authenticate }, async (req, reply) => {
+  app.delete('/store-keys/:id', { preHandler: [app.authenticate, requireFullAdmin] }, async (req, reply) => {
     const { id } = req.params as { id: string };
     reply.send(await storeCredentials.revoke(id));
   });
@@ -799,6 +940,17 @@ export async function storeKeyRoutes(app: FastifyInstance): Promise<void> {
 export async function counterAdminRoutes(app: FastifyInstance): Promise<void> {
   app.addHook('preHandler', app.authenticate);
   app.addHook('preHandler', requireCapability('commerce'));
+  // Every mutating route in this scope requires the storefront-manager bundle.
+  // A full admin passes automatically; a narrowed 'custom' role does not get to
+  // push offers, plan shipments, move money, or run imports just because it has
+  // the 'commerce' read capability. GET/read stays open to any commerce session
+  // (dashboards would be unusable otherwise). Money-movement routes below layer
+  // requireFullAdmin on top of this — this is the floor, not the ceiling.
+  const gateWrites = requireBundle('storefront-manager');
+  app.addHook('preHandler', async (req, reply) => {
+    if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') return;
+    await gateWrites(req, reply);
+  });
 
   // Store activity for the dashboard: orders by status, attempted-but-unfinished
   // checkouts, live abandoned carts (count + value), the coming-soon launch list,
@@ -1005,14 +1157,14 @@ export async function counterAdminRoutes(app: FastifyInstance): Promise<void> {
   // Writes go straight to the bridge. A soft engine failure comes back as
   // { ok:false, reason }; reply non-2xx so the admin Server Action's apiSend
   // throws and the island renders the reason instead of a false success.
-  app.post('/counter/payments/woopay/payout', async (req, reply) => {
+  app.post('/counter/payments/woopay/payout', { preHandler: [app.authenticate, requireFullAdmin] }, async (req, reply) => {
     const { woopayBridge } = await import('../../counter/woopayBridge.js');
     const input = z.object({ currency: z.string().min(3).max(3).default('usd') }).parse(req.body ?? {});
     const r = await woopayBridge.instantPayout(input.currency);
     if (!r.ok) return reply.code(502).send({ error: r.reason ?? 'Instant payout failed.' });
     reply.send(r);
   });
-  app.put('/counter/payments/woopay/deposit-schedule', async (req, reply) => {
+  app.put('/counter/payments/woopay/deposit-schedule', { preHandler: [app.authenticate, requireFullAdmin] }, async (req, reply) => {
     const { woopayBridge } = await import('../../counter/woopayBridge.js');
     const input = z.object({
       interval: z.enum(['daily', 'weekly', 'monthly']),
@@ -1023,14 +1175,14 @@ export async function counterAdminRoutes(app: FastifyInstance): Promise<void> {
     if (!r.ok) return reply.code(502).send({ error: r.reason ?? 'Could not update the schedule.' });
     reply.send(r);
   });
-  app.put('/counter/payments/woopay/methods', async (req, reply) => {
+  app.put('/counter/payments/woopay/methods', { preHandler: [app.authenticate, requireFullAdmin] }, async (req, reply) => {
     const { woopayBridge } = await import('../../counter/woopayBridge.js');
     const input = z.object({ ids: z.array(z.string().min(1).max(40)).max(30) }).parse(req.body);
     const r = await woopayBridge.setEnabledMethods(input.ids);
     if (!r.ok) return reply.code(502).send({ error: r.reason ?? 'Could not save the methods.' });
     reply.send(r);
   });
-  app.post('/counter/payments/woopay/disputes/:id', async (req, reply) => {
+  app.post('/counter/payments/woopay/disputes/:id', { preHandler: [app.authenticate, requireFullAdmin] }, async (req, reply) => {
     const { woopayBridge } = await import('../../counter/woopayBridge.js');
     const id = (req.params as { id: string }).id;
     const input = z.object({
@@ -1041,7 +1193,7 @@ export async function counterAdminRoutes(app: FastifyInstance): Promise<void> {
     if (!r.ok) return reply.code(502).send({ error: r.reason ?? 'Could not save the dispute response.' });
     reply.send(r);
   });
-  app.post('/counter/payments/woopay/disputes/:id/close', async (req, reply) => {
+  app.post('/counter/payments/woopay/disputes/:id/close', { preHandler: [app.authenticate, requireFullAdmin] }, async (req, reply) => {
     const { woopayBridge } = await import('../../counter/woopayBridge.js');
     const r = await woopayBridge.closeDispute((req.params as { id: string }).id);
     if (!r.ok) return reply.code(502).send({ error: r.reason ?? 'Could not close the dispute.' });

@@ -109,6 +109,22 @@ function checkWebhookSecret(): HealthCheck {
   return { id: 'webhook-secret', label: 'Payment webhook secret', status: 'ok', detail: 'Configured.' };
 }
 
+// Every paid order line must actually reach its vendor. A push route that
+// failed is the store's bug (error). A partner webhook returning non-2xx means
+// the store could not hand the order over (warn). This measures DELIVERY — what
+// the store controls; it cannot see whether the partner then prints.
+async function checkFulfillment(): Promise<HealthCheck> {
+  try {
+    const { fulfillmentAudit } = await import('./fulfillmentAudit.service.js');
+    const s = await fulfillmentAudit.sweep();
+    if (s.stuckPush > 0) return { id: 'fulfillment', label: 'Order fulfillment', status: 'error', detail: `${s.stuckPush} paid line(s) failed to reach a print provider — retry or fix the connection.` };
+    if (s.stuckPull > 0) return { id: 'fulfillment', label: 'Order fulfillment', status: 'warn', detail: `${s.stuckPull} paid line(s) the partner did not genuinely accept (200 with an error body): ${s.failingPartners.join(', ')}.` };
+    return { id: 'fulfillment', label: 'Order fulfillment', status: 'ok', detail: `All ${s.total} paid order line(s) genuinely accepted by their vendor.` };
+  } catch (err) {
+    return { id: 'fulfillment', label: 'Order fulfillment', status: 'warn', detail: err instanceof Error ? err.message : 'audit unavailable' };
+  }
+}
+
 // admin/ and builder/ ship their own package.json and are deployed separately,
 // so a mismatch with the API's version is a real operational fact worth seeing
 // rather than an assumption. Missing/unreadable reads as 'unknown', never as
@@ -124,7 +140,7 @@ function readSiblingVersion(dir: 'admin' | 'builder'): string {
 
 export const systemService = {
   async health(): Promise<{ status: CheckStatus; checks: HealthCheck[] }> {
-    const checks = await Promise.all([checkDatabase(), checkRedis(), Promise.resolve(checkJwtSecret()), Promise.resolve(checkCredentialKey()), Promise.resolve(checkCors()), Promise.resolve(checkNodeEnv()), Promise.resolve(checkWebhookSecret())]);
+    const checks = await Promise.all([checkDatabase(), checkRedis(), checkFulfillment(), Promise.resolve(checkJwtSecret()), Promise.resolve(checkCredentialKey()), Promise.resolve(checkCors()), Promise.resolve(checkNodeEnv()), Promise.resolve(checkWebhookSecret())]);
     const status: CheckStatus = checks.some((c) => c.status === 'error') ? 'error' : checks.some((c) => c.status === 'warn') ? 'warn' : 'ok';
     return { status, checks };
   },

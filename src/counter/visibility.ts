@@ -25,14 +25,26 @@ import { db } from '../lib/db.js';
  *                and accounts COMBINE: a shopper who matches either gets in.
  *                Anyone else sees nothing at all — absent from listings and the
  *                URL 404s, with no hint the product exists.
+ *   members    — hidden from the public, visible to EVERY signed-in shopper
+ *                (no milieu or grant needed). A logged-in operator counts too —
+ *                see `isStaff` below.
  */
-export type Visibility = 'public' | 'private' | 'restricted';
+export type Visibility = 'public' | 'private' | 'restricted' | 'members';
 
 /** Who is asking. A signed-out shopper is `null` everywhere below. */
 export interface Viewer {
   customerId: string | null;
   /** Milieus this customer is an ACTIVE member of (pending ones do not count). */
   milieuIds: string[];
+  /**
+   * A signed-in operator (valid admin session) browsing the live storefront.
+   * They have no customer row, but "logged in" is exactly what they are, so
+   * they see the `members` tier — the operator must be able to preview the
+   * products they just pushed without registering a second, customer account.
+   * Deliberately does NOT unlock `restricted` (that needs a real milieu/grant)
+   * or `private` (unlisted by definition).
+   */
+  isStaff?: boolean;
 }
 
 export const ANONYMOUS: Viewer = { customerId: null, milieuIds: [] };
@@ -46,8 +58,10 @@ export const ANONYMOUS: Viewer = { customerId: null, milieuIds: [] };
  * nothing, an expired membership grants nothing, and an expired MILIEU grants
  * nothing either. If that definition changes, both must change together.
  */
-export async function viewerFor(customerId: string | null): Promise<Viewer> {
-  if (!customerId) return ANONYMOUS;
+export async function viewerFor(customerId: string | null, opts?: { isStaff?: boolean }): Promise<Viewer> {
+  const isStaff = !!opts?.isStaff;
+  // A signed-in operator with no customer row still counts as logged in.
+  if (!customerId) return { customerId: null, milieuIds: [], isStaff };
   const now = new Date();
   const rows = await db.milieuMembership.findMany({
     where: {
@@ -58,7 +72,7 @@ export async function viewerFor(customerId: string | null): Promise<Viewer> {
     },
     select: { milieuId: true },
   });
-  return { customerId, milieuIds: rows.map((r) => r.milieuId) };
+  return { customerId, milieuIds: rows.map((r) => r.milieuId), isStaff };
 }
 
 export interface Gated {
@@ -86,6 +100,12 @@ export function canSee(p: Gated, viewer: Viewer): boolean {
         (p.audiences ?? []).some((a) => viewer.milieuIds.includes(a.milieuId)) ||
         (!!viewer.customerId && (p.access ?? []).some((a) => a.customerId === viewer.customerId))
       );
+    case 'members':
+      // The "logged-in can see it" tier: hidden from the public, open to EVERY
+      // signed-in shopper (broader than restricted, which needs a milieu/grant).
+      // A signed-in operator counts as logged in too — they preview the live
+      // site with the same access as a customer, without a customer account.
+      return !!viewer.customerId || !!viewer.isStaff;
     default:
       return true;
   }
@@ -125,6 +145,9 @@ export function visibleWhere(viewer: Viewer): Prisma.ProductWhereInput {
   return {
     OR: [
       { visibility: 'public' },
+      // 'members' — visible to ANY signed-in shopper (customer OR operator),
+      // never to the public.
+      ...(viewer.customerId || viewer.isStaff ? [{ visibility: 'members' }] : []),
       // No qualifying grant at all means no restricted product can match, and
       // an empty OR inside would match EVERYTHING — the failure mode here is
       // exposing the whole restricted catalogue, so it is spelled out.

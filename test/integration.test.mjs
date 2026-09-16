@@ -89,25 +89,28 @@ test('create product returns entity with variant', async () => {
 });
 
 test('order reserves inventory + is idempotent + total is correct', async () => {
+  // /api/orders is the ADMIN order-creation endpoint (gated storefront-manager;
+  // the storefront itself creates orders via /cart/checkout). So this admin call
+  // carries an admin token.
   const key = `it-${Date.now()}`;
   const payload = { items: [{ variantId, quantity: 2 }], idempotencyKey: key };
-  const r1 = await app.inject({ method: 'POST', url: '/api/orders', payload });
+  const r1 = await app.inject({ method: 'POST', url: '/api/orders', headers: auth(), payload });
   assert.equal(r1.statusCode, 201);
   const o1 = r1.json();
   assert.equal(o1.status, 'pending');
   assert.equal(o1.total, 5000);
-  const r2 = await app.inject({ method: 'POST', url: '/api/orders', payload });
+  const r2 = await app.inject({ method: 'POST', url: '/api/orders', headers: auth(), payload });
   assert.equal(r2.json().id, o1.id, 'idempotent: same order id');
 });
 
 test('oversell guard returns 409', async () => {
-  const r = await app.inject({ method: 'POST', url: '/api/orders', payload: { items: [{ variantId, quantity: 9999 }] } });
+  const r = await app.inject({ method: 'POST', url: '/api/orders', headers: auth(), payload: { items: [{ variantId, quantity: 9999 }] } });
   assert.equal(r.statusCode, 409);
   assert.equal(r.json().error.code, 'conflict');
 });
 
 test('webhook rejects bad signature, accepts valid + marks paid', async () => {
-  const oc = await app.inject({ method: 'POST', url: '/api/orders', payload: { items: [{ variantId, quantity: 1 }] } });
+  const oc = await app.inject({ method: 'POST', url: '/api/orders', headers: auth(), payload: { items: [{ variantId, quantity: 1 }] } });
   const orderId = oc.json().id;
   const body = JSON.stringify({ type: 'payment.succeeded', orderId, txnId: 'it-txn' });
 

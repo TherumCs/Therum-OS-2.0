@@ -78,7 +78,7 @@ export const SUBSCRIBE_SCRIPT = `
         body: JSON.stringify({ email: email })
       }).then(function(r){ return r.json().catch(function(){ return {}; }).then(function(j){ return { ok: r.ok, j: j }; }); })
         .then(function(res){
-          if (res.ok && res.j.ok) { f.reset(); note.textContent = 'Thanks — check your inbox for your code.'; }
+          if (res.ok && res.j.ok) { f.reset(); note.textContent = 'You\u2019re on the list.'; try { document.cookie = 'th_sub=1; path=/; max-age=315360000; samesite=lax'; } catch (e) {} }
           else { note.textContent = res.j.error || 'Could not sign you up just now.'; go.disabled = false; }
         })
         .catch(function(){ note.textContent = 'Could not sign you up just now.'; go.disabled = false; });

@@ -1,14 +1,19 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
-import { usePathname, useRouter } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { NavSection } from '../../lib/nav';
 import { BASE_PATH } from '../../lib/session';
 import { Icon } from './icons';
 
-function isActive(pathname: string, href: string): boolean {
-  const path = href.split('?')[0]!;
-  return path === '/' ? pathname === '/' : pathname === path || pathname.startsWith(path + '/');
+function isActive(pathname: string, href: string, search?: URLSearchParams | null): boolean {
+  const [path, query] = href.split('?') as [string, string | undefined];
+  const onPath = path === '/' ? pathname === '/' : pathname === path || pathname.startsWith(path + '/');
+  if (!onPath || !query) return onPath;
+  // Items that differ only by query (Flow's tabs) light up one at a time.
+  const want = new URLSearchParams(query);
+  for (const [k, v] of want) if ((search?.get(k) ?? (k === 'tab' ? 'subscribers' : null)) !== v) return false;
+  return true;
 }
 
 function slugify(label: string): string {
@@ -31,6 +36,7 @@ export function Sidebar({
   startFolded: boolean;
 }) {
   const pathname = usePathname();
+  const search = useSearchParams();
   const router = useRouter();
   const [folded, setFolded] = useState(startFolded);
 
@@ -294,7 +300,7 @@ export function Sidebar({
                             </button>
                           </span>
                         )}
-                        <Link href={item.href} className={'th-sb-item' + (isActive(pathname, item.href) ? ' active' : '')}>
+                        <Link href={item.href} className={'th-sb-item' + (isActive(pathname, item.href, search) ? ' active' : '')}>
                           <ItemIcon />
                           <span>{item.label}</span>
                         </Link>

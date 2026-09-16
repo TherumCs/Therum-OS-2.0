@@ -1,0 +1,15 @@
+-- Scope one-time email codes by PURPOSE.
+--
+-- Login codes, registration-verification codes and password-reset codes were all
+-- written as kind:'email' with no purpose discriminator, and every consumer
+-- (verifyCode / resetPasswordWithCode / confirmEmailChange) selected with the
+-- same filter. The rows were therefore interchangeable: a code mailed as "your
+-- login code" could be redeemed at the password-reset endpoint to set a new
+-- password (full account takeover), and vice-versa. A purpose column, set at
+-- issuance and required at consumption, makes each code redeemable only in the
+-- flow it was minted for.
+--
+-- DEFAULT 'login' so any code already in flight at deploy behaves as a login
+-- code (the common case); reset/email-change codes minted after deploy carry
+-- their own purpose. IF NOT EXISTS keeps this a no-op on any DB already patched.
+ALTER TABLE "customer_auth_codes" ADD COLUMN IF NOT EXISTS "purpose" TEXT NOT NULL DEFAULT 'login';

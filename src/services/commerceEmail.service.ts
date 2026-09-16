@@ -110,7 +110,10 @@ export const commerceEmailService = {
       const adminLink = origin ? `\n\nOpen it: ${origin}/counter` : '';
       const html = orderEmailHtml({
         heading: 'New order',
-        intro: order.guestEmail ? `${order.guestEmail} just placed an order.` : 'A new order just landed.',
+        // guestEmail is customer-supplied at checkout and the template's intro
+        // is NOT auto-escaped (para/nw only) — escape it so a crafted value can't
+        // inject markup into the admin's inbox.
+        intro: order.guestEmail ? `${esc(order.guestEmail)} just placed an order.` : 'A new order just landed.',
         rows: orderRows(order),
         total: money(order.total, order.currency),
         orderNumber: order.number,
@@ -132,7 +135,8 @@ export const commerceEmailService = {
   async sendRefundNotice(orderId: string): Promise<void> {
     try {
       const order = await orderWithItems(orderId);
-      if (!order?.guestEmail) return;
+      const to = order?.guestEmail ?? order?.customer?.email ?? null;
+      if (!order || !to) return; // account customers (no guestEmail) were silently skipped
       const site = await settingsService.getSite();
       const html = orderEmailHtml({
         heading: 'Refund issued',
@@ -143,7 +147,7 @@ export const commerceEmailService = {
         siteName: site.siteName,
       });
       await notificationService.sendToAddress(
-        order.guestEmail,
+        to,
         `${site.siteName} — order ${order.number} refunded`,
         `Your order ${order.number} has been refunded in full (${money(order.refundedTotal, order.currency)}).\nRefunds typically appear within 5–10 business days depending on your bank.\n\n— ${site.siteName}`,
         html,
@@ -163,13 +167,17 @@ export const commerceEmailService = {
           order: {
             select: {
               guestEmail: true, number: true, currency: true,
+              customer: { select: { email: true } },
               items: { include: { variant: { include: { product: { select: { name: true, image: true } } } } } },
             },
           },
         },
       });
       const order = shipment?.order;
-      if (!order?.guestEmail || !shipment?.trackingNumber) return; // nothing to send to / not really shipped
+      // Checkout email first, account email second — an account customer whose
+      // checkout left guestEmail blank was silently getting NO shipped notice.
+      const to = order?.guestEmail ?? order?.customer?.email ?? null;
+      if (!order || !to || !shipment?.trackingNumber) return; // nothing to send to / not really shipped
       const site = await settingsService.getSite();
       const storeOrigin = process.env.PUBLIC_ORIGIN?.replace(/\/+$/, '') || '';
       const url = trackingUrl(shipment.trackingCarrier, shipment.trackingNumber) ?? (storeOrigin ? `${storeOrigin}/account` : '');
@@ -187,7 +195,7 @@ export const commerceEmailService = {
         siteName: site.siteName,
       });
       await notificationService.sendToAddress(
-        order.guestEmail,
+        to,
         `${site.siteName} — order ${order.number} shipped`,
         `Your order ${order.number} has shipped.\n\n${carrier} ${shipment.trackingNumber}\nTrack it: ${url}\n\n— ${site.siteName}`,
         html,
@@ -202,10 +210,11 @@ export const commerceEmailService = {
     try {
       const shipment = await db.orderShipment.findUnique({
         where: { id: shipmentId },
-        select: { order: { select: { guestEmail: true, number: true } } },
+        select: { order: { select: { guestEmail: true, number: true, customer: { select: { email: true } } } } },
       });
       const order = shipment?.order;
-      if (!order?.guestEmail) return;
+      const to = order?.guestEmail ?? order?.customer?.email ?? null;
+      if (!order || !to) return; // account customers (no guestEmail) were silently skipped
       const site = await settingsService.getSite();
       const html = messageEmailHtml({
         eyebrow: 'Delivered', heading: 'Your order arrived.',
@@ -217,13 +226,83 @@ export const commerceEmailService = {
         siteName: site.siteName,
       });
       await notificationService.sendToAddress(
-        order.guestEmail,
+        to,
         `${site.siteName} — order ${order.number} delivered`,
         `Your order ${order.number} was delivered. Thank you for shopping ${site.siteName}.`,
         html,
       );
     } catch (err) {
       logger.warn({ err, shipmentId }, 'delivered-notice email failed (non-fatal)');
+    }
+  },
+
+  // Per-line "your item is being made" notice. A multi-vendor order enters
+  // production a product at a time, so this names the SPECIFIC items now in
+  // production (itemIds) rather than the whole order. Fired by
+  // orderService.setItemProduction when a line first enters 'in_production'.
+  // Customer notice as a line advances through production. ONE function for every
+  // stage a shopper should hear about — entering production, shipping, delivery —
+  // so a multi-vendor order tells the customer where each PART is, not just "your
+  // order". Called per line (atomically, once per real transition) from
+  // setItemProduction; copy adapts to whole-order vs part-of-order.
+  async sendStageNotice(
+    orderId: string,
+    itemIds: string[],
+    stage: 'in_production' | 'shipped' | 'delivered',
+    _origin: string | null,
+  ): Promise<void> {
+    try {
+      const order = await orderWithItems(orderId);
+      const to = order?.guestEmail ?? order?.customer?.email ?? null;
+      if (!order || !to) return;
+      const named = order.items.filter((i) => itemIds.includes(i.id));
+      const productNames = named.map((i) => i.variant?.product?.name ?? 'your item');
+      const site = await settingsService.getSite();
+      const list = productNames.length ? productNames.map((n) => `• ${n}`).join('\n') : 'your order';
+      const allInOrder = named.length >= order.items.length;
+      const many = productNames.length > 1;
+      const S = {
+        in_production: {
+          eyebrow: 'In production', verb: 'in production',
+          whole: 'Your order is being made.', part: 'Part of your order is being made.',
+          leadWhole: `Good news &mdash; order ${esc(order.number)} is now in production. We&rsquo;ll email you again the moment it ships.`,
+          leadPart: `Good news &mdash; ${many ? 'these items from' : 'an item from'} order ${esc(order.number)} ${many ? 'are' : 'is'} now in production. The rest of your order follows its own timeline; we&rsquo;ll email you as each part ships.`,
+          next: "We'll email you again as each part ships.",
+        },
+        shipped: {
+          eyebrow: 'Shipped', verb: 'shipped',
+          whole: 'Your order is on the way.', part: 'Part of your order is on the way.',
+          leadWhole: `Order ${esc(order.number)} has shipped and is on its way to you.`,
+          leadPart: `${many ? 'These items from' : 'An item from'} order ${esc(order.number)} ${many ? 'have' : 'has'} shipped. The rest of your order follows its own timeline.`,
+          next: 'If a tracking number is available it will follow separately.',
+        },
+        delivered: {
+          eyebrow: 'Delivered', verb: 'delivered',
+          whole: 'Your order was delivered.', part: 'Part of your order was delivered.',
+          leadWhole: `Order ${esc(order.number)} was marked delivered &mdash; we hope it&rsquo;s everything you wanted.`,
+          leadPart: `${many ? 'These items from' : 'An item from'} order ${esc(order.number)} ${many ? 'were' : 'was'} delivered.`,
+          next: 'Something not right? Just reply to this email.',
+        },
+      }[stage];
+      const heading = allInOrder ? S.whole : S.part;
+      const lead = allInOrder ? S.leadWhole : S.leadPart;
+      const html = messageEmailHtml({
+        eyebrow: S.eyebrow, heading,
+        paragraphs: [
+          lead,
+          ...(allInOrder ? [] : [productNames.map((n) => `<strong>${esc(n)}</strong>`).join('<br>')]),
+        ],
+        cta: { label: 'View your order', url: `${process.env.PUBLIC_ORIGIN || ''}/account` },
+        siteName: site.siteName,
+      });
+      await notificationService.sendToAddress(
+        to,
+        `${site.siteName} — order ${order.number}: ${S.verb}`,
+        `${allInOrder ? `Your order ${order.number} is now ${S.verb}.` : `Part of your order ${order.number} is now ${S.verb}:\n${list}`}\n\n${S.next}\n\n- ${site.siteName}`,
+        html,
+      );
+    } catch (err) {
+      logger.warn({ err, orderId, stage }, 'stage-notice email failed (non-fatal)');
     }
   },
 };

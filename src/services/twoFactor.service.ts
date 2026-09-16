@@ -39,8 +39,14 @@ export const twoFactorService = {
 
   // Returns backup codes ONCE, in plaintext — only their hashes are ever
   // stored, matching how the password itself is handled.
-  async confirm(userId: string, code: string): Promise<{ backupCodes: string[] }> {
+  async confirm(userId: string, code: string, password: string): Promise<{ backupCodes: string[] }> {
     const user = await requireUser(userId);
+    // Re-auth: binding a second factor to this account is a sensitive change; a
+    // stolen SESSION alone must not be able to enrol an attacker's device on a
+    // not-yet-enrolled account (audit R6). Require the account password.
+    if (!password || !(await verifyPassword(password, user.passwordHash))) {
+      throw new ValidationError('Enter your account password to enable two-factor.', 'password');
+    }
     if (!user.totpSecret) throw new ValidationError('Start enrollment first.', 'totp');
     const result = verifyTotp(user.totpSecret, code, user.totpLastStep);
     if (!result.ok) throw new ValidationError('Incorrect code — check the time on your device and try again.', 'code');
@@ -53,8 +59,17 @@ export const twoFactorService = {
     return { backupCodes: plainCodes };
   },
 
-  async disable(userId: string): Promise<void> {
-    await requireUser(userId);
+  async disable(userId: string, proof: { password?: string; code?: string }): Promise<void> {
+    const user = await requireUser(userId);
+    // Re-auth: a stolen SESSION alone must NOT be able to strip the second factor
+    // (and then rebind the attacker's device), which defeated mandatory-2FA
+    // entirely (audit R6). Require proof beyond the session cookie: the account
+    // password OR a current TOTP/backup code.
+    const okPassword = !!proof.password && (await verifyPassword(proof.password, user.passwordHash));
+    const okCode = !!proof.code && (await twoFactorService.verifyChallenge(userId, proof.code));
+    if (!okPassword && !okCode) {
+      throw new ValidationError('Enter your password or a current 2FA code to turn off two-factor.', 'proof');
+    }
     await db.adminUser.update({ where: { id: userId }, data: { totpEnabled: false, totpSecret: null, backupCodes: Prisma.JsonNull, totpLastStep: null } });
   },
 

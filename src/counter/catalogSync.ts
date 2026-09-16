@@ -23,6 +23,10 @@ export interface NormalizedVariant {
   sku: string | null;
   /** Minor units. Providers quote decimals, cents, or strings; adapters convert. */
   price: number;
+  /** The provider's cost-to-make (wholesale), minor units. For POD the synced
+   *  number IS the production cost (the merchant sets retail in Counter), so we
+   *  record it as `cost` — that is what the margin floor clamps discounts against. */
+  cost: number;
   color: string | null;
   size: string | null;
   inventory: number;
@@ -251,6 +255,9 @@ const printful: CatalogProvider = {
               sourceId: String(v.id),
               sku: v.sku ?? null,
               price,
+              // POD: the vendor's number is the cost to make. Record it so the
+              // margin floor can protect the retail price the merchant sets.
+              cost: price,
               color: v.color ?? null,
               size: v.size ?? null,
               inventory: POD_INVENTORY,
@@ -329,6 +336,9 @@ const printify: CatalogProvider = {
           sourceId: String(v.id),
           sku: v.sku ?? null,
           price: typeof v.price === 'number' ? v.price : 0,
+          // Provider number = the cost baseline for the margin floor; the merchant
+          // sets the true retail in Counter (which re-sync no longer clobbers).
+          cost: typeof v.price === 'number' ? v.price : 0,
           // Printify puts the option combination in the variant title.
           color: null,
           size: v.title ?? null,
@@ -426,7 +436,13 @@ export const catalogSyncService = {
             await db.productVariant.update({
               where: { id: found.id },
               data: {
-                price: v.price,
+                // Provider owns COST (its wholesale number); the merchant owns
+                // the retail PRICE. A re-sync used to overwrite `price` with the
+                // provider's number every time — wiping the markup set in Counter
+                // and leaving synced products selling at cost, which also made the
+                // margin floor a no-op (cost was never recorded at all). Now: keep
+                // cost current, and NEVER clobber the merchant's retail price.
+                cost: v.cost,
                 // Images are set ONLY when the variant has none.
                 //
                 // The provider's single rendered preview must not overwrite the

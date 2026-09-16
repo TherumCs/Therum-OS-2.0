@@ -36,3 +36,6 @@ bricks-addons/
 # Forge/cli-* audit output envelopes (tool artifacts, not source)
 .claude/cli-*.json
 .claude/tangle-partition.json
+
+# Ops notes (failure logs, unreleased-notes) live in the TSC-BETA repo, not in the product.
+_core/

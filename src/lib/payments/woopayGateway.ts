@@ -78,7 +78,12 @@ export const woopayGateway: PaymentGateway = {
   // payment-method type. BNPL / Cash App are reachable on the WCPay rail but
   // are NOT declared — createIntent (below) has no funding-method input to
   // select them (see risks); declaring them would light up a dead path.
-  supports: (c) => ['refunds', 'partial_refunds', 'webhooks', 'card', 'wallet_apple', 'wallet_google'].includes(c),
+  // 'sync_refund': refund() confirms the money movement synchronously (engineSend
+  // returns ok before it resolves) and there is NO refund webhook — the bridge
+  // webhook only carries payment.succeeded/failed. So the caller must confirm the
+  // Refund row inline; without this it sat 'pending' forever, no refund email, no
+  // coupon release (audit C1).
+  supports: (c) => ['refunds', 'partial_refunds', 'webhooks', 'sync_refund', 'card', 'wallet_apple', 'wallet_google'].includes(c),
 
   async createIntent(
     order: OrderForPayment,

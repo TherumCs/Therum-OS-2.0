@@ -6,6 +6,9 @@ import { sendEmailTo, type MailAttachment } from '../../services/notification.se
 import { roleBySlug, CAREERS_INBOX, CV_MAX_BYTES, CV_TYPES } from '../../site/careers.js';
 import { checkRateLimit } from '../../lib/rateLimit.js';
 import { TooManyRequestsError, ValidationError } from '../../lib/errors.js';
+import { marketingService } from '../../services/marketing.service.js';
+import { signupFormService } from '../../services/signupForm.service.js';
+import { normalisePhone } from '../../services/sms.service.js';
 
 // The contact form's one endpoint.
 //
@@ -33,6 +36,12 @@ const ContactInput = z.object({
 
 const SubscribeInput = z.object({
   email: z.string().email().max(320),
+  firstName: z.string().max(80).optional(),
+  phone: z.string().max(40).optional(),
+  smsConsent: z.boolean().optional(),
+  // Which capture surface — only the storefront's own. Anything else is 'footer'.
+  source: z.enum(['footer', 'popup', 'embed', 'checkout']).optional(),
+  formId: z.string().max(40).optional(),
   // Same honeypot contract as the contact form above.
   website: z.string().max(200).optional(),
 });
@@ -105,17 +114,22 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
       throw new TooManyRequestsError('Too many signups from this address — try again shortly.', rl.retryAfterSeconds);
     }
 
-    const n = await settingsService.getNotifications();
-    const to = n.adminEmail;
-    const transport = await mailTransport();
-    // Say so plainly rather than showing a success message that means nothing.
-    // A signup form that silently drops addresses is worse than one that admits
-    // it is not wired up.
-    if (!to || !n.emailEnabled || !transport.ready) {
-      return reply.send({ ok: false, error: 'Signups are not configured yet.' });
-    }
+    // The address is SAVED first — onto the Newsletter list in Marketing —
+    // which is what a signup form is for. This used to only email the
+    // merchant and keep nothing, so every footer signup was lost.
+    const phone = input.phone ? normalisePhone(input.phone) : null;
+    const r = await marketingService.subscribe({ email: input.email, firstName: input.firstName || null, phone, smsConsent: !!phone && !!input.smsConsent, source: input.source ?? 'footer', resubscribe: true });
+    if (input.formId) void signupFormService.countSubmit(input.formId);
+    // The popup reads this to never show itself to someone already on the list.
+    reply.header('Set-Cookie', 'th_sub=1; Path=/; Max-Age=315360000; SameSite=Lax');
 
-    await sendEmailTo(to, 'New newsletter signup', `${input.email}\n\nFrom the site footer signup form.`);
+    // The heads-up to the merchant stays, but it is now a courtesy, not the
+    // record: a dead transport no longer loses the signup.
+    const n = await settingsService.getNotifications();
+    const transport = await mailTransport();
+    if (r.created && n.adminEmail && n.emailEnabled && transport.ready) {
+      void sendEmailTo(n.adminEmail, 'New newsletter signup', `${input.email}\n\nFrom the site footer signup form.`).catch(() => {});
+    }
     reply.send({ ok: true });
   });
 

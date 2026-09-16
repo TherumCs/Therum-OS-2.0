@@ -1,0 +1,12 @@
+-- Trust boundary for partner order scoping. A first-party (admin-issued) store
+-- key sees all orders; a partner key is fenced to its own vendor's orders. The
+-- scope used to fail OPEN for any credential label outside a 9-brand allowlist,
+-- leaking every customer's PII to a partner named anything else (audit CRITICAL).
+-- The fence now keys on this flag instead of a partner-controlled label.
+--
+-- DEFAULT false so EVERY existing credential is treated as a partner (fenced) —
+-- fail closed. The full-admin /store-keys issuance path sets it true going
+-- forward; an existing admin store-wide key that legitimately needs all-order
+-- access is re-issued (or flipped by an operator) rather than leaving the leak
+-- open by default. IF NOT EXISTS keeps this a no-op on an already-patched DB.
+ALTER TABLE "store_credentials" ADD COLUMN IF NOT EXISTS "first_party" BOOLEAN NOT NULL DEFAULT false;

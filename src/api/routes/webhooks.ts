@@ -3,7 +3,7 @@ import { Prisma } from '@prisma/client';
 import { z } from 'zod';
 import { env } from '../../lib/env.js';
 import { verifyHmac } from '../../lib/webhook.js';
-import { UnauthorizedError } from '../../lib/errors.js';
+import { UnauthorizedError, ConflictError } from '../../lib/errors.js';
 import { orderService } from '../../services/order.service.js';
 
 const WebhookEvent = z.object({
@@ -36,7 +36,22 @@ export async function webhookRoutes(app: FastifyInstance): Promise<void> {
       return;
     }
 
-    const order = await orderService.transition(event.orderId, { status: 'failed' });
-    reply.send({ ok: true, status: order.status });
+    // payment.failed. Idempotent like the success path above: a PSP routinely
+    // re-delivers, and transition() throws ConflictError on a graph-forbidden
+    // move (failed->failed, cancelled->failed) or the paid-order guard (a
+    // payment.failed arriving after a payment.succeeded already advanced the
+    // order). Treat those as a benign no-op and ACK, instead of a 500 that makes
+    // the PSP retry-loop forever.
+    try {
+      const order = await orderService.transition(event.orderId, { status: 'failed' });
+      reply.send({ ok: true, status: order.status });
+    } catch (err) {
+      if (err instanceof ConflictError) {
+        const cur = await orderService.get(event.orderId).catch(() => null);
+        reply.send({ ok: true, status: cur?.status ?? 'unchanged', note: 'already terminal or paid' });
+        return;
+      }
+      throw err;
+    }
   });
 }

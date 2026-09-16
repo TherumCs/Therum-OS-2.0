@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { db } from '../lib/db.js';
+import { redis } from '../lib/redis.js';
 import { logger } from '../lib/logger.js';
 import { ConflictError, NotFoundError, UnauthorizedError, ValidationError } from '../lib/errors.js';
 import { connectionService } from './connection.service.js';
@@ -222,20 +223,46 @@ export const paymentGatewayService = {
     if (!gateway.payWithToken) {
       throw new ValidationError(`${gateway.displayName()} cannot take an in-page payment — it uses a hosted checkout.`);
     }
-    const paymentId = await gateway.payWithToken(
-      { id: order.id, number: order.number, total: order.total, currency: order.currency },
-      credential,
-      token,
-      `tok_${order.id}`,
-      vault,
-    );
-    // Settle through the canonical paid path, not raw row writes. markPaid is
-    // the one place that advances pending→processing, submits fulfilment, and
-    // (now) sends the receipt + owner email — an in-page charge that wrote the
-    // rows directly used to skip all three, so Stripe orders shipped nothing
-    // and emailed no one. pspResponse records how it settled.
-    await orderService.markPaid(order.id, paymentId, providerId, { via: 'in-page-token', status: 'paid' });
-    return { orderNumber: order.number, paymentId, status: 'paid' as const };
+
+    // Per-order charge LOCK. The PSP idempotency key is per-attempt (below), so
+    // it deliberately does NOT dedupe two DIFFERENT tokens for the same order —
+    // which means a rapid double-click / concurrent retry (each re-tokenizes to
+    // a fresh pm_) could otherwise charge the card TWICE before markPaid flips
+    // the status (audit: in-page double-charge). Serialize charges per order:
+    // the second caller can't acquire the lock, and re-reads status inside it.
+    const lockKey = `pay-lock:${order.id}`;
+    const gotLock = await redis.set(lockKey, '1', 'PX', 30_000, 'NX');
+    if (!gotLock) throw new ConflictError('A payment for this order is already being processed — give it a moment.', 'order');
+    try {
+      // Re-read INSIDE the lock: a just-completed attempt may have settled it.
+      const fresh = await db.order.findUnique({ where: { id: order.id }, select: { status: true } });
+      if (fresh && fresh.status !== 'pending') throw new ConflictError(`Order is ${fresh.status}, not payable.`, 'order');
+
+      // PSP idempotency key is per CHARGE ATTEMPT, not per order, so a retry with
+      // a CORRECTED card is not rejected by the PSP for reusing a key with
+      // different params (a per-order key was that dead-end — audit H5). Safe
+      // against double-charge because the lock above serializes attempts and
+      // markPaid's atomic settle claim is the final guard; a network-blip orphan
+      // (charge ok, response lost) is recovered by the payment_intent webhook via
+      // the order_id metadata now carried on the intent.
+      const attemptKey = `tok_${order.id}_${createHash('sha256').update(token).digest('hex').slice(0, 16)}`;
+      const paymentId = await gateway.payWithToken(
+        { id: order.id, number: order.number, total: order.total, currency: order.currency },
+        credential,
+        token,
+        attemptKey,
+        vault,
+      );
+      // Settle through the canonical paid path, not raw row writes. markPaid is
+      // the one place that advances pending→processing, submits fulfilment, and
+      // (now) sends the receipt + owner email — an in-page charge that wrote the
+      // rows directly used to skip all three, so Stripe orders shipped nothing
+      // and emailed no one. pspResponse records how it settled.
+      await orderService.markPaid(order.id, paymentId, providerId, { via: 'in-page-token', status: 'paid' });
+      return { orderNumber: order.number, paymentId, status: 'paid' as const };
+    } finally {
+      await redis.del(lockKey).catch(() => { /* lock self-expires via PX */ });
+    }
   },
 
   // The /checkout/return path for redirect gateways — the endpoint 1.x's
@@ -368,7 +395,12 @@ export const paymentGatewayService = {
       return;
     }
     if ((event.kind === 'refund.succeeded' || event.kind === 'payment.refunded') && event.refundId) {
-      await db.refund.updateMany({ where: { providerRefundId: event.refundId, status: 'pending' }, data: { status: 'succeeded' } });
+      // One-shot flip: only the call that actually moves pending→succeeded does
+      // the side effects. A retried/duplicate provider webhook flips 0 rows and
+      // must NOT re-release the coupon or re-send the 'refund issued' email
+      // (customers were getting duplicate refund emails on every webhook retry).
+      const { count: flipped } = await db.refund.updateMany({ where: { providerRefundId: event.refundId, status: 'pending' }, data: { status: 'succeeded' } });
+      if (flipped === 0) return; // already processed
       // Coupon release happens on CONFIRMED refund (audit F6) — only once the
       // provider says the money actually went back, and only when succeeded
       // refunds cover the whole order.
@@ -398,6 +430,39 @@ export const paymentGatewayService = {
       }
       return;
     }
+    // PayPal: the payer APPROVED, but PayPal never auto-captures — the money
+    // moves only when we capture. Normally the browser return (/checkout/return)
+    // or the buy-box poll (/shop/checkout/redirect-finish) triggers that. A buyer
+    // who approves and then never comes back — closed the tab, dismissed the
+    // PayPal popup, lost signal — was silently lost: authorised, never charged,
+    // order stuck pending, no receipt. That is the recurring PayPal failure. PayPal
+    // DOES webhook us the approval (CHECKOUT.ORDER.APPROVED), so capture here too,
+    // server-side and browser-independent. Guards: only a still-PENDING order with
+    // an intent is captured (never resurrect a cancelled/abandoned order into a
+    // charge — same rule as finalizeReturn); idempotent via the same
+    // `capture-<orderId>` PayPal-Request-Id (a concurrent return-path capture
+    // returns the SAME capture, not a second charge) and markPaid no-ops once paid.
+    if (providerId === 'paypal' && event.kind === 'checkout.approved') {
+      const orderId = typeof event.payload?.orderId === 'string' ? event.payload.orderId : null;
+      if (!orderId) {
+        logger.warn({ provider: providerId }, 'paypal approved webhook without custom_id — cannot resolve order');
+        return;
+      }
+      const order = await db.order.findUnique({ where: { id: orderId }, include: { payment: true } });
+      if (!order || order.status !== 'pending' || !order.payment?.txnId || order.payment.status === 'paid') return;
+      const { gateway, credential } = await requireGateway('paypal');
+      const { capturePaypalOrder } = await import('../lib/payments/paypalGateway.js');
+      const cap = await capturePaypalOrder(order.payment.txnId, credential, `capture-${orderId}`);
+      // PayPal collected email + ship-to in its window; fill any blanks before
+      // markPaid so fulfillment and the receipt have them (mirrors finalizeReturn).
+      await orderService.backfillContact(orderId, cap.contact);
+      const status = await gateway.intentStatus(order.payment.txnId, credential);
+      if (status === 'succeeded') {
+        await orderService.markPaid(orderId, order.payment.txnId, 'paypal', { via: 'webhook-approved-capture', status });
+      }
+      return;
+    }
+
     // Unknown kinds (disputes, refund.pending) are ledgered but not acted on.
     logger.info({ provider: providerId, kind: event.kind }, 'psp event ledgered, no handler');
   },
@@ -481,6 +546,23 @@ export const paymentGatewayService = {
       throw err;
     }
     refund = await db.refund.update({ where: { id: refund.id }, data: { providerRefundId } });
+
+    // SYNCHRONOUS gateways (woopay: engineSend confirmed the money moved before
+    // gateway.refund() returned, and there is NO refund webhook) must be confirmed
+    // INLINE — otherwise the Refund row sits 'pending' forever, the customer never
+    // gets the refund email, and the coupon slot is never released (audit C1). This
+    // mirrors _apply's refund.succeeded one-shot flip.
+    if (gateway.supports('sync_refund')) {
+      const { count: flipped } = await db.refund.updateMany({ where: { id: refund.id, status: 'pending' }, data: { status: 'succeeded' } });
+      if (flipped === 1) {
+        const ord = await db.order.findUnique({ where: { id: orderId }, select: { total: true } });
+        const succeeded = await db.refund.aggregate({ where: { orderId, status: 'succeeded' }, _sum: { amount: true } });
+        if (ord && (succeeded._sum.amount ?? 0) >= ord.total) {
+          await couponService.releaseForOrder(orderId);
+          void commerceEmailService.sendRefundNotice(orderId); // fire-and-forget, on full refund (mirrors _apply)
+        }
+      }
+    }
 
     // Full refund cancels the order through the real state machine (which
     // owns the restock rules); partial refunds leave status alone. Coupon

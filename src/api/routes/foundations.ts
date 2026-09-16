@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { foundationService } from '../../services/foundation.service.js';
+import { requireFullAdmin } from '../../middleware/bundle.js';
 
 const idParam = (req: { params: unknown }): string => (req.params as { id: string }).id;
 
@@ -10,7 +11,7 @@ export async function foundationRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Enable / disable a foundation (Studio). Admin only.
-  app.patch('/foundations/:id', { preHandler: app.authenticate }, async (req, reply) => {
+  app.patch('/foundations/:id', { preHandler: [app.authenticate, requireFullAdmin] }, async (req, reply) => {
     const enabled = Boolean((req.body as { enabled?: boolean }).enabled);
     reply.send(await foundationService.setEnabled(idParam(req), enabled));
   });

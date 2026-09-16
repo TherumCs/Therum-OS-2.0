@@ -45,7 +45,7 @@ html.th-mmenu-open,html.th-mmenu-open body{overflow:hidden}
 export const MOBILE_MENU_RUNTIME = `
 (function(){
   if (window.__thMmenu) return; window.__thMmenu = 1;
-  function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];}); }
 
   function navLinks(){
     // The chrome's own top menu. Fall back to any header anchors if the ported

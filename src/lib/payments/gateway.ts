@@ -27,7 +27,11 @@ export interface PspWebhookEvent {
   payload?: Record<string, unknown>;
 }
 
-export type GatewayCapability = 'refunds' | 'partial_refunds' | 'webhooks' | 'card' | 'wallet_apple' | 'wallet_google' | 'bnpl' | 'bank' | 'p2p' | 'crypto';
+export type GatewayCapability = 'refunds' | 'partial_refunds' | 'webhooks' | 'card' | 'wallet_apple' | 'wallet_google' | 'bnpl' | 'bank' | 'p2p' | 'crypto'
+  // The gateway confirms a refund SYNCHRONOUSLY (refund() resolves only after the
+  // money moved) and emits NO refund webhook, so the caller confirms the Refund
+  // row inline instead of awaiting a webhook that never arrives (audit C1).
+  | 'sync_refund';
 
 export interface OrderForPayment {
   id: string;

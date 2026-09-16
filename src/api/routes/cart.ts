@@ -95,12 +95,14 @@ export async function cartRoutes(app: FastifyInstance): Promise<void> {
   app.patch('/cart/items/:variantId', async (req, reply) => {
     const { variantId } = req.params as { variantId: string };
     const input = SetQuantityInput.parse(req.body);
-    reply.send(await cartService.setQuantity(input.cartToken, variantId, input.quantity));
+    const customer = await resolveCustomer(req);
+    reply.send(await cartService.setQuantity(input.cartToken, variantId, input.quantity, customer?.id ?? null));
   });
 
   app.post('/cart/identity', async (req, reply) => {
     const input = IdentityInput.parse(req.body);
-    reply.send(await cartService.setIdentity(input.cartToken, input.email));
+    const customer = await resolveCustomer(req);
+    reply.send(await cartService.setIdentity(input.cartToken, input.email, customer?.id ?? null));
   });
 
   app.delete('/cart', async (req, reply) => {
@@ -121,7 +123,8 @@ export async function cartRoutes(app: FastifyInstance): Promise<void> {
   });
 
   app.delete('/cart/coupon', async (req, reply) => {
-    reply.send(await cartService.removeCoupon(headerToken(req)));
+    const customer = await resolveCustomer(req);
+    reply.send(await cartService.removeCoupon(headerToken(req), customer?.id ?? null));
   });
 
   // Cart → order. Returns the order number + guest access token — the
@@ -132,7 +135,8 @@ export async function cartRoutes(app: FastifyInstance): Promise<void> {
   // the summary disagrees with is worse than no picker.
   app.post('/cart/shipping', async (req, reply) => {
     const input = ShippingInput.parse(req.body);
-    reply.send(await cartService.setShipping(input.cartToken, input.shipAddress, input.methodId));
+    const customer = await resolveCustomer(req);
+    reply.send(await cartService.setShipping(input.cartToken, input.shipAddress, input.methodId, customer?.id ?? null));
   });
 
   app.post('/cart/checkout', async (req, reply) => {

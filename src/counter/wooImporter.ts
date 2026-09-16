@@ -386,7 +386,10 @@ export const wooImporter = {
           await db.customer.update({ where: { id: existing.id }, data: { name } });
           report.customers.updated++;
         } else {
-          await db.customer.create({ data: { email: c.email, name } });
+          // Mark imported customers so marketing (dropBroadcast) can exclude
+          // them — Bam's rule: migrated WP customers get no marketing until he
+          // says who. meta.noMarketing is the durable opt-out flag.
+          await db.customer.create({ data: { email: c.email, name, meta: { source: 'wp-import', noMarketing: true } } });
           report.customers.created++;
         }
       } catch (e) {

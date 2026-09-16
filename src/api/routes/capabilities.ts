@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify';
 import { capabilityService } from '../../services/capability.service.js';
+import { requireFullAdmin } from '../../middleware/bundle.js';
 
 const idParam = (req: { params: unknown }): string => (req.params as { id: string }).id;
 
@@ -10,7 +11,7 @@ export async function capabilityRoutes(app: FastifyInstance): Promise<void> {
   });
 
   // Toggle a capability and/or select its provider (native / ecosystem / custom).
-  app.patch('/capabilities/:id', { preHandler: app.authenticate }, async (req, reply) => {
+  app.patch('/capabilities/:id', { preHandler: [app.authenticate, requireFullAdmin] }, async (req, reply) => {
     const body = req.body as { enabled?: boolean; provider?: string };
     const id = idParam(req);
     if (body.provider !== undefined) await capabilityService.setProvider(id, body.provider);

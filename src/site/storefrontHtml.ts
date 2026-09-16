@@ -1,6 +1,7 @@
 import { esc, money } from './html.js';
 import { BANNER_RUNTIME, BANNER_STYLES } from './bannerRuntime.js';
 import { SUBSCRIBE_SCRIPT } from './shortcodes.js';
+import { POPUP_RUNTIME, POPUP_STYLES } from './popupRuntime.js';
 import { PRODUCT_GRID_FALLBACK_CSS } from './productGrid.js';
 import { CHECKOUT_FLOW_CSS } from './checkoutFlow.js';
 import { SHOP_TOOLBAR_CSS } from './shopToolbar.js';
@@ -219,7 +220,7 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 .pdp--apple .swatch-name{font-size:13px;opacity:.7;margin:10px 0 0}
 .pdp--apple .single-size{font-size:13px;opacity:.7}
 .pdp--apple .btn{min-width:260px;margin-top:32px;border-radius:var(--radius-pill,999px);padding:16px 34px}
-.pdp--apple .product-desc{margin-top:34px;font-size:15px;line-height:1.7;opacity:.85;max-width:520px;margin-left:auto;margin-right:auto}
+.pdp--apple .product-desc{margin-top:34px;font-size:15px;line-height:1.75;opacity:.85;max-width:520px;margin-left:auto;margin-right:auto}
 .pdp--apple .taxonomy-row{justify-content:center}
 .pdp--apple .gallery-strip{max-width:420px;margin-left:auto;margin-right:auto}
 .pdp--apple .gallery-strip > .gallery-thumb{height:64px}
@@ -387,6 +388,14 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 .gallery-thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .gallery-thumb.sel{border-color:var(--ac-btn)}
 .product-desc{margin-top:22px;padding-top:18px;border-top:1px solid var(--bd);font-size:14px;color:var(--tx2);line-height:1.7}
+/* Beautiful rags: text-wrap:pretty lets the browser optimise the last few lines
+   of each paragraph, killing orphans and short stubs; balance evens the shorter
+   blocks. A ~62ch measure keeps lines from running too long to scan. */
+.product-desc,.product-desc p{text-wrap:pretty}
+.product-desc{max-width:62ch;margin-left:auto;margin-right:auto}
+.product-desc p{margin:0 0 1em}
+.product-desc p:last-child{margin-bottom:0}
+.product-title,.cta-title,.sx-story__t{text-wrap:balance}
 /* PDP reviews — list + rating summary + submit form. */
 .pdp-reviews{max-width:820px;margin:56px auto 0;padding:32px 20px 0;border-top:1px solid var(--bd)}
 .pdp-reviews__h{font-size:13px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;margin:0 0 16px;color:var(--tx)}
@@ -413,6 +422,38 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 .pdp-reviews__in{width:100%;padding:12px 14px;border:1px solid var(--bd);background:var(--sf2);color:var(--tx);font-family:var(--f);font-size:14px;border-radius:var(--th-btn-r,0)}
 .pdp-reviews__body{min-height:90px;resize:vertical}
 .pdp-reviews__msg{font-size:13px;color:var(--tx2);min-height:16px;margin:4px 0 0}
+/* ── PDP: click-to-zoom lightbox (site-wide) — click the hero (or the corner
+   button) to grow it in the viewport; arrows page front/back; X or Esc closes. */
+.gallery-main{position:relative;cursor:zoom-in}
+.pdp-zoom-btn{position:absolute;top:10px;right:10px;width:36px;height:36px;border-radius:50%;border:0;background:rgba(255,255,255,.92);color:#111;cursor:zoom-in;display:flex;align-items:center;justify-content:center;z-index:3;box-shadow:0 1px 6px rgba(0,0,0,.18);font-size:15px;transition:background var(--e)}
+.pdp-zoom-btn:hover{background:#fff}
+.pdp-lightbox{position:fixed;inset:0;z-index:10000;background:rgba(12,12,12,.95);display:none;align-items:center;justify-content:center;padding:24px;box-sizing:border-box;-webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px)}
+.pdp-lightbox.open{display:flex}
+.pdp-lightbox img{max-width:92vw;max-height:88vh;width:auto;height:auto;object-fit:contain;user-select:none;-webkit-user-drag:none}
+.pdp-lb-close{position:fixed;top:18px;right:20px;width:46px;height:46px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:24px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background var(--e)}
+.pdp-lb-arrow{position:fixed;top:50%;transform:translateY(-50%);width:54px;height:54px;border-radius:50%;border:0;background:rgba(255,255,255,.14);color:#fff;font-size:30px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;transition:background var(--e)}
+.pdp-lb-arrow.prev{left:22px}.pdp-lb-arrow.next{right:22px}
+.pdp-lb-close:hover,.pdp-lb-arrow:hover{background:rgba(255,255,255,.28)}
+.pdp-lb-count{position:fixed;bottom:22px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,.8);font-size:13px;font-variant-numeric:tabular-nums;letter-spacing:.04em}
+@media(max-width:600px){.pdp-lb-arrow{width:44px;height:44px;font-size:26px}.pdp-lb-arrow.prev{left:10px}.pdp-lb-arrow.next{right:10px}.pdp-lightbox img{max-width:96vw}}
+/* ── PDP desktop only (>=1200): keep the Apple look, go a little wider than
+   tablet, and give the size / colour / quantity controls more presence. Tablet
+   and below keep the tighter layout Bam signed off on. ── */
+@media(min-width:1200px){
+  .pdp--apple{max-width:1080px}
+  .pdp--apple .pdp__media{max-width:840px}
+  .pdp--apple .pdp__info{max-width:680px}
+  .pdp--apple .product-desc{max-width:600px}
+  .pdp-reviews{max-width:940px}
+  .pdp-picker{gap:14px;margin:24px 0}
+  .pdp-box{min-height:82px;padding:15px 20px}
+  .pdp-box__k{font-size:12px}
+  .pdp-box__v{font-size:17px}
+  .pdp-box__dot{width:22px;height:22px}
+  .qtybox{padding:5px}
+  .qbtn{width:34px;height:34px;font-size:20px}
+  .qn{min-width:30px;font-size:15px}
+}
 /* Card media: hover-video + arrow-flip */
 .card-media{position:relative;overflow:hidden}
 .card-media .card-still{width:100%;height:100%;object-fit:cover;display:block}
@@ -653,7 +694,7 @@ export function layout(title: string, body: string, extraScript = '', chrome?: S
   const header = chrome?.header
     ? `<div id="brx-header">${chrome.header}</div>`
     : `<header class="site"><div class="wrap">
-  <a class="brand" href="/shop"><span class="dot"></span>Therum Store</a>
+  <a class="brand" href="/shop"><span class="dot"></span>The Sidemoney Company</a>
   <nav class="main">
     <a href="/shop">Shop</a>
     <a class="cartlink" href="/cart">Cart <span id="cart-count" class="empty">0</span></a>
@@ -667,7 +708,7 @@ export function layout(title: string, body: string, extraScript = '', chrome?: S
   // link here, the shared header and footer rendered in -apple-system on shop
   // and order-tracking while every other page used Manrope.
   const themeCss = chrome?.cssUrl
-    ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap"><link rel="stylesheet" href="${esc(chrome.cssUrl)}">`
+    ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@100..900&family=Manrope:wght@200..800&family=Roboto+Condensed:wght@100..900&family=Roboto:wght@100..900&family=Montserrat:wght@100..900&display=swap"><link rel="stylesheet" href="${esc(chrome.cssUrl)}">`
     : '';
   // Only the ported header carries the cart/search/wishlist hooks; the
   // fallback chrome above has its own plain cart link and needs none of it.
@@ -685,7 +726,7 @@ function layoutInner(title: string, body: string, extraScript: string, header: s
 <title>${esc(title)}</title>
 ${seoTags(title, seo)}
 ${themeCss}
-<style>:root{--th-site-max:${siteMax ?? '1080px'};--th-btn-r:${btnRadius ?? '0'}}${CSS}${BANNER_STYLES}${PRODUCT_GRID_FALLBACK_CSS}${CHECKOUT_FLOW_CSS}${SHOP_TOOLBAR_CSS}${WISHLIST_CSS}${ACCOUNT_CSS}${headerIcons ? HEADER_CART_CSS + MOBILE_MENU_CSS : ''}</style>
+<style>:root{--th-site-max:${siteMax ?? '1080px'};--th-btn-r:${btnRadius ?? '0'}}${CSS}${BANNER_STYLES}${PRODUCT_GRID_FALLBACK_CSS}${CHECKOUT_FLOW_CSS}${SHOP_TOOLBAR_CSS}${WISHLIST_CSS}${ACCOUNT_CSS}${POPUP_STYLES}${headerIcons ? HEADER_CART_CSS + MOBILE_MENU_CSS : ''}</style>
 </head>
 <body>
 <div id="th-shell">
@@ -695,7 +736,7 @@ ${body}
 </div></main>
 ${footer}
 </div>
-<script>(function(){try{if(document.cookie.indexOf('th_src=')<0){var q=new URLSearchParams(location.search),src=q.get('utm_source')||q.get('ref')||'';if(!src&&document.referrer){try{var h=new URL(document.referrer).hostname;if(h&&h!==location.hostname)src=h;}catch(e){}}if(src){var camp=q.get('utm_campaign');if(camp)src+=' / '+camp;document.cookie='th_src='+encodeURIComponent(src.slice(0,120))+'; path=/; max-age=2592000; samesite=lax';}}}catch(e){}})();${RUNTIME}${BANNER_RUNTIME}${WISHLIST_RUNTIME}${SUBSCRIBE_SCRIPT}${extraScript}</script>
+<script>(function(){try{if(document.cookie.indexOf('th_src=')<0){var q=new URLSearchParams(location.search),src=q.get('utm_source')||q.get('ref')||'';if(!src&&document.referrer){try{var h=new URL(document.referrer).hostname;if(h&&h!==location.hostname)src=h;}catch(e){}}if(src){var camp=q.get('utm_campaign');if(camp)src+=' / '+camp;document.cookie='th_src='+encodeURIComponent(src.slice(0,120))+'; path=/; max-age=2592000; samesite=lax';}}}catch(e){}})();${RUNTIME}${BANNER_RUNTIME}${WISHLIST_RUNTIME}${SUBSCRIBE_SCRIPT}${POPUP_RUNTIME}${extraScript}</script>
 ${headerIcons ? `<script>${headerCartRuntime(headerIcons)}</script><script>${MOBILE_MENU_RUNTIME}</script>` : ''}
 </body>
 </html>`;

@@ -4,7 +4,12 @@ import { AssignRoleInput } from '../../schemas/role.schema.js';
 import { requireFullAdmin } from '../../middleware/bundle.js';
 
 export async function userRoutes(app: FastifyInstance): Promise<void> {
-  app.get('/users', { preHandler: app.authenticate }, async (_req, reply) => {
+  // Full-admin only: this is the ADMIN ROSTER — every admin's username, role and
+  // totpEnabled flag. Materially more sensitive than the content/product reads
+  // the "reads are open to any session" convention was written for; a restricted
+  // custom role reading it gets a ready-made target list of which admins have 2FA
+  // off. Gated like the role-management routes below.
+  app.get('/users', { preHandler: [app.authenticate, requireFullAdmin] }, async (_req, reply) => {
     reply.send(await adminUserService.list());
   });
 

@@ -56,6 +56,6 @@ export function stockLabel(v: StockLike): { label: string; sellable: boolean; lo
   const available = availableOf(v);
   if (v.stockStatus === 'backorder') return { label: 'On backorder', sellable: true, low: false };
   if (available <= 0) return { label: 'Sold out', sellable: false, low: false };
-  if (isTracked(v) && available <= 5) return { label: `Only ${available} left`, sellable: true, low: true };
+  if (isTracked(v) && available <= 3) return { label: `Only ${available} left`, sellable: true, low: true };
   return { label: 'In stock', sellable: true, low: false };
 }

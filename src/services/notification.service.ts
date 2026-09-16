@@ -22,6 +22,10 @@ interface MailMessage {
   /** Optional HTML part. Senders that support it deliver multipart/alternative
    *  (text + HTML); the text `body` stays as the fallback. */
   html?: string;
+  /** Extra MIME headers (e.g. List-Unsubscribe / List-Unsubscribe-Post for
+   *  one-click marketing opt-out, RFC 8058). Each transport maps them into its
+   *  own shape; a transport that can't carry them just omits them. */
+  headers?: Record<string, string>;
 }
 
 // One POST for every HTTP mail transport. A failed send used to collapse to a
@@ -51,7 +55,7 @@ async function viaResend(msg: MailMessage): Promise<boolean> {
   return mailPost('resend', 'https://api.resend.com/emails', {
     method: 'POST',
     headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
-    body: JSON.stringify({ from: msg.from, to: [msg.to], subject: msg.subject, text: msg.body, ...(msg.html ? { html: msg.html } : {}) }),
+    body: JSON.stringify({ from: msg.from, to: [msg.to], subject: msg.subject, text: msg.body, ...(msg.html ? { html: msg.html } : {}), ...(msg.headers ? { headers: msg.headers } : {}) }),
   });
 }
 
@@ -69,6 +73,7 @@ async function viaSendgrid(msg: MailMessage): Promise<boolean> {
       content: msg.html
         ? [{ type: 'text/plain', value: msg.body }, { type: 'text/html', value: msg.html }]
         : [{ type: 'text/plain', value: msg.body }],
+      ...(msg.headers ? { headers: msg.headers } : {}),
     }),
   });
 }
@@ -79,7 +84,7 @@ async function viaPostmark(msg: MailMessage): Promise<boolean> {
   return mailPost('postmark', 'https://api.postmarkapp.com/email', {
     method: 'POST',
     headers: { 'X-Postmark-Server-Token': key, 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ From: msg.from, To: msg.to, Subject: msg.subject, TextBody: msg.body, ...(msg.html ? { HtmlBody: msg.html } : {}) }),
+    body: JSON.stringify({ From: msg.from, To: msg.to, Subject: msg.subject, TextBody: msg.body, ...(msg.html ? { HtmlBody: msg.html } : {}), ...(msg.headers ? { Headers: Object.entries(msg.headers).map(([Name, Value]) => ({ Name, Value })) } : {}) }),
   });
 }
 
@@ -127,6 +132,7 @@ export async function sendEmailTo(
   body: string,
   attachments?: MailAttachment[],
   html?: string,
+  headers?: Record<string, string>,
 ): Promise<void> {
   const n = await settingsService.getNotifications();
   if (!n.emailEnabled) return;
@@ -140,7 +146,7 @@ export async function sendEmailTo(
     // success.
     if (!attachments?.length) {
       for (const send of NEXUS_SENDERS) {
-        if (await send({ to, from, subject, body, html }).catch(() => false)) return;
+        if (await send({ to, from, subject, body, html, headers }).catch(() => false)) return;
       }
     }
   }
@@ -187,7 +193,7 @@ export async function sendEmailTo(
         socketTimeout: 20_000,
       });
       try {
-        await mx.sendMail({ from: n.smtpFrom || n.adminEmail, to, subject, text: body, html, attachments });
+        await mx.sendMail({ from: n.smtpFrom || n.adminEmail, to, subject, text: body, html, attachments, ...(headers ? { headers } : {}) });
         return;
       } catch {
         // Try the next exchanger — a single MX being down is routine.
@@ -212,7 +218,7 @@ export async function sendEmailTo(
     socketTimeout: 20_000,
   });
   try {
-    await transport.sendMail({ from: n.smtpFrom || n.smtpUser, to, subject, text: body, html, attachments });
+    await transport.sendMail({ from: n.smtpFrom || n.smtpUser, to, subject, text: body, html, attachments, ...(headers ? { headers } : {}) });
   } finally {
     transport.close();
   }
@@ -233,8 +239,8 @@ async function sendSlack(text: string): Promise<void> {
 export const notificationService = {
   // Direct customer send (Counter C6). Best-effort like everything here —
   // callers fire without awaiting; failures are logged by the caller.
-  async sendToAddress(to: string, subject: string, body: string, html?: string): Promise<void> {
-    await sendEmailTo(to, subject, body, undefined, html);
+  async sendToAddress(to: string, subject: string, body: string, html?: string, headers?: Record<string, string>): Promise<void> {
+    await sendEmailTo(to, subject, body, undefined, html, headers);
   },
 
   async notifyLogin(username: string, ip: string | null): Promise<void> {
@@ -249,6 +255,15 @@ export const notificationService = {
     if (!n.notifyOnBackup) return;
     const msg = `Therum CMS: backup completed — ${file} (${(sizeBytes / 1024 / 1024).toFixed(1)} MB)`;
     await Promise.allSettled([sendEmail('Therum CMS — backup completed', msg), sendSlack(msg)]);
+  },
+
+  // A FAILED backup is the one you must hear about — only the success path
+  // notified, so a silently-failing backup left no recent restore point and
+  // nobody knew until they needed it. Always alerts (a backup failure is not
+  // something to gate behind a preference).
+  async notifyBackupFailed(reason: string): Promise<void> {
+    const msg = `Therum CMS: SCHEDULED BACKUP FAILED — ${reason}. No fresh restore point was created; investigate now.`;
+    await Promise.allSettled([sendEmail('Therum CMS — BACKUP FAILED', msg), sendSlack(msg)]);
   },
 
   // Unlike the trigger methods above, a manual test send should honestly

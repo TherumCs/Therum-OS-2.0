@@ -80,6 +80,14 @@ export const squareGateway: PaymentGateway = {
     });
     const payment = res.payment as { id?: string; status?: string } | undefined;
     if (!payment?.id) throw new Error('Square accepted the request but returned no payment id.');
+    // NEVER report success for a payment that did not actually CAPTURE. Square
+    // returns APPROVED (authorised, funds not taken) or PENDING for some cards /
+    // BNPL flows; only COMPLETED means the money moved. Returning the id on
+    // APPROVED drove the order to PAID with nothing captured (same class as the
+    // Stripe requires_action guard). Fail with a retryable message instead.
+    if (payment.status !== 'COMPLETED') {
+      throw new Error('That payment could not be completed in-page — please try another card or a wallet.');
+    }
     return payment.id;
   },
 

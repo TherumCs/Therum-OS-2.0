@@ -21,6 +21,7 @@ import { extensionRoutes } from './api/routes/extensions.js';
 import { importRoutes } from './api/routes/import.js';
 import { contentRoutes } from './api/routes/content.js';
 import { mediaRoutes } from './api/routes/media.js';
+import { feedRoutes } from './api/routes/feeds.js';
 import { adminGoogleAuthRoutes } from './api/routes/adminGoogleAuth.js';
 import { gmailAuthRoutes } from './api/routes/gmailAuth.js';
 import { shopifyOAuthRoutes } from './api/routes/shopifyOAuth.js';
@@ -48,6 +49,7 @@ import { clusterRoutes } from './api/routes/clusters.js';
 import { checkoutRoutes } from './api/routes/checkout.js';
 import { cartRoutes } from './api/routes/cart.js';
 import { contactRoutes } from './api/routes/contact.js';
+import { marketingRoutes, campaignRoutes, campaignSendRoutes, marketingPublicRoutes, segmentRoutes, automationRoutes, formRoutes } from './api/routes/marketing.js';
 import { orderTrackingRoutes } from './api/routes/orderTracking.js';
 import { couponRoutes } from './api/routes/coupons.js';
 import { storefrontRoutes } from './api/routes/storefront.js';
@@ -148,6 +150,21 @@ export async function buildServer() {
         raw = raw.replace('/wp-json/wc/v2/', '/wp-json/wc/v3/');
       }
 
+      /**
+       * `wc/v1/<anything>` -> `wc/v3/<anything>`. Same reasoning as v2: the v1
+       * and v3 namespaces are one API, and a v3-only store is unusable to a v1
+       * client. JetPrint's connector pushes to the v1 namespace exclusively
+       * (POST `/wp-json/wc/v1/products`), which a v3-only store 404s — reported
+       * to the merchant as a bare "publishing error" that names neither the
+       * route nor the version. Confirmed live: JetPrint (47.242.9.220) hit
+       * `/wp-json/wc/v1/products` and got 404 while the product never landed.
+       * No v1-only vendor plugin namespace exists to carve out (unlike
+       * Printful's v2 plugin), so the whole namespace maps across.
+       */
+      if (raw.startsWith('/wp-json/wc/v1/')) {
+        raw = raw.replace('/wp-json/wc/v1/', '/wp-json/wc/v3/');
+      }
+
       return raw;
     },
     logger: {
@@ -213,7 +230,20 @@ export async function buildServer() {
   // error before the configured limit is ever consulted, and raising the
   // setting above 50 MB would silently do nothing.
   await app.register(multipart, { limits: { fileSize: 2048 * 1024 * 1024 } });
-  await app.register(fastifyStatic, { root: UPLOADS_DIR, prefix: '/api/uploads/', decorateReply: false });
+  // Uploads are PUBLIC assets — product images in emails, the Meta/Google
+  // feeds, and any partner page all load them from another origin. helmet's
+  // default `Cross-Origin-Resource-Policy: same-origin` made every mail client
+  // drop them (the logo under /wp-content/uploads has no such header and
+  // rendered fine — that was the whole difference). Found 2026-09-15 on the
+  // first campaign test send.
+  await app.register(fastifyStatic, {
+    root: UPLOADS_DIR,
+    prefix: '/api/uploads/',
+    decorateReply: false,
+    setHeaders: (reply) => {
+      reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
+    },
+  });
   // The visual builder (builder/, a Vite SPA whose base is '/builder/') is
   // served from THIS origin rather than its own dev port. NEXT_PUBLIC_BUILDER_URL
   // pointed at :10004 — a port nothing listens on since the API moved to
@@ -287,9 +317,14 @@ export async function buildServer() {
         return;
       }
     }
+    // Mask any secret query params (partner consumer_key/secret, oauth_*) BEFORE
+    // they are persisted or echoed. A store-credential handshake that 404s would
+    // otherwise store the cleartext secret in the admin 404 monitor and reflect it
+    // in the error body (audit). Same mask the request logger already applies.
+    const safeUrl = maskSecretQuery(req.url ?? '');
     const referer = req.headers.referer;
-    void notFoundMonitorService.record(req.url, req.method, typeof referer === 'string' ? referer : null);
-    reply.status(404).send({ error: { code: 'not_found', message: `Route ${req.method}:${req.url} not found` } });
+    void notFoundMonitorService.record(safeUrl, req.method, typeof referer === 'string' ? maskSecretQuery(referer) : null);
+    reply.status(404).send({ error: { code: 'not_found', message: `Route ${req.method}:${safeUrl} not found` } });
   });
 
   app.get('/health', async () => {
@@ -310,6 +345,7 @@ export async function buildServer() {
   await app.register(importRoutes, { prefix: '/api' });
   await app.register(contentRoutes, { prefix: '/api' });
   await app.register(mediaRoutes, { prefix: '/api' });
+  await app.register(feedRoutes, { prefix: '/api' });
   await app.register(authRoutes, { prefix: '/api' });
 // NO /api prefix: these are browser redirect endpoints the operator and Google
 // both navigate to directly, and the redirect_uri registered with Google is a
@@ -384,6 +420,13 @@ await app.register(shopifyOAuthRoutes);
   await app.register(checkoutRoutes, { prefix: '/api' });
   await app.register(cartRoutes, { prefix: '/api' });
   await app.register(contactRoutes, { prefix: '/api' });
+  await app.register(marketingRoutes, { prefix: '/api' });
+  await app.register(campaignRoutes, { prefix: '/api' });
+  await app.register(campaignSendRoutes, { prefix: '/api' });
+  await app.register(marketingPublicRoutes, { prefix: '/api' });
+  await app.register(segmentRoutes, { prefix: '/api' });
+  await app.register(automationRoutes, { prefix: '/api' });
+  await app.register(formRoutes, { prefix: '/api' });
   await app.register(orderTrackingRoutes, { prefix: '/api' });
   await app.register(couponRoutes, { prefix: '/api' });
   await app.register(taxonomyRoutes, { prefix: '/api' });

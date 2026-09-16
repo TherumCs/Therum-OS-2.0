@@ -21,6 +21,10 @@ let partnerPort;
 let failNext = 0;
 
 before(async () => {
+  // These tests deliver to a loopback HTTP partner, which the send-time SSRF
+  // guard (https + no-private-target) correctly blocks in production. Opt this
+  // process out so the guard permits the loopback target under test.
+  process.env.WEBHOOK_ALLOW_PRIVATE_TARGETS = '1';
   app = await buildServer();
   await app.ready();
   partner = createServer((req, res) => {

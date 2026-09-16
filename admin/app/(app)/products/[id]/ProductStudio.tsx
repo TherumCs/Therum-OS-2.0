@@ -83,7 +83,10 @@ export function ProductStudio({
   // Which field last saved, so the confirmation appears NEXT TO the thing that
   // changed rather than only in the header where nobody is looking.
   const [savedField, setSavedField] = useState<string | null>(null);
-  const [pickerFor, setPickerFor] = useState<null | 'primary' | 'gallery' | { variantId: string }>(null);
+  // 'primary' / 'gallery' add; { variantId } adds to a colour; { replace: n }
+  // REPLACES an existing image in place (-1 = primary, >=0 = gallery index) —
+  // what the left thumbnails and the inspector's Replace button now target.
+  const [pickerFor, setPickerFor] = useState<null | 'primary' | 'gallery' | { variantId: string } | { replace: number }>(null);
   // Terms live in state, not straight off the props: a category created here
   // has to appear in the chip row immediately, without a page reload.
   const [cats, setCats] = useState<Term[]>(allCategories);
@@ -282,26 +285,40 @@ export function ProductStudio({
           <span>Media</span>
           <button type="button" className="th-btn th-btn--xs" onClick={() => setPickerFor('gallery')}>Add</button>
         </div>
+        {/* Each row selects (shows in the inspector) AND carries its own
+            Replace — so an image can be swapped straight from the left, not only
+            from the right inspector. A div, not a button, so the Replace button
+            can nest without an invalid button-in-button. */}
         {p.image && (
-          <button
-            type="button"
+          <div
+            role="button"
+            tabIndex={0}
             className={'th-studio__thumbrow' + (sel.kind === 'image' && sel.index === -1 ? ' is-sel' : '')}
+            style={{ cursor: 'pointer' }}
             onClick={() => setSel({ kind: 'image', index: -1 })}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSel({ kind: 'image', index: -1 }); } }}
           >
             <img src={p.image} alt="" />
             <span>Primary</span>
-          </button>
+            <button type="button" className="th-btn th-btn--xs" style={{ marginLeft: 'auto' }}
+              onClick={(e) => { e.stopPropagation(); setPickerFor({ replace: -1 }); }}>Replace</button>
+          </div>
         )}
         {gallery.map((g, i) => (
-          <button
+          <div
             key={`${g.url}-${i}`}
-            type="button"
+            role="button"
+            tabIndex={0}
             className={'th-studio__thumbrow' + (sel.kind === 'image' && sel.index === i ? ' is-sel' : '')}
+            style={{ cursor: 'pointer' }}
             onClick={() => setSel({ kind: 'image', index: i })}
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSel({ kind: 'image', index: i }); } }}
           >
             <img src={g.url} alt="" />
             <span>{g.type === 'video' ? 'Video' : `Image ${i + 1}`}</span>
-          </button>
+            <button type="button" className="th-btn th-btn--xs" style={{ marginLeft: 'auto' }}
+              onClick={(e) => { e.stopPropagation(); setPickerFor({ replace: i }); }}>Replace</button>
+          </div>
         ))}
         {!p.image && !gallery.length && <p className="th-hint th-studio__empty">No media yet.</p>}
       </div>
@@ -535,10 +552,14 @@ export function ProductStudio({
               onChange={(e) => { const visibility = e.target.value; setP({ ...p, visibility }); void patch({ visibility }); }}
             >
               <option value="public">Public — anyone</option>
+              <option value="members">Members — any signed-in shopper</option>
               <option value="private">Unlisted — hidden, but the link works</option>
               <option value="restricted">Restricted — groups or accounts</option>
             </select>
           </label>
+          {p.visibility === 'members' && (
+            <p className="th-hint">Hidden from the public shop, search and feeds. Any signed-in account can see and buy it — a staged/early-access tier.</p>
+          )}
           {p.visibility === 'private' && (
             <p className="th-hint">Not in the shop, search or sitemap. Anyone you send the link to can open and buy it.</p>
           )}
@@ -773,7 +794,7 @@ export function ProductStudio({
           <div className="th-studio__group-head"><span>{sel.index === -1 ? 'Primary image' : `Image ${sel.index + 1}`}</span></div>
           <img className="th-studio__preview" src={sel.index === -1 ? p.image ?? '' : gallery[sel.index]?.url ?? ''} alt="" />
           <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-            <button type="button" className="th-btn" onClick={() => setPickerFor(sel.index === -1 ? 'primary' : 'gallery')}>Replace</button>
+            <button type="button" className="th-btn" onClick={() => setPickerFor({ replace: sel.index })}>Replace</button>
             <button
               type="button"
               className="th-btn th-btn-danger"
@@ -1045,7 +1066,17 @@ export function ProductStudio({
         kind="image"
         onClose={() => setPickerFor(null)}
         onPick={(asset) => {
-          if (pickerFor && typeof pickerFor === 'object') {
+          if (pickerFor && typeof pickerFor === 'object' && 'replace' in pickerFor) {
+            // Replace an existing image IN PLACE — the left thumbnail's Replace
+            // and the inspector's Replace. -1 is the primary; >=0 is a gallery slot.
+            const idx = pickerFor.replace;
+            if (idx === -1) { setP({ ...p, image: asset.url }); void patch({ image: asset.url }); }
+            else {
+              const images = gallery.map((g, i) => (i === idx ? { url: asset.url, alt: asset.alt ?? undefined } : g));
+              setP({ ...p, images });
+              void patch({ images });
+            }
+          } else if (pickerFor && typeof pickerFor === 'object' && 'variantId' in pickerFor) {
             // Straight onto the VARIANT. Its first image is the one the
             // storefront swaps to when a shopper picks that colour, so an
             // empty variant takes the new picture as its main.

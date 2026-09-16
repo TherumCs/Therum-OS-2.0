@@ -1,0 +1,12 @@
+-- orders.meta drift. schema.prisma declares `Order.meta Json @default("{}")`
+-- (lifecycle bookkeeping — reviewRequestedAt, note flags, source/attribution),
+-- but — exactly like orders.woo_id — no migration ever created the column. The
+-- production DB was patched by hand, so a migration-built (fresh) database has
+-- no orders.meta and EVERY read of an order 500s: the Woo-compat /orders list
+-- (include meta) throws `column orders.meta does not exist`, which breaks the
+-- partner order pull outright.
+--
+-- Additive + idempotent: a no-op on the hand-patched production DB, correct on
+-- any fresh build. JSONB NOT NULL DEFAULT '{}' matches Prisma's mapping of a
+-- non-null Json field with a default.
+ALTER TABLE "orders" ADD COLUMN IF NOT EXISTS "meta" JSONB NOT NULL DEFAULT '{}';

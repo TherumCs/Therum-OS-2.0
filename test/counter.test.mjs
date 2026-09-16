@@ -515,22 +515,31 @@ describe('counter customer accounts', () => {
     const email = `bad-${uniq()}@test.local`;
     await customerAuth.requestCode({ destination: email, kind: 'email' });
     await assert.rejects(() => customerAuth.verifyCode({ destination: email, kind: 'email', code: '000000' }), /not right/i);
-    await assert.rejects(() => customerAuth.requestCode({ destination: '07700900123', kind: 'phone' }), /international format/i);
+    // Phone sign-in is intentionally disabled in this build (no SMS transport),
+    // so a phone code request is refused up front rather than minting a code
+    // that could never be delivered.
+    await assert.rejects(() => customerAuth.requestCode({ destination: '07700900123', kind: 'phone' }), /not available/i);
   });
 
   test('social sign-in links to an existing account ONLY on a verified email', async () => {
     const email = `soc-${uniq()}@test.local`;
     const first = await customerAuth.registerWithPassword({ email, password: 'correct horse battery' });
     made.customers.push(first.customer.id);
+    // The email must be PROVEN before it is a link target — an account whose only
+    // tie to the address is an unverified registration claim is never merged into
+    // (that unproven-claim merge is exactly the C5 pre-hijack). Prove it from the
+    // registrant's own session, the way the real flow does.
+    const { code } = await customerAuth.requestCode({ destination: email, kind: 'email' });
+    await customerAuth.verifyCode({ destination: email, kind: 'email', code, sessionCustomerId: first.customer.id });
 
-    // Unverified provider email must NOT take over the existing account.
+    // Unverified provider email must NOT take over the account.
     const unverified = await customerAuth.signInWithOAuth({
       provider: 'google', subject: `sub-${uniq()}`, email, emailVerified: false,
     });
     made.customers.push(unverified.customer.id);
     assert.notEqual(unverified.customer.id, first.customer.id, 'unverified email must not auto-link');
 
-    // Verified does link.
+    // Verified DOES link — now that the email is proven on the account.
     const verified = await customerAuth.signInWithOAuth({
       provider: 'google', subject: `sub-${uniq()}`, email, emailVerified: true,
     });
@@ -545,24 +554,42 @@ describe('counter customer accounts', () => {
     assert.equal(b.customer.id, a.customer.id);
   });
 
-  test('registering claims prior GUEST orders for that email', async () => {
+  test('registering does NOT claim guest orders until the email is proven', async () => {
     const email = `guest-${uniq()}@test.local`;
     const order = await db.order.create({
       data: { number: `G-${uniq()}`, status: 'delivered', total: 2500, currency: 'USD', guestEmail: email },
     });
     made.orders.push(order.id);
 
+    // Filling in a signup form is NOT proof of controlling the mailbox. If it
+    // were, anyone could register a stranger's guest email and inherit their
+    // whole order history. So the guest order must NOT transfer at signup.
     const out = await customerAuth.registerWithPassword({ email, password: 'correct horse battery' });
     made.customers.push(out.customer.id);
-    const claimed = await db.order.findUnique({ where: { id: order.id } });
-    assert.equal(claimed.customerId, out.customer.id, 'guest history should follow the account');
+    const beforeProof = await db.order.findUnique({ where: { id: order.id } });
+    assert.equal(beforeProof.customerId, null, 'unproven signup must not claim guest history');
+
+    // Proving the mailbox (the emailed code) is what claims the history. The
+    // registrant is signed in (register issues a session), so the verify carries
+    // that session — verifyCode then PROMOTES their own pending email in place
+    // and the history lands on the SAME account, not a duplicate. (audit C5)
+    const { code } = await customerAuth.requestCode({ destination: email, kind: 'email' });
+    await customerAuth.verifyCode({ destination: email, kind: 'email', code, sessionCustomerId: out.customer.id });
+    const afterProof = await db.order.findUnique({ where: { id: order.id } });
+    assert.equal(afterProof.customerId, out.customer.id, 'a proven email claims the guest history to the same account');
   });
 
   test('refuses to unlink the last identity — that would lock them out for good', async () => {
     const out = await customerAuth.registerWithPassword({ email: `last-${uniq()}@test.local`, password: 'correct horse battery' });
     made.customers.push(out.customer.id);
-    const [only] = await customerAuth.identitiesFor(out.customer.id);
-    await assert.rejects(() => customerAuth.unlinkIdentity(out.customer.id, only.id), /only way to sign in/i);
+    // A password signup creates TWO identities — the password AND the email it
+    // registered. Remove one so the account is down to its last way in...
+    const ids = await customerAuth.identitiesFor(out.customer.id);
+    assert.ok(ids.length >= 2, 'a password signup should have a password and an email identity');
+    await customerAuth.unlinkIdentity(out.customer.id, ids[0].id);
+    // ...and unlinking that last one must be refused.
+    const [last] = await customerAuth.identitiesFor(out.customer.id);
+    await assert.rejects(() => customerAuth.unlinkIdentity(out.customer.id, last.id), /only way to sign in/i);
   });
 
   test('sign out invalidates the token', async () => {
@@ -931,8 +958,9 @@ describe('partner PUBLISHES to the store (the half that was missing)', () => {
     assert.match(page.body, /hoodie-front\.jpg/, 'images did not come through');
 
     // And it is SELLABLE. A row with no price and no stock looks like a
-    // successful sync until a customer tries to buy it.
-    const full = await db.product.findUnique({ where: { id }, include: { variants: true } });
+    // successful sync until a customer tries to buy it. (`id` is the emitted
+    // integer WooCommerce id, so resolve the row by wooId, not the cuid.)
+    const full = await db.product.findFirst({ where: { wooId: id }, include: { variants: true } });
     assert.equal(full.status, 'active', 'pushed as published but landed as a draft');
     assert.equal(full.variants.length, 1, 'no variant = nothing to add to a cart');
     assert.equal(full.variants[0].price, 4800, 'price is not in minor units');
@@ -988,7 +1016,7 @@ describe('partner PUBLISHES to the store (the half that was missing)', () => {
       assert.equal(v.statusCode, 201, `variation ${size} rejected`);
     }
 
-    const p = await db.product.findUnique({ where: { id }, include: { variants: true } });
+    const p = await db.product.findFirst({ where: { wooId: id }, include: { variants: true } });
     // The placeholder variant the create made is REUSED by the first pushed
     // variation — otherwise the page shows a £0.00 option nobody wants.
     assert.equal(p.variants.length, 2, `expected 2 buyable variants, got ${p.variants.length}`);
@@ -1016,11 +1044,13 @@ describe('partner PUBLISHES to the store (the half that was missing)', () => {
 
     const soft = await app.inject({ method: 'DELETE', url: `/wp-json/wc/v3/products/${id}`, headers: auth() });
     assert.equal(soft.statusCode, 200);
-    assert.equal((await db.product.findUnique({ where: { id } })).status, 'draft', 'delete should unpublish, not destroy');
+    // `id` is the emitted integer WooCommerce id — resolve the row by wooId.
+    const prod = await db.product.findFirst({ where: { wooId: id }, select: { id: true } });
+    assert.equal((await db.product.findUnique({ where: { id: prod.id } })).status, 'draft', 'delete should unpublish, not destroy');
 
     // A design retired at the partner must not take a customer's order line
     // with it. Force-delete on an ordered product is refused, not silently done.
-    const variant = await db.productVariant.findFirst({ where: { productId: id } });
+    const variant = await db.productVariant.findFirst({ where: { productId: prod.id } });
     const order = await db.order.create({
       data: {
         number: `PP-${Date.now()}`, status: 'processing', currency: 'USD', total: 4800,

@@ -6,6 +6,8 @@ import { notificationService } from './notification.service.js';
 import { settingsService } from './settings.service.js';
 import { messageEmailHtml, offerEmailHtml, codeEmailHtml, welcomeFriendsFamilyHtml } from './emailTemplate.js';
 import { esc } from '../site/html.js';
+import { resolveCustomerByEmail } from '../counter/customerEmail.js';
+import { unsubscribeUrl as buildUnsubscribeUrl } from '../lib/unsubscribe.js';
 
 // Lifecycle emails — the TRIGGER LOGIC for the store's relationship touches:
 // expiring memberships, post-delivery review requests, abandoned carts, back-
@@ -63,8 +65,14 @@ const prettyDate = (d: Date | string | null | undefined): string | null => {
 
 // Fire-and-forget send. Never awaited by callers for its result — a failure is
 // swallowed so the surrounding sweep/operation is never broken by mail.
-function send(to: string, subject: string, text: string, html?: string): void {
-  void notificationService.sendToAddress(to, subject, text, html).catch(() => {});
+// `unsubscribeUrl` is set for MARKETING sends only: it adds the RFC 8058
+// one-click List-Unsubscribe headers so Gmail/Apple Mail show a native
+// "Unsubscribe" button and honour it. Transactional sends leave it unset.
+function send(to: string, subject: string, text: string, html?: string, unsubscribeUrl?: string): void {
+  const headers = unsubscribeUrl
+    ? { 'List-Unsubscribe': `<${unsubscribeUrl}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' }
+    : undefined;
+  void notificationService.sendToAddress(to, subject, text, html, headers).catch(() => {});
 }
 
 // meta is Prisma JSON; normalise the untyped value to a plain object we can read
@@ -143,6 +151,12 @@ export const lifecycleService = {
 
     const orders = await db.order.findMany({
       where: {
+        // NEVER the imported WP history. Those 53 migrated orders carry a
+        // sourceId and were stamped with a RECENT updatedAt at migration time,
+        // so the updatedAt-window branch below would sweep them in and email
+        // long-migrated customers about years-old orders — which Bam explicitly
+        // forbade. sourceId:null keeps this to real orders placed on THIS store.
+        sourceId: null,
         OR: [
           { status: 'delivered', updatedAt: { gte: floor, lte: cutoff } },
           { shipments: { some: { status: 'delivered', deliveredAt: { not: null, gte: floor, lte: cutoff } } } },
@@ -151,7 +165,7 @@ export const lifecycleService = {
       orderBy: { updatedAt: 'asc' },
       take: 200, // bound each sweep; the stamp guarantees forward progress
       include: {
-        customer: { select: { id: true, email: true, name: true } },
+        customer: { select: { id: true, email: true, name: true, meta: true } },
         items: { include: { variant: { include: { product: { select: { id: true, name: true, slug: true } } } } } },
       },
     });
@@ -160,6 +174,13 @@ export const lifecycleService = {
       try {
         const meta = metaObject((order as { meta?: unknown }).meta);
         if (meta.reviewRequestedAt) continue; // already asked
+
+        // Honour the unsubscribe promise: the footer's Unsubscribe sets
+        // customer.meta.noMarketing, and the confirmation page says "no more
+        // marketing email". A post-delivery review solicitation is exactly that,
+        // so skip an opted-out (or imported) customer — matching dropBroadcast.
+        const cmeta = metaObject((order.customer as { meta?: unknown } | null)?.meta);
+        if (cmeta.noMarketing === true || cmeta.source === 'wp-import') continue;
 
         const to = order.guestEmail ?? order.customer?.email ?? null;
         if (!isRealEmail(to)) continue;
@@ -192,6 +213,13 @@ export const lifecycleService = {
         const site = await settingsService.getSite();
         const feature = pending[0]!; // guarded: pending.length checked above
         const more = pending.length > 1 ? ` and the rest of your order` : '';
+        // Marketing › Automations version first; the hard-coded ask is the fallback.
+        const { automationService } = await import('./automation.service.js');
+        if (await automationService.fire('post_purchase', { email: to, firstName: firstName(order.customer?.name) === 'there' ? null : firstName(order.customer?.name), vars: { product_name: feature.name, product_url: `${SITE}/product/${encodeURIComponent(feature.slug)}` } })) {
+          await db.order.update({ where: { id: order.id }, data: { meta: { ...meta, reviewRequestedAt: new Date().toISOString() } } });
+          count += 1;
+          continue;
+        }
         const html = messageEmailHtml({
           eyebrow: 'Your order', eyebrowColor: RED,
           heading: 'How did we do?',
@@ -266,6 +294,25 @@ export const lifecycleService = {
           });
           if (ordered) continue;
 
+          // This nudge is promotional ("before it sells out"): honour the
+          // unsubscribe opt-out and carry a real unsubscribe control, like every
+          // other marketing send.
+          const cust = await db.customer.findFirst({ where: { email: { equals: cart.customerEmail, mode: 'insensitive' } }, select: { meta: true } });
+          const cmeta = metaObject((cust as { meta?: unknown } | null)?.meta);
+          if (cmeta.noMarketing === true || cmeta.source === 'wp-import') continue;
+          // The Marketing › Automations version wins when it is switched on;
+          // this hard-coded nudge is the fallback so nothing goes quiet.
+          const { automationService } = await import('./automation.service.js');
+          if (await automationService.fire('abandoned_cart', { email: cart.customerEmail, vars: { cart_url: CART_URL } })) {
+            cart.abandonedNotifiedAt = new Date().toISOString();
+            const pttl0 = await redis.pttl(cartKey);
+            if (pttl0 > 0) await redis.set(cartKey, JSON.stringify(cart), 'PX', pttl0);
+            else await redis.set(cartKey, JSON.stringify(cart), 'EX', CART_TTL_SECONDS);
+            count += 1;
+            continue;
+          }
+          const unsub = buildUnsubscribeUrl(cart.customerEmail);
+
           const site = await settingsService.getSite();
           const html = messageEmailHtml({
             eyebrow: 'Your cart', eyebrowColor: RED,
@@ -278,12 +325,14 @@ export const lifecycleService = {
             ctaNote: `or visit ${SITE}/cart`,
             preheader: 'Your cart is still waiting.',
             siteName: site.siteName,
+            unsubscribeUrl: unsub,
           });
           send(
             cart.customerEmail,
             `You left something in your cart`,
             `Your cart is still waiting for you.\nPick up where you left off: ${CART_URL}\n\n- ${site.siteName}`,
             html,
+            unsub,
           );
 
           // Stamp the flag back onto the SAME cart JSON, preserving its remaining
@@ -325,30 +374,39 @@ export const lifecycleService = {
 
     const site = await settingsService.getSite();
     const url = `${SITE}/product/${encodeURIComponent(product.slug)}`;
-    const html = offerEmailHtml({
-      heroImg: product.image ?? undefined,
-      eyebrow: 'Back in stock',
-      heading: `${esc(product.name)} is back.`,
-      body: 'It sold out once already. These do not tend to hang around &mdash; grab yours before it goes again.',
-      productName: product.name,
-      badge: 'Restocked',
-      cta: { label: 'Shop it now', url },
-      siteName: site.siteName,
-    });
     const subject = `${product.name} is back in stock`;
     const text = `${product.name} is back in stock.\nShop it: ${url}\n\n- ${site.siteName}`;
 
-    // Mark notified BEFORE (well, immediately after queuing) so a second run
-    // that overlaps this one cannot double-send. The send itself is fire-and-
-    // forget, so the mark is the real idempotency guard, not the mail result.
+    // CLAIM each subscription atomically BEFORE sending. The findMany above is a
+    // read, not a claim, so two overlapping restock events (concurrent stock
+    // saves) both saw notifiedAt:null and double-sent. A per-row conditional
+    // updateMany is the real idempotency guard: exactly one caller flips
+    // notifiedAt:null→now (count===1) and sends; the loser gets count 0 and skips.
+    // Marketing send: per-recipient unsubscribe, and skip a customer who opted out.
+    let sent = 0;
     for (const sub of subs) {
-      if (isRealEmail(sub.email)) send(sub.email, subject, text, html);
+      if (!isRealEmail(sub.email)) continue;
+      const claimed = await db.backInStockSubscription.updateMany({ where: { id: sub.id, notifiedAt: null }, data: { notifiedAt: new Date() } });
+      if (claimed.count !== 1) continue; // another run already took it
+      const cust = await db.customer.findFirst({ where: { email: { equals: sub.email, mode: 'insensitive' } }, select: { meta: true } });
+      const cmeta = metaObject((cust as { meta?: unknown } | null)?.meta);
+      if (cmeta.noMarketing === true) continue; // claimed (won't re-send) but honour opt-out
+      const unsub = buildUnsubscribeUrl(sub.email);
+      const html = offerEmailHtml({
+        heroImg: product.image ?? undefined,
+        eyebrow: 'Back in stock',
+        heading: `${esc(product.name)} is back.`,
+        body: 'It sold out once already. These do not tend to hang around &mdash; grab yours before it goes again.',
+        productName: product.name,
+        badge: 'Restocked',
+        cta: { label: 'Shop it now', url },
+        siteName: site.siteName,
+        unsubscribeUrl: unsub,
+      });
+      send(sub.email, subject, text, html, unsub);
+      sent += 1;
     }
-    await db.backInStockSubscription.updateMany({
-      where: { id: { in: subs.map((s) => s.id) }, notifiedAt: null },
-      data: { notifiedAt: new Date() },
-    });
-    return subs.length;
+    return sent;
   },
 
   // ── Drop broadcast ─────────────────────────────────────────────────────────
@@ -356,14 +414,33 @@ export const lifecycleService = {
   // small gap between batches so a burst of sends does not hammer the transport.
   // Returns the number of recipients queued.
   async dropBroadcast(input: { title: string; blurb: string; productSlug: string; heroImg?: string }): Promise<number> {
-    const customers = await db.customer.findMany({ select: { email: true } });
-    const recipients = customers.map((c) => c.email).filter(isRealEmail);
+    // NEVER blast the imported WP customers (Bam's rule: they don't get marketing
+    // until he says who + what). They were imported with no consent and no
+    // engagement here. Gate on ACTUAL engagement with THIS store: a verified
+    // account identity, OR an order placed here (native = sourceId null). An
+    // import-only customer has neither and is excluded. Also skip anyone flagged
+    // meta.source='wp-import' or meta.noMarketing.
+    // Meta gate in JS: the Prisma NOT-on-JSON-path form is SQL NULL (so false)
+    // for a customer with no `source`/`noMarketing` key — it excluded everyone
+    // and this broadcast went to nobody (found 2026-09-16 via Flow's mirror).
+    const candidates = await db.customer.findMany({
+      where: { OR: [{ identities: { some: { verifiedAt: { not: null } } } }, { orders: { some: { sourceId: null } } }] },
+      select: { email: true, meta: true },
+    });
+    const recipients = candidates
+      .filter((c) => { const m = metaObject(c.meta); return m.source !== 'wp-import' && m.noMarketing !== true; })
+      .map((c) => c.email)
+      .filter(isRealEmail);
     if (recipients.length === 0) return 0;
 
     const site = await settingsService.getSite();
     const url = `${SITE}/product/${encodeURIComponent(input.productSlug)}`;
-    // Identical to every recipient, so build the HTML once and reuse it.
-    const html = offerEmailHtml({
+    const subject = input.title;
+    const text = `${input.title}\n\n${input.blurb}\n\nShop it: ${url}\n\n- ${site.siteName}`;
+    // The unsubscribe link/header is per-recipient, so the HTML is built per
+    // recipient (only the footer link differs). This is an engagement-gated
+    // list, not the full customer base — the extra string builds are cheap.
+    const htmlFor = (to: string): string => offerEmailHtml({
       heroImg: input.heroImg,
       eyebrow: 'New drop',
       heading: input.title,
@@ -371,13 +448,12 @@ export const lifecycleService = {
       badge: 'Just dropped',
       cta: { label: 'Shop the drop', url },
       siteName: site.siteName,
+      unsubscribeUrl: buildUnsubscribeUrl(to),
     });
-    const subject = input.title;
-    const text = `${input.title}\n\n${input.blurb}\n\nShop it: ${url}\n\n- ${site.siteName}`;
 
     const BATCH = 40;
     for (let i = 0; i < recipients.length; i += BATCH) {
-      for (const to of recipients.slice(i, i + BATCH)) send(to, subject, text, html);
+      for (const to of recipients.slice(i, i + BATCH)) send(to, subject, text, htmlFor(to), buildUnsubscribeUrl(to));
       if (i + BATCH < recipients.length) await sleep(300);
     }
     return recipients.length;
@@ -410,6 +486,7 @@ export const lifecycleService = {
       if (member) return; // gets the F&F welcome instead
 
       const site = await settingsService.getSite();
+      const unsub = buildUnsubscribeUrl(customer.email);
       const html = messageEmailHtml({
         eyebrow: 'Welcome',
         heading: `Welcome to ${esc(site.siteName)}.`,
@@ -422,12 +499,14 @@ export const lifecycleService = {
         signoff: `<span style="color:#8a8a8a;">&mdash; ${esc(site.siteName)}</span>`,
         preheader: `Welcome to ${site.siteName}.`,
         siteName: site.siteName,
+        unsubscribeUrl: unsub,
       });
       send(
         customer.email,
         `Welcome to ${site.siteName}`,
         `Thanks for joining ${site.siteName}. Your account is ready: ${ACCOUNT_URL}\n\n- ${site.siteName}`,
         html,
+        unsub,
       );
     } catch (err) {
       logger.warn({ err, customerId }, 'welcome email failed (non-fatal)');
@@ -459,16 +538,21 @@ export const lifecycleService = {
     try {
       const destination = String(email ?? '').trim().toLowerCase();
       if (!isRealEmail(destination)) return;
-      // Only issue for a real account. We do not create one here, and we do not
-      // tell the caller either way (this returns void) — no enumeration oracle.
-      const customer = await db.customer.findFirst({ where: { email: destination }, select: { id: true } });
-      if (!customer) return;
+      // Only issue for a real account, resolved via ANY of its verified emails
+      // (so recovery works when the owner types a secondary address). We do not
+      // create one here, and do not tell the caller either way (returns void) —
+      // no enumeration oracle. The code still goes to the entered destination.
+      const resolved = await resolveCustomerByEmail(destination, { verifiedOnly: true });
+      if (!resolved) return;
 
       const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
       await db.customerAuthCode.create({
         data: {
           destination,
           kind: 'email',
+          // 'reset' purpose: redeemable ONLY at resetPasswordWithCode, never to
+          // sign in or confirm an email — see customerAuth code-purpose scoping.
+          purpose: 'reset',
           codeHash: sha256(code),
           expiresAt: new Date(Date.now() + 10 * 60 * 1000),
         },

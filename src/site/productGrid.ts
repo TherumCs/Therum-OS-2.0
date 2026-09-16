@@ -101,8 +101,14 @@ export interface GridProduct {
   hasOptions: boolean;
   /** Single-variant products can be bought without a trip to the PDP. */
   quickVariantId?: string | null;
+  /** External / affiliate product (e.g. a Foot Locker exclusive): the card links
+   *  out to this URL and offers no on-site purchase. From product.meta.externalUrl. */
+  externalUrl?: string | null;
   /** Total sellable across variants — drives the sold-out / low-stock mark. */
   stock?: number;
+  /** Ready-made pre-order pill text (e.g. "Pre-order · Oct 10") — shown when the
+   *  product is a pre-order. Built in the storefront mapper from meta.preorder. */
+  preorderLabel?: string;
   /** Vendor name, shown as a brand pill by the presets that use one. */
   brand?: string | null;
   /** The product's categories — a small pill per one at the card foot, revealed
@@ -142,6 +148,10 @@ export interface GridProduct {
    */
   mediaOverride?: CardMedia | null;
   presetOverride?: CardPreset | null;
+  /** Per-product object-fit override (meta.cardFit); falls back to cfg.fit. Lets
+   *  a product whose shot must not be cropped (a jersey) show 'contain' while the
+   *  grid default stays 'cover'. */
+  fitOverride?: 'cover' | 'contain' | null;
   /**
    * The signed-in shopper's milieu discount, as a percentage. Applied to the
    * displayed price rather than shown as a saving: a membership is a standing
@@ -345,6 +355,15 @@ function stars(r: { average: number; count: number }): string {
  * class IS the column width. It used to be hardcoded to 4, which is why moving
  * the Columns setting changed the class on the LIST and nothing about the cards.
  */
+/** Every local upload carries a 480px `-thumb` derivative (see imagePipeline).
+ *  Grid cards and carousel strips display far smaller than the 2560px original,
+ *  so they request the thumb — 47KB vs 632KB on a jersey. External URLs (POD
+ *  hotlinks) and SVGs have no derivative and pass through untouched. */
+export function thumbUrl(url: string): string {
+  const m = /^\/api\/uploads\/(.+)\.(png|jpe?g|webp)$/i.exec(url);
+  return m ? `/api/uploads/${m[1]}-thumb.${m[2]}` : url;
+}
+
 export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS, perRow = 4): string {
   // Per-product overrides beat the store-wide setting. Everything else about
   // the card still comes from settings, so one odd product does not become a
@@ -352,7 +371,11 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS, per
   const rows = PRESET_ROWS[p.presetOverride ?? cfg.preset];
   const stills = p.media.filter((m) => m.type === 'image');
   const video = p.media.find((m) => m.type === 'video') ?? null;
-  const href = `/product/${esc(p.slug)}`;
+  // External / affiliate product (Foot Locker exclusive): the card links OUT and
+  // offers no on-site purchase. p.externalUrl comes from product.meta.externalUrl.
+  const ext = typeof p.externalUrl === 'string' && p.externalUrl.trim() ? p.externalUrl.trim() : null;
+  const href = ext ? esc(ext) : `/product/${esc(p.slug)}`;
+  const linkExtra = ext ? ' target="_blank" rel="noopener"' : '';
 
   const base = stills[0]?.url ?? video?.poster ?? null;
   // The hover image is the SECOND shot. A print-on-demand product keeps its
@@ -374,7 +397,7 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS, per
   // !important, which made the Cover/Contain setting inert. The card-fit-* class
   // (emitted from cfg.fit) owns fit now.
   const img = (url: string, cls: string, alt = '') =>
-    `<img class="c-product-grid__thumb ${cls}" src="${esc(url)}" alt="${esc(alt)}" loading="lazy" decoding="async"${alt ? '' : ' aria-hidden="true"'}>`;
+    `<img class="c-product-grid__thumb ${cls}" src="${esc(thumbUrl(url))}" alt="${esc(alt)}" loading="lazy" decoding="async"${alt ? '' : ' aria-hidden="true"'}>`;
 
   const thumb = !base && !video
     ? `<div class="c-product-grid__thumb c-product-grid__thumb--base" aria-hidden="true"></div>`
@@ -407,7 +430,9 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS, per
     ? [
         discountPct ? `<span class="card-badge card-badge--deal">-${discountPct}%</span>` : '',
         soldOut ? `<span class="card-badge card-badge--out">Sold out</span>`
-          : lowStock ? `<span class="card-badge">Low stock</span>` : '',
+          : lowStock ? `<span class="card-badge">Only ${p.stock} left</span>` : '',
+        // Pre-order pill sits in the TOP-RIGHT of the card image (margin-left:auto).
+        p.preorderLabel ? `<span class="card-badge card-badge--preorder">${p.preorderLabel}</span>` : '',
       ].filter(Boolean).join('')
     : '';
   const markStrip = marks ? `<div class="card-marks">${marks}</div>` : '';
@@ -415,7 +440,7 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS, per
   // ── Actions ─────────────────────────────────────────────────────────────
   // A product with choices to make cannot be quick-bought — guessing a size
   // for someone is worse than one extra click.
-  const canQuickBuy = !p.hasOptions && !!p.quickVariantId && !soldOut;
+  const canQuickBuy = !ext && !p.hasOptions && !!p.quickVariantId && !soldOut;
   const buyAttrs = canQuickBuy
     ? `type="button" data-quick-buy="${esc(p.quickVariantId!)}"`
     : '';
@@ -427,13 +452,13 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS, per
   // a card that CANNOT open the picker (evolve off). There the button is a
   // link to the PDP, and calling a link to another page "Buy now" promises a
   // purchase the click does not make.
-  const canBuyOnCard = canQuickBuy || (cfg.evolve && cfg.action !== 'none' && (p.variants?.length ?? 0) > 0);
-  const primaryLabel = soldOut ? 'Sold out' : canBuyOnCard ? 'Buy now' : 'Select options';
+  const canBuyOnCard = !ext && (canQuickBuy || (cfg.evolve && cfg.action !== 'none' && (p.variants?.length ?? 0) > 0));
+  const primaryLabel = ext ? 'Shop at Foot Locker' : soldOut ? 'Sold out' : canBuyOnCard ? 'Buy now' : 'Select options';
   const primary = soldOut
     ? `<span class="card-btn card-btn--out">Sold out</span>`
     : canQuickBuy
       ? `<button ${buyAttrs} class="card-btn card-btn--solid">Buy now</button>`
-      : `<a href="${href}" class="card-btn card-btn--solid">${primaryLabel}</a>`;
+      : `<a href="${href}"${linkExtra} class="card-btn card-btn--solid">${primaryLabel}</a>`;
   // Evolve only means anything when there is a choice to make AND the card
   // actually offers an add-to-cart. A single-variant product adds in one tap
   // either way; asking someone to "choose" from one option is a step that
@@ -443,11 +468,11 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS, per
   // so fell through to `data-quick-buy`, opening the cart drawer and leaving
   // the page. A product with one variant simply has nothing to choose, so the
   // runtime skips the options step rather than the whole flow.
-  const needsChoice = cfg.evolve && cfg.action !== 'none' && !soldOut && (p.variants?.length ?? 0) > 0;
+  const needsChoice = !ext && cfg.evolve && cfg.action !== 'none' && !soldOut && (p.variants?.length ?? 0) > 0;
 
   const evolveOpen = (label: string): string =>
     `<button class="card-btn card-btn--solid" type="button" data-evolve-open>${esc(label)}</button>`;
-  const secondary = soldOut ? '' : `<a href="${href}" class="card-btn card-btn--ghost">Explore</a>`;
+  const secondary = soldOut || ext ? '' : `<a href="${href}" class="card-btn card-btn--ghost">Explore</a>`;
 
   const iconRow = `
     <div class="card-icons">
@@ -481,7 +506,7 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS, per
 
   const pickFace = needsChoice ? `
       <div class="card-picker" data-evolve-face="pick" hidden
-           data-variants='${esc(JSON.stringify(p.variants!.map((v) => ({ i: v.id, c: v.color, s: v.size, p: v.price, a: v.available, img: v.image ?? null, cc: (v.color && p.colorCodes?.[v.color]) || [] }))))}'>
+           data-variants='${esc(JSON.stringify(p.variants!.map((v) => ({ i: v.id, c: v.color, s: v.size, p: v.price, a: v.available, img: v.image ? thumbUrl(v.image) : null, cc: (v.color && p.colorCodes?.[v.color]) || [] }))))}'>
         <button class="card-picker__back" type="button" data-evolve-close aria-label="Back">‹</button>
         <div class="card-picker__rows"></div>
         <button class="card-btn card-btn--solid" type="button" data-evolve-confirm disabled>Choose an option</button>
@@ -788,8 +813,8 @@ export function productCard(p: GridProduct, cfg: CardConfig = CARD_DEFAULTS, per
     : '';
 
   return `
-<div class="c-product-grid__item c-product-grid__item--${perRow}-per-row c-product-grid__item--1-per-row-mobile product counter-product card-shell-${cfg.shell} card-preset-${p.presetOverride ?? cfg.preset} card-media-${media} card-align-${cfg.align} card-radius-${cfg.radius} card-ratio-${cfg.ratio} card-fit-${cfg.fit} card-shadow-${cfg.shadow}${cfg.hover === 'none' ? '' : ` card-hover-${cfg.hover}`}${cfg.reveal === 'none' ? '' : ` card-reveal card-reveal--${cfg.reveal}`}${soldOut ? ' is-sold-out' : ''}">
-  <div class="c-product-grid__thumb-wrap c-product-grid__thumb-wrap--buttons card-media" data-stills='${esc(JSON.stringify(stills.map((s) => s.url)))}' data-still-colors='${esc(JSON.stringify(stills.map((s) => s.color ?? null)))}'>
+<div class="c-product-grid__item c-product-grid__item--${perRow}-per-row c-product-grid__item--1-per-row-mobile product counter-product card-shell-${cfg.shell} card-preset-${p.presetOverride ?? cfg.preset} card-media-${media} card-align-${cfg.align} card-radius-${cfg.radius} card-ratio-${cfg.ratio} card-fit-${p.fitOverride ?? cfg.fit} card-shadow-${cfg.shadow}${cfg.hover === 'none' ? '' : ` card-hover-${cfg.hover}`}${cfg.reveal === 'none' ? '' : ` card-reveal card-reveal--${cfg.reveal}`}${soldOut ? ' is-sold-out' : ''}">
+  <div class="c-product-grid__thumb-wrap c-product-grid__thumb-wrap--buttons card-media" data-stills='${esc(JSON.stringify(stills.map((s) => thumbUrl(s.url))))}' data-still-colors='${esc(JSON.stringify(stills.map((s) => s.color ?? null)))}'>
     <a href="${href}" class="woocommerce-LoopProduct-link woocommerce-loop-product__link">${thumb}</a>
     ${markStrip}
     ${cfg.wishlist && cfg.action !== 'icons' ? wishlistButton(p.id, { url: href, title: esc(p.name) }) : ''}
@@ -973,7 +998,7 @@ export const CARD_EVOLVE_RUNTIME = `
       var ready = (colors.length < 2 || chosen.c !== null) && (sizes.length < 2 || chosen.s !== null);
       var mv = ready ? match() : null;
       var n = mv ? mv.a : null;
-      if (n != null && n > 0 && n <= 5) { cardStockEl.textContent = 'Only ' + n + ' left'; cardStockEl.hidden = false; }
+      if (n != null && n > 0 && n <= 3) { cardStockEl.textContent = 'Only ' + n + ' left'; cardStockEl.hidden = false; }
       else if (n != null && n <= 0) { cardStockEl.textContent = 'Sold out'; cardStockEl.hidden = false; }
       else { cardStockEl.hidden = true; cardStockEl.textContent = ''; }
     }
@@ -2127,21 +2152,37 @@ export const CARD_EVOLVE_RUNTIME = `
         var ready = (data.providers || []).filter(function(p){ return p.ready; });
         var buttons = [];
         var express = [];
+        // Fixed display order: Apple Pay leads (most-used, most-recognised),
+        // then Google Pay, Link, then PayPal — regardless of the order the
+        // providers arrive in from /wallets (PayPal's own account is listed
+        // first there, which used to push its disc to the front). Anything
+        // unlisted sorts last, keeping its arrival order.
+        var WALLET_ORDER = { apple_pay: 0, google_pay: 1, link: 2, shop_pay: 3, paypal: 4 };
+        var entries = [];
         ready.forEach(function(p){
           (p.wallets || []).forEach(function(w){
             if (!walletLabels[w]) return;
-            express.push({ id: 'wallet:' + w, group: 'express', label: walletLabels[w],
-              available: true, provider: p.provider, wallet: w, kind: p.kind || 'token' });
-            // data-wallet-kind travels with the button so the click handler
-            // can tell a token wallet from a redirect one. Sending PayPal
-            // down the token path throws at the server's provider guard.
-            buttons.push('<button type="button" class="card-pay__wallet" data-wallet="' + w
-              + '" data-wallet-kind="' + (p.kind || 'token') + '"'
-              + ' data-wallet-provider="' + p.provider + '"'
-              + ' title="' + walletLabels[w] + '" aria-label="Pay with ' + walletLabels[w] + '">'
-              + (walletIcons[w] || '<span class="card-pay__wallet-txt">' + walletLabels[w] + '</span>')
-              + '</button>');
+            entries.push({ w: w, p: p });
           });
+        });
+        entries.sort(function(a, b){
+          var oa = (WALLET_ORDER[a.w] == null) ? 99 : WALLET_ORDER[a.w];
+          var ob = (WALLET_ORDER[b.w] == null) ? 99 : WALLET_ORDER[b.w];
+          return oa - ob;
+        });
+        entries.forEach(function(e){
+          var w = e.w, p = e.p;
+          express.push({ id: 'wallet:' + w, group: 'express', label: walletLabels[w],
+            available: true, provider: p.provider, wallet: w, kind: p.kind || 'token' });
+          // data-wallet-kind travels with the button so the click handler
+          // can tell a token wallet from a redirect one. Sending PayPal
+          // down the token path throws at the server's provider guard.
+          buttons.push('<button type="button" class="card-pay__wallet" data-wallet="' + w
+            + '" data-wallet-kind="' + (p.kind || 'token') + '"'
+            + ' data-wallet-provider="' + p.provider + '"'
+            + ' title="' + walletLabels[w] + '" aria-label="Pay with ' + walletLabels[w] + '">'
+            + (walletIcons[w] || '<span class="card-pay__wallet-txt">' + walletLabels[w] + '</span>')
+            + '</button>');
         });
         if (buttons.length === 0) return;   // stays hidden; no empty express row
         // Remembered so the Payment strip can offer the same options as a
@@ -2833,6 +2874,7 @@ export const PRODUCT_GRID_FALLBACK_CSS = `
   letter-spacing:.08em;text-transform:uppercase;padding:5px 9px;border-radius:999px;line-height:1}
 .card-badge--out{background:var(--text-color,#111);color:var(--white-color,#fff);margin-left:auto}
 .card-badge--deal{background:var(--text-color,#111);color:var(--white-color,#fff)}
+.card-badge--preorder{background:var(--ac,#e83b3b);color:#fff;margin-left:auto}
 .is-sold-out .c-product-grid__thumb--base{opacity:.55}
 
 /* ── CONTENT ROWS ───────────────────────────────────────────────────────── */

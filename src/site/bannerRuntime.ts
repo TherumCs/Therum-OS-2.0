@@ -185,8 +185,16 @@ export const BANNER_STYLES = `
    scroll keyframes assume. */
 .c-ip-running-line.c-ip-running-line{display:flex!important;flex-direction:row!important;
   flex-wrap:nowrap!important;align-items:center;overflow:hidden}
+/* margin-right is the SEAM gap between one copy and the next, and it has to be
+   here. The theme defines --gap:15px and its scroll keyframe advances each copy
+   by calc(100% + var(--gap)) — so it already assumes every copy carries that gap
+   on its trailing edge. The flex gap:15px inside a copy only spaces items from
+   each other, never after the last one, so with margin:0 the last title butted
+   straight against the next copy's first bullet at 0px ("...Afterpay•" with no
+   space). Restoring margin-right:var(--gap) makes the seam match the 15px rhythm
+   and keeps the loop seamless (the keyframe already accounts for it). */
 .c-ip-running-line.c-ip-running-line>.c-ip-running-line__content{
-  flex:0 0 auto!important;width:max-content!important;margin:0}
+  flex:0 0 auto!important;width:max-content!important;margin:0 var(--gap,15px) 0 0}
 
 /* Column widths for the imported banner grids.
    The theme's own stylesheet sizes .c-ip-banners__list--N; without it the

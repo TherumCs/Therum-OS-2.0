@@ -6,6 +6,7 @@ import { capabilityService } from './capability.service.js';
 import { milieuService } from './milieu.service.js';
 import { messageEmailHtml } from './emailTemplate.js';
 import { esc } from '../site/html.js';
+import { unsubscribeUrl as buildUnsubscribeUrl } from '../lib/unsubscribe.js';
 
 // Everything the signed-in shopper's own account page needs, and the merchant
 // side of pushing an offer to one.
@@ -83,7 +84,7 @@ export const customerAccountService = {
    * new arrivals and SAYS so via `basis`, so the storefront can label the strip
    * honestly instead of implying a personalisation that did not happen.
    */
-  async recommendations(customerId: string, limit = 4): Promise<{ basis: 'history' | 'new'; products: unknown[] }> {
+  async recommendations(customerId: string, limit = 8): Promise<{ sections: { key: string; title: string; basis: string; products: unknown[] }[] }> {
     const bought = await db.order.findMany({
       where: { customerId },
       select: { items: { select: { variant: { select: { productId: true } } } } },
@@ -122,40 +123,80 @@ export const customerAccountService = {
       };
     });
 
+    const sections: { key: string; title: string; basis: string; products: unknown[] }[] = [];
+    // Dedupe ACROSS rails — a product shown once (or already owned) never repeats
+    // in a later rail, so the page reads as distinct sections, not the same eight
+    // items relabelled.
+    const shown = new Set<string>(boughtIds);
+    const addSection = (key: string, title: string, basis: string, rows: { id: string; meta: unknown }[]): void => {
+      const fresh = rows.filter((p) => !shown.has(p.id)).slice(0, limit);
+      if (!fresh.length) return;
+      fresh.forEach((p) => shown.add(p.id));
+      sections.push({ key, title, basis, products: enrich(fresh) });
+    };
+
+    // 1. Exclusive to you — the member-only drops this shopper can ACTUALLY see:
+    // products gated to a milieu they belong to (Friends & Family) or granted to
+    // their account directly. The real F&F-exclusive surface, not a public item
+    // dressed up. No milieu + no grants → no such rail. (Empty until such products
+    // exist — create a product with milieu/account visibility and it lights up.)
+    const myMilieus = await db.milieuMembership.findMany({ where: { customerId }, select: { milieuId: true } });
+    const milieuIds = myMilieus.map((m) => m.milieuId);
+    // Canonical gated value is 'restricted' (milieu audiences + account grants
+    // combined) — the same value src/counter/visibility.ts's gate honours, so the
+    // account rail and the storefront grid agree on what's exclusive.
+    addSection('exclusive', 'Exclusive to you', 'exclusive', await db.product.findMany({
+      where: {
+        status: 'active',
+        OR: [
+          // 'members' — visible to any signed-in shopper (this account qualifies).
+          { visibility: 'members' },
+          // 'restricted' — only when a milieu/account grant matches this shopper.
+          { visibility: 'restricted', OR: [
+            ...(milieuIds.length ? [{ audiences: { some: { milieuId: { in: milieuIds } } } }] : []),
+            { access: { some: { customerId } } },
+          ] },
+        ],
+      },
+      select, orderBy: { createdAt: 'desc' }, take: limit,
+    }));
+
+    // 2. Picked for you — more from the categories they've bought into. Needs the
+    // past purchases to be categorised (uncategorised orders yield no rail).
     if (boughtIds.length) {
-      const cats = await db.productCategory.findMany({
-        where: { products: { some: { id: { in: boughtIds } } } },
-        select: { id: true },
-      });
+      const cats = await db.productCategory.findMany({ where: { products: { some: { id: { in: boughtIds } } } }, select: { id: true } });
       if (cats.length) {
-        const products = await db.product.findMany({
-          where: {
-            status: 'active',
-            // Recommendations is a discovery surface, so it must only ever
-            // surface PUBLIC products. Restricted/private items (the bespoke
-            // crewneck) are reachable by their authorized owner via a direct
-            // link — never recommended, or they leak to everyone else.
-            visibility: 'public',
-            id: { notIn: boughtIds },
-            categories: { some: { id: { in: cats.map((c) => c.id) } } },
-          },
-          select,
-          orderBy: { createdAt: 'desc' },
-          take: limit,
-        });
-        if (products.length) return { basis: 'history', products: enrich(products) };
+        addSection('foryou', 'Picked for you', 'history', await db.product.findMany({
+          where: { status: 'active', visibility: 'public', categories: { some: { id: { in: cats.map((c) => c.id) } } } },
+          select, orderBy: { createdAt: 'desc' }, take: limit + boughtIds.length,
+        }));
       }
     }
 
-    return {
-      basis: 'new',
-      products: enrich(await db.product.findMany({
-        where: { status: 'active', visibility: 'public', ...(boughtIds.length ? { id: { notIn: boughtIds } } : {}) },
-        select,
-        orderBy: { createdAt: 'desc' },
-        take: limit,
-      })),
-    };
+    // 3. Trending now — the store's bestsellers by units sold. The reliable rail
+    // that fills for everyone, so the page is never a single row of new arrivals.
+    const trendRows = await db.orderItem.groupBy({ by: ['variantId'], _sum: { quantity: true }, orderBy: { _sum: { quantity: 'desc' } }, take: 80 });
+    const trendVarIds = trendRows.map((r) => r.variantId).filter((v): v is string => !!v);
+    if (trendVarIds.length) {
+      const vmap = new Map((await db.productVariant.findMany({ where: { id: { in: trendVarIds } }, select: { id: true, productId: true } })).map((v) => [v.id, v.productId]));
+      const pidOrder: string[] = [];
+      const seen = new Set<string>();
+      for (const r of trendRows) {
+        const pid = r.variantId ? vmap.get(r.variantId) : undefined;
+        if (pid && !seen.has(pid)) { seen.add(pid); pidOrder.push(pid); }
+      }
+      const rows = await db.product.findMany({ where: { id: { in: pidOrder }, status: 'active', visibility: 'public' }, select });
+      const byId = new Map(rows.map((p) => [p.id, p]));
+      addSection('trending', 'Trending now', 'trending', pidOrder.map((id) => byId.get(id)).filter((p): p is (typeof rows)[number] => !!p));
+    }
+
+    // 4. New arrivals — the newest public drops, whatever hasn't been shown yet.
+    addSection('new', 'New arrivals', 'new', await db.product.findMany({
+      where: { status: 'active', visibility: 'public' },
+      select, orderBy: { createdAt: 'desc' }, take: limit + 30,
+    }));
+
+    return { sections };
   },
 
   // ── Offers ──────────────────────────────────────────────────────────────
@@ -292,6 +333,7 @@ export const customerAccountService = {
       for (const customerId of pushed) {
         const to = emailById.get(customerId);
         if (!to) continue;
+        const unsub = buildUnsubscribeUrl(to);
         const html = messageEmailHtml({
           eyebrow: 'Friends & Family', eyebrowColor: '#e83b3b',
           heading: input.title,
@@ -299,12 +341,14 @@ export const customerAccountService = {
           cta: { label: 'View your account', url: `${process.env.PUBLIC_ORIGIN || ''}/account` },
           preheader: input.title,
           siteName: site.siteName,
+          unsubscribeUrl: unsub,
         });
         void notificationService.sendToAddress(
           to,
           `${site.siteName} — ${input.title}`,
           `${input.title}\n\n${message}\n\nView it in your account: ${process.env.PUBLIC_ORIGIN || ''}/account\n\n— ${site.siteName}`,
           html,
+          { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' },
         ).catch(() => {});
       }
     }

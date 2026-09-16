@@ -54,6 +54,12 @@ enum PaymentStatus {
 model Vendor {
   id            String         @id @default(cuid())
   name          String
+  // The store credential this vendor belongs to, when it represents a connected
+  // partner. partnerVendor() keys on THIS, not the human label — the label is not
+  // unique (every NULL-description compat key collapsed to one shared "Connected
+  // partner" vendor, so two partners were fenced to the SAME vendor and read each
+  // other's customer PII, audit C2). Unique so two credentials never share one.
+  credentialId  String?        @unique @map("credential_id")
   platform      VendorPlatform @default(custom)
   apiKey        String?        @map("api_key")
   webhookSecret String?        @map("webhook_secret")
@@ -78,7 +84,7 @@ model Vendor {
 model Product {
   deletedAt   DateTime? @map("deleted_at")
   id          String        @id @default(cuid())
-  wooId       Int?          @unique @map("woo_id")
+  wooId       Int?          @unique @default(autoincrement()) @map("woo_id")
   name        String
   slug        String        @unique
   description String?
@@ -133,7 +139,7 @@ model Product {
 model ProductCategory {
   deletedAt DateTime? @map("deleted_at")
   id       String  @id @default(cuid())
-  wooId    Int?    @unique @map("woo_id")
+  wooId    Int?    @unique @default(autoincrement()) @map("woo_id")
   name     String
   // NOT globally unique — unique WITHIN ITS PARENT.
   //
@@ -164,7 +170,7 @@ model ProductCategory {
 model ProductTag {
   deletedAt DateTime? @map("deleted_at")
   id   String @id @default(cuid())
-  wooId Int?  @unique @map("woo_id")
+  wooId Int?  @unique @default(autoincrement()) @map("woo_id")
   name String
   slug String @unique
 
@@ -177,7 +183,7 @@ model ProductTag {
 
 model ProductVariant {
   id             String  @id @default(cuid())
-  wooId          Int?    @unique @map("woo_id")
+  wooId          Int?    @unique @default(autoincrement()) @map("woo_id")
   productId      String  @map("product_id")
   sku            String?
   // Money in minor units (cents).
@@ -342,6 +348,13 @@ model Address {
 
 model Order {
   id             String      @id @default(cuid())
+  // Integer WooCommerce-style order id. A partner's Woo parser expects the
+  // order `id` to be an INTEGER (Woo shares the wp_posts id space); handing it
+  // our cuid made a strict receiver reject the whole order before it ever
+  // matched line items. DB-defaulted from a sequence starting at 100000 so an
+  // order id never collides with a product wooId. Emitted as the order `id` in
+  // the webhook + /orders payloads.
+  wooId          Int?        @unique @default(autoincrement()) @map("woo_id")
   // Human-facing order number, high-entropy + unique.
   number         String      @unique
   status         OrderStatus @default(pending)
@@ -379,8 +392,11 @@ model Order {
   // storefront customer auth.
   guestEmail     String?     @map("guest_email")
   // External id from the source platform — the idempotency key that makes a
-  // WooCommerce order import re-runnable without duplicating history.
-  sourceId       String?     @map("source_id")
+  // WooCommerce order import re-runnable without duplicating history. UNIQUE
+  // (partial, non-null) so a concurrent/retried import can't create two orders
+  // for the same source order; the comment claimed idempotency but nothing at
+  // the DB enforced it. Nulls (store-native orders) are exempt.
+  sourceId       String?     @unique @map("source_id")
   // Shipping address captured AT CHECKOUT, on the order itself.
   //
   // Addresses otherwise hang off Customer, which left a guest order with no
@@ -414,6 +430,15 @@ model OrderItem {
   quantity    Int
   // Snapshot of the price at time of order (minor units) — never recompute.
   priceAtTime Int    @map("price_at_time")
+  // PER-LINE fulfilment stage. A multi-vendor order has each product at its own
+  // stage (one printing, another already shipped), so production is tracked per
+  // item, not per order. Values: 'pending' (paid, not started), 'in_production'
+  // (being made — triggers the customer notice), 'shipped', 'delivered',
+  // 'cancelled'. The order-level status stays the overall roll-up.
+  productionStatus String @default("pending") @map("production_status")
+  // When the customer was last told this line entered production — one email per
+  // line per entry, never re-sent on a re-save.
+  productionNotifiedAt DateTime? @map("production_notified_at")
 
   order   Order          @relation(fields: [orderId], references: [id], onDelete: Cascade)
   variant ProductVariant @relation(fields: [variantId], references: [id], onDelete: Restrict)
@@ -473,6 +498,10 @@ model CouponRedemption {
   orderId    String    @map("order_id")
   // Per-user limit tracks by guest email until customer accounts exist.
   email      String?
+  // The VERIFIED customer identity, when the redeemer was signed in. The per-user
+  // cap keys on this first (email alone was bypassable — a signed-in shopper just
+  // typed a different address each time, audit C15); email is the guest fallback.
+  customerId String?   @map("customer_id")
   amount     Int
   appliedAt  DateTime  @default(now()) @map("applied_at")
   // Set on refund → frees the per-user slot (1.x releaseRedemptionsForOrder).
@@ -483,6 +512,7 @@ model CouponRedemption {
 
   @@unique([couponId, orderId], name: "coupon_order")
   @@index([couponId, email])
+  @@index([couponId, customerId])
   @@index([orderId])
   @@map("coupon_redemptions")
 }
@@ -678,6 +708,13 @@ model StoreCredential {
   // nothing more, and handing out write access by default is how a compromised
   // partner becomes a compromised store.
   scope       String    @default("read_write")
+  // TRUST BOUNDARY for order scoping. A first-party key (admin-issued via
+  // /store-keys, for the merchant's own tooling) sees ALL orders; a PARTNER key
+  // (issued via wc-auth or imported from the reference store) is fenced to its
+  // own vendor's orders. Defaults FALSE = partner = fenced, so an un-flagged /
+  // unknown credential fails CLOSED (never leaks all customer PII). Only the
+  // full-admin /store-keys path sets this true.
+  firstParty  Boolean   @default(false) @map("first_party")
   lastUsedAt  DateTime? @map("last_used_at")
   lastUsedIp  String?   @map("last_used_ip")
   revokedAt   DateTime? @map("revoked_at")
@@ -946,6 +983,13 @@ model WebhookDelivery {
   resourceId   String       @map("resource_id")
   // null until a response arrives; a timeout leaves it null with an error set.
   responseCode Int?         @map("response_code")
+  // The vendor's actual response body (truncated). A 2xx is NOT proof of
+  // fulfilment: partners return 200 with an error body — Tapstitch {data:null},
+  // PODpartner {code:2002,"System is busy"} / {code:1,"参数无效"}. `genuine`
+  // records whether the body actually indicated acceptance, so reconciliation
+  // and retry act on the truth, not the HTTP code.
+  responseBody String?      @map("response_body")
+  genuine      Boolean?
   error        String?
   attempt      Int          @default(1)
   durationMs   Int?         @map("duration_ms")
@@ -1202,6 +1246,13 @@ model OrderShipment {
 
   @@index([orderId])
   @@index([status])
+  // One shipment per (order, tracking number). Two paths materialize a ship
+  // event — the Counter markShipped flow and the wooCompat partner tracking-note
+  // handler — and a concurrent/retried POST created a SECOND shipment row and a
+  // SECOND "shipped" email for the same parcel (audit C11). Nulls are distinct in
+  // a Postgres unique index, so multiple planned (untracked) shipments per order
+  // are still allowed; only a duplicate REAL tracking number is rejected.
+  @@unique([orderId, trackingNumber], name: "order_tracking")
   @@map("order_shipments")
 }
 
@@ -1276,6 +1327,12 @@ model CustomerAuthCode {
   // Phone (E.164) or lowercased email.
   destination String
   kind        String
+  // What flow this code was minted for: 'login' (sign-in + registration verify),
+  // 'reset' (password reset), or 'email_change' (adding/confirming an email).
+  // Set at issuance and REQUIRED to match at consumption, so a code minted for
+  // one flow can't be redeemed in another (a login code was otherwise usable at
+  // the password-reset endpoint = account takeover).
+  purpose     String    @default("login")
   codeHash    String    @map("code_hash")
   expiresAt   DateTime  @map("expires_at")
   consumedAt  DateTime? @map("consumed_at")
@@ -1387,4 +1444,207 @@ model ProductAccess {
   @@id([productId, customerId])
   @@index([customerId])
   @@map("product_access")
+}
+
+// ─── Marketing (Flow) ─────────────────────────────────────────────────────
+//
+// Email + SMS marketing: who may be mailed, in which lists, with which
+// campaign, and what happened after. Deliberately its OWN identity table
+// rather than reusing Customer: a subscriber has consented to marketing and
+// may never buy; a customer has bought and may never have consented. The two
+// are linked (customerId) when both are true, and consent lives HERE only —
+// customer.meta.noMarketing stays as the legacy read for the older sweeps.
+
+model Subscriber {
+  id             String    @id @default(cuid())
+  email          String    @unique
+  firstName      String?   @map("first_name")
+  lastName       String?   @map("last_name")
+  phone          String?
+  /** subscribed | unsubscribed | bounced | pending (double opt-in not confirmed) */
+  status         String    @default("subscribed")
+  /** none | subscribed | unsubscribed — SMS consent is separate from email consent. */
+  smsStatus      String    @default("none") @map("sms_status")
+  /** footer | popup | embed | checkout | customer | import | manual | coming-soon */
+  source         String    @default("manual")
+  tags           String[]  @default([])
+  customerId     String?   @unique @map("customer_id")
+  meta           Json      @default("{}")
+  subscribedAt   DateTime  @default(now()) @map("subscribed_at")
+  unsubscribedAt DateTime? @map("unsubscribed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  lists ListMembership[]
+  sends CampaignSend[]
+
+  @@index([status])
+  @@index([createdAt])
+  @@map("subscribers")
+}
+
+model MarketingList {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  description String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  members ListMembership[]
+  forms   SignupForm[]
+
+  @@map("marketing_lists")
+}
+
+model ListMembership {
+  listId       String   @map("list_id")
+  subscriberId String   @map("subscriber_id")
+  addedAt      DateTime @default(now()) @map("added_at")
+
+  list       MarketingList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  subscriber Subscriber    @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+
+  @@id([listId, subscriberId])
+  @@index([subscriberId])
+  @@map("list_memberships")
+}
+
+/** A saved audience rule set, evaluated at send time (never a frozen list). */
+model Segment {
+  id        String   @id @default(cuid())
+  name      String
+  rules     Json     @default("{}")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("segments")
+}
+
+model Campaign {
+  id             String    @id @default(cuid())
+  name           String
+  /** email | sms */
+  channel        String    @default("email")
+  subject        String    @default("")
+  preheader      String    @default("")
+  fromName       String?   @map("from_name")
+  replyTo        String?   @map("reply_to")
+  /** Composer blocks (source of truth); `html` is the compiled render. */
+  blocks         Json      @default("[]")
+  html           String    @default("")
+  /** Plain-text alternative for email; the message body for SMS. */
+  text           String    @default("")
+  /** { all?: boolean, listIds: string[], segmentIds: string[], excludeListIds: string[] } */
+  audience       Json      @default("{}")
+  /** draft | scheduled | sending | sent | paused | cancelled */
+  status         String    @default("draft")
+  scheduledAt    DateTime? @map("scheduled_at")
+  startedAt      DateTime? @map("started_at")
+  sentAt         DateTime? @map("sent_at")
+  recipientCount Int       @default(0) @map("recipient_count")
+  sentCount      Int       @default(0) @map("sent_count")
+  failedCount    Int       @default(0) @map("failed_count")
+  openCount      Int       @default(0) @map("open_count")
+  clickCount     Int       @default(0) @map("click_count")
+  unsubCount     Int       @default(0) @map("unsub_count")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  sends CampaignSend[]
+
+  @@index([status])
+  @@index([scheduledAt])
+  @@map("campaigns")
+}
+
+/** A triggered message: welcome, abandoned cart, post-purchase, win-back, custom. */
+model Automation {
+  id         String   @id @default(cuid())
+  key        String   @unique
+  name       String
+  enabled    Boolean  @default(false)
+  channel    String   @default("email")
+  /** { event: 'signup'|'cart_abandoned'|'order_paid'|'order_delivered'|'no_order_days', delayMinutes, days?, listId? } */
+  trigger    Json     @default("{}")
+  subject    String   @default("")
+  preheader  String   @default("")
+  blocks     Json     @default("[]")
+  html       String   @default("")
+  text       String   @default("")
+  sentCount  Int      @default(0) @map("sent_count")
+  openCount  Int      @default(0) @map("open_count")
+  clickCount Int      @default(0) @map("click_count")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  sends CampaignSend[]
+
+  @@map("automations")
+}
+
+/** One message to one recipient. Carries the tracking token opens/clicks resolve to. */
+model CampaignSend {
+  id             String    @id @default(cuid())
+  campaignId     String?   @map("campaign_id")
+  automationId   String?   @map("automation_id")
+  subscriberId   String?   @map("subscriber_id")
+  email          String
+  channel        String    @default("email")
+  token          String    @unique
+  /** queued | sent | failed | bounced | skipped */
+  status         String    @default("queued")
+  error          String?
+  sentAt         DateTime? @map("sent_at")
+  openedAt       DateTime? @map("opened_at")
+  clickedAt      DateTime? @map("clicked_at")
+  unsubscribedAt DateTime? @map("unsubscribed_at")
+  meta           Json      @default("{}")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  campaign   Campaign?   @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  automation Automation? @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  subscriber Subscriber? @relation(fields: [subscriberId], references: [id], onDelete: SetNull)
+  events     CampaignEvent[]
+
+  @@unique([campaignId, email])
+  @@index([automationId, email])
+  @@index([subscriberId])
+  @@index([status])
+  @@map("campaign_sends")
+}
+
+model CampaignEvent {
+  id     String   @id @default(cuid())
+  sendId String   @map("send_id")
+  /** open | click | unsubscribe | bounce */
+  kind   String
+  url    String?
+  ua     String?
+  ip     String?
+  at     DateTime @default(now())
+
+  send CampaignSend @relation(fields: [sendId], references: [id], onDelete: Cascade)
+
+  @@index([sendId])
+  @@map("campaign_events")
+}
+
+/** A capture surface on the storefront: popup, inline embed, bar, or the footer form. */
+model SignupForm {
+  id        String   @id @default(cuid())
+  name      String
+  /** popup | embed | bar | footer */
+  kind      String   @default("popup")
+  listId    String?  @map("list_id")
+  enabled   Boolean  @default(false)
+  settings  Json     @default("{}")
+  views     Int      @default(0)
+  submits   Int      @default(0)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  list MarketingList? @relation(fields: [listId], references: [id], onDelete: SetNull)
+
+  @@map("signup_forms")
 }

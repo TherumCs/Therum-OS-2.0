@@ -2,6 +2,7 @@ import type { FastifyInstance } from 'fastify';
 import { CreateMediaInput, ListMediaQuery, UpdateMediaInput, RenameMediaInput, BulkRenameInput, TransformMediaInput } from '../../schemas/media.schema.js';
 import { mediaService } from '../../services/media.service.js';
 import { requireCapability } from '../../middleware/capability.js';
+import { requireBundle } from '../../middleware/bundle.js';
 import { ValidationError } from '../../lib/errors.js';
 
 const idParam = (req: { params: unknown }): string => (req.params as { id: string }).id;
@@ -24,11 +25,11 @@ export async function mediaRoutes(app: FastifyInstance): Promise<void> {
     reply.send(await mediaService.get(idParam(req)));
   });
 
-  app.post('/media', { preHandler: app.authenticate }, async (req, reply) => {
+  app.post('/media', { preHandler: [app.authenticate, requireBundle('write')] }, async (req, reply) => {
     reply.status(201).send(await mediaService.create(CreateMediaInput.parse(req.body)));
   });
 
-  app.post('/media/upload', { preHandler: app.authenticate }, async (req, reply) => {
+  app.post('/media/upload', { preHandler: [app.authenticate, requireBundle('write')] }, async (req, reply) => {
     const file = await req.file();
     if (!file) throw new ValidationError('No file in upload.', 'file');
     const buffer = await file.toBuffer();
@@ -36,35 +37,35 @@ export async function mediaRoutes(app: FastifyInstance): Promise<void> {
     reply.status(201).send(await mediaService.upload({ filename: file.filename, mimetype: file.mimetype, buffer }, alt));
   });
 
-  app.patch('/media/:id', { preHandler: app.authenticate }, async (req, reply) => {
+  app.patch('/media/:id', { preHandler: [app.authenticate, requireBundle('write')] }, async (req, reply) => {
     const input = UpdateMediaInput.parse(req.body);
     reply.send(await mediaService.updateAlt(idParam(req), input.alt));
   });
 
-  app.post('/media/:id/rename', { preHandler: app.authenticate }, async (req, reply) => {
+  app.post('/media/:id/rename', { preHandler: [app.authenticate, requireBundle('write')] }, async (req, reply) => {
     const input = RenameMediaInput.parse(req.body);
     reply.send(await mediaService.rename(idParam(req), input.basename));
   });
 
-  app.post('/media/:id/transform', { preHandler: app.authenticate }, async (req, reply) => {
+  app.post('/media/:id/transform', { preHandler: [app.authenticate, requireBundle('write')] }, async (req, reply) => {
     const input = TransformMediaInput.parse(req.body);
     reply.send(await mediaService.transform(idParam(req), input));
   });
 
-  app.post('/media/:id/revert', { preHandler: app.authenticate }, async (req, reply) => {
+  app.post('/media/:id/revert', { preHandler: [app.authenticate, requireBundle('write')] }, async (req, reply) => {
     reply.send(await mediaService.revert(idParam(req)));
   });
 
-  app.post('/media/:id/regenerate-thumbnail', { preHandler: app.authenticate }, async (req, reply) => {
+  app.post('/media/:id/regenerate-thumbnail', { preHandler: [app.authenticate, requireBundle('write')] }, async (req, reply) => {
     reply.send(await mediaService.regenerateThumbnail(idParam(req)));
   });
 
-  app.post('/media/bulk-rename', { preHandler: app.authenticate }, async (req, reply) => {
+  app.post('/media/bulk-rename', { preHandler: [app.authenticate, requireBundle('content-manager')] }, async (req, reply) => {
     const input = BulkRenameInput.parse(req.body);
     reply.send(await mediaService.bulkRename(input.items));
   });
 
-  app.delete('/media/:id', { preHandler: app.authenticate }, async (req, reply) => {
+  app.delete('/media/:id', { preHandler: [app.authenticate, requireBundle('content-manager')] }, async (req, reply) => {
     reply.send(await mediaService.remove(idParam(req)));
   });
 }

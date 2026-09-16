@@ -189,6 +189,9 @@ export const ACCOUNT_CSS = `
 .th-offer__fine{font-size:11px;color:var(--text-color-light,#888)}
 
 /* ── Product strips ────────────────────────────────────────────────────── */
+.th-picks-sec{margin-bottom:34px}
+.th-picks-sec:last-child{margin-bottom:0}
+.th-picks-sec__h{font-size:16px;font-weight:800;letter-spacing:-.01em;margin:0 0 16px}
 .th-picks{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:24px}
 /* Five to a row: four products and the shop. */
 .th-picks--5{grid-template-columns:repeat(5,minmax(0,1fr))}
@@ -394,14 +397,22 @@ export function accountMarkup(wishlist: string, googleClientId = ''): string {
         </form>
 
         <div class="th-acct__addr">
-          <div class="th-acct__addr-txt">Sign-in email <span class="th-acct__dim" data-acct-email2></span></div>
-          <div class="th-acct__addr-acts">
-            <button type="button" class="th-acct__link" data-acct-em-edit>Change</button>
-          </div>
+          <div class="th-acct__addr-txt">Login emails <span class="th-acct__dim">(up to 3 — sign in with any)</span></div>
+        </div>
+        <div data-acct-emails></div>
+        <div class="th-acct__addr-acts" style="margin-top:8px">
+          <button type="button" class="th-acct__link" data-acct-em-edit>+ Add email</button>
         </div>
         <form class="th-acct__addrform" data-acct-em-form hidden>
-          <input class="th-acct__in" data-em="email" type="email" placeholder="New email address" autocomplete="email">
+          <input class="th-acct__in" data-em="email" type="email" placeholder="Email to add" autocomplete="email">
           <input class="th-acct__in" data-em="password" type="password" placeholder="Your password" autocomplete="current-password">
+          <!-- Re-auth for a PASSWORDLESS account: prove you control an EXISTING
+               address before adding a new one (a session alone is not enough —
+               audit C3). Password accounts leave this blank and use the password. -->
+          <div data-acct-em-reauth hidden style="margin-top:6px">
+            <button type="button" class="th-acct__link" data-em-reauth-send>Email me a code to my current address</button>
+            <input class="th-acct__in" data-em="reauth" inputmode="numeric" placeholder="Code from your current email" autocomplete="one-time-code">
+          </div>
           <div class="th-acct__editrow">
             <button type="submit" class="th-acct__btn">Send code</button>
             <button type="button" class="th-acct__link" data-acct-em-cancel>Cancel</button>
@@ -563,10 +574,10 @@ export const ACCOUNT_RUNTIME = `
     if (t) {
       localStorage.setItem(KEY, t);
       var maxAge = expiresAt ? Math.max(0, Math.floor((new Date(expiresAt) - new Date()) / 1000)) : 2592000;
-      document.cookie = 'th_customer=' + encodeURIComponent(t) + ';path=/;max-age=' + maxAge + ';samesite=lax';
+      document.cookie = 'th_customer=' + encodeURIComponent(t) + ';path=/;max-age=' + maxAge + ';samesite=lax' + (location.protocol === 'https:' ? ';secure' : '');
     } else {
       localStorage.removeItem(KEY);
-      document.cookie = 'th_customer=;path=/;max-age=0;samesite=lax';
+      document.cookie = 'th_customer=;path=/;max-age=0;samesite=lax' + (location.protocol === 'https:' ? ';secure' : '');
     }
   }
   async function api(path, opts){
@@ -590,13 +601,30 @@ export const ACCOUNT_RUNTIME = `
   }
 
   function showGuest(){ guest.hidden = false; user.hidden = true; root.classList.remove('th-acct--wide'); }
+  var LAST_ME = null;
+  // The account's up-to-3 login emails, with a Primary/Verified/Pending badge and
+  // per-row Make-primary / Remove actions. Re-rendered after any email change.
+  function renderEmails(me){
+    LAST_ME = me;
+    var host = root.querySelector('[data-acct-emails]'); if (!host) return;
+    var emails = (me.emails && me.emails.length) ? me.emails : [{ email: me.email, verifiedAt: 1, primary: true }];
+    host.innerHTML = emails.map(function(x){
+      var badge = x.primary ? 'Primary' : (x.verifiedAt ? 'Verified' : 'Pending');
+      var acts = '';
+      if (!x.primary && x.verifiedAt) acts += '<button type="button" class="th-acct__link" data-em-primary="' + esc(x.email) + '">Make primary</button> ';
+      if (!x.primary) acts += '<button type="button" class="th-acct__link" data-em-remove="' + esc(x.email) + '">Remove</button>';
+      return '<div class="th-acct__addr"><div class="th-acct__addr-txt">' + esc(x.email) + ' <span class="th-acct__dim">' + badge + '</span></div><div class="th-acct__addr-acts">' + acts + '</div></div>';
+    }).join('');
+    var addBtn = root.querySelector('[data-acct-em-edit]');
+    if (addBtn) { if (emails.length >= 3) { addBtn.setAttribute('disabled', ''); addBtn.style.opacity = '.5'; } else { addBtn.removeAttribute('disabled'); addBtn.style.opacity = ''; } }
+  }
   function showUser(me){
     guest.hidden = true; user.hidden = false; root.classList.add('th-acct--wide');
     var nmI = root.querySelector('[data-acct-name-input]'); if (nmI) nmI.value = me.name || '';
     var fnI = root.querySelector('[data-acct-first-input]'); if (fnI) fnI.value = me.firstName || '';
     var lnI = root.querySelector('[data-acct-last-input]'); if (lnI) lnI.value = me.lastName || '';
     var emI = root.querySelector('[data-acct-email]'); if (emI) { if (emI.tagName === 'INPUT') emI.value = me.email; else emI.textContent = me.email; }
-    var e2 = root.querySelector('[data-acct-email2]'); if (e2) e2.textContent = me.email;
+    renderEmails(me);
     root.querySelector('[data-acct-hello]').textContent = me.name ? ('Hey, ' + me.name.split(' ')[0]) : 'Your account';
     var lvl = root.querySelector('[data-acct-level]');
     if (lvl) {
@@ -738,8 +766,36 @@ export const ACCOUNT_RUNTIME = `
   root.addEventListener('click', function(e){
     if (e.target.matches('[data-acct-pw-edit]')) { pwForm.hidden = false; pwForm.querySelector('[data-pw="current"]').focus(); }
     if (e.target.matches('[data-acct-pw-cancel]')) { pwForm.hidden = true; }
-    if (e.target.matches('[data-acct-em-edit]')) { emForm.hidden = false; emConfirm.hidden = true; emForm.querySelector('[data-em="email"]').focus(); }
+    if (e.target.matches('[data-acct-em-edit]')) {
+      emForm.hidden = false; emConfirm.hidden = true;
+      // Reveal the passwordless re-auth helper (harmless for password accounts,
+      // which just use the password field). Server requires ONE of the two.
+      var rz0 = emForm.querySelector('[data-acct-em-reauth]'); if (rz0) rz0.hidden = false;
+      emForm.querySelector('[data-em="email"]').focus();
+    }
     if (e.target.matches('[data-acct-em-cancel]')) { emForm.hidden = true; emConfirm.hidden = true; }
+    if (e.target.matches('[data-em-reauth-send]')) {
+      // Passwordless re-auth: send a login code to the account's CURRENT primary
+      // email so the owner can prove control before adding a new address (C3).
+      var primary = (LAST_ME && LAST_ME.email) || '';
+      if (primary) {
+        api('/shop/account/code', { method: 'POST', body: JSON.stringify({ destination: primary, kind: 'email' }) })
+          .then(function(){ if (msg2) msg2.textContent = 'We sent a code to ' + primary + ' — enter it below, then Send code.'; })
+          .catch(function(err){ if (msg2) msg2.textContent = err.message || 'Could not send a code.'; });
+      }
+    }
+    if (e.target.matches('[data-em-primary]')) {
+      var pemail = e.target.getAttribute('data-em-primary');
+      api('/shop/account/email/primary', { method: 'POST', body: JSON.stringify({ email: pemail }) })
+        .then(function(r){ renderEmails(Object.assign({}, LAST_ME, { emails: r.emails, email: pemail })); if (msg2) msg2.textContent = pemail + ' is now your primary email.'; })
+        .catch(function(err){ if (msg2) msg2.textContent = err.message || 'Could not set primary.'; });
+    }
+    if (e.target.matches('[data-em-remove]')) {
+      var remail = e.target.getAttribute('data-em-remove');
+      api('/shop/account/email/remove', { method: 'POST', body: JSON.stringify({ email: remail }) })
+        .then(function(r){ renderEmails(Object.assign({}, LAST_ME, { emails: r.emails })); if (msg2) msg2.textContent = remail + ' removed.'; })
+        .catch(function(err){ if (msg2) msg2.textContent = err.message || 'Could not remove that email.'; });
+    }
   });
 
   if (pwForm) pwForm.addEventListener('submit', async function(e){
@@ -763,7 +819,7 @@ export const ACCOUNT_RUNTIME = `
     e.preventDefault();
     try {
       var out = await api('/shop/account/email', { method: 'POST',
-        body: JSON.stringify({ email: emv('email'), password: emv('password') || undefined }) });
+        body: JSON.stringify({ email: emv('email'), password: emv('password') || undefined, code: emv('reauth') || undefined }) });
       pendingEmail = out.to;
       emForm.hidden = true; emConfirm.hidden = false;
       var note = root.querySelector('[data-acct-em-sent]');
@@ -779,9 +835,12 @@ export const ACCOUNT_RUNTIME = `
       var out = await api('/shop/account/email/confirm', { method: 'POST',
         body: JSON.stringify({ email: pendingEmail, code: emv('code') }) });
       emConfirm.hidden = true;
-      root.querySelector('[data-acct-email]').textContent = out.email;
-      var e2 = root.querySelector('[data-acct-email2]'); if (e2) e2.textContent = out.email;
-      if (msg2) msg2.textContent = 'Email changed to ' + out.email + '.';
+      emConfirm.querySelectorAll('input').forEach(function(i){ i.value = ''; });
+      emForm.querySelectorAll('input').forEach(function(i){ i.value = ''; });
+      // Added (not replaced): re-pull the account so the new verified email joins
+      // the list without touching the primary.
+      try { var me = await api('/shop/account/me', {}); renderEmails(me); } catch (e3) {}
+      if (msg2) msg2.textContent = out.email + ' added — you can now sign in with it.';
     } catch (err) { if (msg2) msg2.textContent = err.message || 'That code did not match.'; }
   });
 
@@ -928,11 +987,15 @@ export const ACCOUNT_RUNTIME = `
     var results = await Promise.all([
       api('/shop/account/offers').catch(function(){ return { offers: [] }; }),
       api('/shop/account/orders').catch(function(){ return { orders: [] }; }),
-      api('/shop/account/recommendations').catch(function(){ return { basis: 'new', products: [] }; }),
+      api('/shop/account/recommendations').catch(function(){ return { sections: [] }; }),
     ]);
     var offers = results[0].offers || [];
     var orders = results[1].orders || [];
-    var picks = results[2].products || [];
+    // Overview preview = the FIRST available rail (Exclusive → Picked → New), so
+    // a member sees their exclusive drop first; the full set lives on the For-you tab.
+    var recSections = results[2].sections || [];
+    var picksSection = recSections[0] || null;
+    var picks = picksSection ? (picksSection.products || []) : [];
     var live = offers.filter(function(o){ return o.status === 'active'; });
     root.querySelector('[data-acct-offer-count]').textContent = live.length > 0 ? String(live.length) : '';
 
@@ -996,7 +1059,7 @@ export const ACCOUNT_RUNTIME = `
     // Picks run full width — this is the part that should feel like a store.
     if (picks.length) {
       el.insertAdjacentHTML('beforeend', '<div class="th-card th-card--span">'
-        + '<div class="th-card__label">' + (results[2].basis === 'history' ? 'Picked for you' : 'New in') + '</div>'
+        + '<div class="th-card__label">' + (picksSection ? picksSection.title : 'New in') + '</div>'
         // Four, then a fifth tile that is the shop itself. Five across reads
         // as a row rather than a grid that ran out, and someone who wants
         // none of the four has somewhere to go from the same row.
@@ -1189,14 +1252,20 @@ export const ACCOUNT_RUNTIME = `
     var el = panel('picks');
     try {
       var r = await api('/shop/account/recommendations');
-      var products = r.products || [];
-      if (!products.length) {
-        el.innerHTML = '<p class="th-acct__empty">Nothing to suggest yet.</p>';
+      var sections = r.sections || [];
+      if (!sections.length) {
+        el.innerHTML = '<p class="th-acct__empty">Nothing to suggest yet — order something and this gets personal.</p>';
         return;
       }
-      el.innerHTML = '<p class="th-picks__basis">'
-        + (r.basis === 'history' ? 'Based on what you have ordered.' : 'New arrivals — order something and this gets personal.')
-        + '</p><div class="th-picks">' + products.map(pickHtml).join('') + '</div>';
+      // One titled rail per section (Exclusive to you / Picked for you / New
+      // arrivals), each only present when it actually has product. Titles are
+      // server-fixed strings, not user input.
+      el.innerHTML = sections.map(function(s){
+        return '<div class="th-picks-sec">'
+          + '<div class="th-picks-sec__h">' + s.title + '</div>'
+          + '<div class="th-picks">' + (s.products || []).map(pickHtml).join('') + '</div>'
+          + '</div>';
+      }).join('');
     } catch (err) {
       el.innerHTML = '<p class="th-acct__empty">Could not load suggestions.</p>';
     }

@@ -1,5 +1,9 @@
 import { Worker } from 'bullmq';
 import { BACKUP_CRON, BACKUP_QUEUE, backupQueue, CATALOG_SYNC_CRON, CATALOG_SYNC_QUEUE, catalogSyncQueue, connection, IMPORT_QUEUE, LIFECYCLE_CRON, LIFECYCLE_QUEUE, lifecycleQueue, MILIEUS_QUEUE, milieusQueue } from './lib/queue.js';
+import { marketingService } from './services/marketing.service.js';
+import { campaignSendService } from './services/campaignSend.service.js';
+import { automationService } from './services/automation.service.js';
+import { MARKETING_QUEUE, MARKETING_TICK_CRON, marketingQueue } from './lib/queue.js';
 import { lifecycleService } from './services/lifecycle.service.js';
 import { hookBus } from './lib/hooks.js';
 import { importService } from './services/import.service.js';
@@ -77,8 +81,11 @@ const lifecycleWorker = new Worker(
   async (job) => {
     const reviews = await lifecycleService.reviewRequestSweep();
     const carts = await lifecycleService.abandonedCartSweep();
-    logger.info({ jobId: job.id, reviews, carts }, 'lifecycle sweep completed');
-    return { reviews, carts };
+    // Keep the marketing base in step with engaged customers (never revives an opt-out).
+    const subscribers = await marketingService.syncCustomers().catch((err: unknown) => { logger.warn({ err }, 'customer → subscriber sync failed'); return null; });
+    const winback = await automationService.winbackSweep().catch((err: unknown) => { logger.warn({ err }, 'win-back sweep failed'); return null; });
+    logger.info({ jobId: job.id, reviews, carts, subscribers, winback }, 'lifecycle sweep completed');
+    return { reviews, carts, subscribers, winback };
   },
   { connection, concurrency: 1 },
 );
@@ -118,7 +125,12 @@ const backupWorker = new Worker(
   },
   { connection, concurrency: 1 },
 );
-backupWorker.on('failed', (job, err) => logger.error({ jobId: job?.id, err }, 'scheduled backup failed'));
+backupWorker.on('failed', (job, err) => {
+  logger.error({ jobId: job?.id, err }, 'scheduled backup failed');
+  // A failed backup must be LOUD — the success path notifies, so silence on
+  // failure was the worst case (no restore point, nobody told).
+  void notificationService.notifyBackupFailed(err instanceof Error ? err.message : String(err)).catch(() => { /* notify layer logs */ });
+});
 backupWorker.on('error', (err) => logger.error({ err }, 'backup worker error'));
 
 // Re-read on every boot so a frequency change picked up by the API is honoured
@@ -142,17 +154,24 @@ void ensureBackupSchedule();
 const catalogSyncWorker = new Worker(
   CATALOG_SYNC_QUEUE,
   async (job) => {
-    const { catalogSyncService } = await import('./counter/catalogSync.js');
-    const providers = await catalogSyncService.providers();
+    // Provider enumeration + catalog sync is ISOLATED from the safety sweeps
+    // below. It reads/decrypts connection credentials, and if that throws (a bad
+    // credential, a decrypt failure after an env drift) the whole job used to
+    // abort — skipping the stale-pending stock release, reconcile and redelivery.
+    // A catalog-sync failure must never take the money-safety sweeps down with it.
     const results: { id: string; ok: boolean; created?: number; updated?: number; error?: string }[] = [];
-    for (const p of providers.filter((x) => x.connected)) {
-      try {
-        const r = await catalogSyncService.run(p.id);
-        results.push({ id: p.id, ok: true, created: r.created, updated: r.updated });
-      } catch (err) {
-        results.push({ id: p.id, ok: false, error: err instanceof Error ? err.message : String(err) });
+    try {
+      const { catalogSyncService } = await import('./counter/catalogSync.js');
+      const providers = await catalogSyncService.providers();
+      for (const p of providers.filter((x) => x.connected)) {
+        try {
+          const r = await catalogSyncService.run(p.id);
+          results.push({ id: p.id, ok: true, created: r.created, updated: r.updated });
+        } catch (err) {
+          results.push({ id: p.id, ok: false, error: err instanceof Error ? err.message : String(err) });
+        }
       }
-    }
+    } catch (err) { logger.error({ err }, 'catalog provider enumeration failed (non-fatal) — safety sweeps still run'); }
     // Each post-sync cleanup is ISOLATED: a throw in the draft purge must never
     // skip the stale-pending sweep, because that sweep is what releases stock
     // reservations from abandoned checkouts — skip it and a stranded pending
@@ -172,8 +191,37 @@ const catalogSyncWorker = new Worker(
       if (sweep.chargedStuck.length > 0) logger.error({ orders: sweep.chargedStuck }, 'CHARGED orders stuck in pending — investigate now');
     } catch (err) { logger.error({ err }, 'stale-pending sweep failed (non-fatal)'); }
 
-    logger.info({ jobId: job.id, results, purgedDrafts: purged.deleted, purgedNames: purged.names, sweptPending: sweep.failed }, 'scheduled catalog sync');
-    return { results, purged, sweep };
+    // Vendor-layer reconciliation: confirm paid orders are ACTUALLY on the push
+    // vendors' backends (queried against their own API). missingPush = the store
+    // routed but the factory has no order — the exact silent failure a payload
+    // check can't see. Isolated: never let it break the sync.
+    let reconcile: { verified: number; missingPush: { order: string; provider: string }[]; unknownPush: number; unverifiablePull: { order: string; vendor: string }[]; self: number } | null = null;
+    try {
+      const { fulfillmentAudit } = await import('./services/fulfillmentAudit.service.js');
+      reconcile = await fulfillmentAudit.reconcile();
+      if (reconcile.missingPush.length > 0) logger.error({ missingPush: reconcile.missingPush }, 'RECONCILE: paid order lines missing from the vendor backend — investigate now');
+    } catch (err) { logger.error({ err }, 'vendor reconciliation failed (non-fatal)'); }
+
+    // Self-healing: re-offer processing orders to webhook vendors whose latest
+    // response was not a genuine accept (bounded: 14 days, 6h per order).
+    // Notifications only — never re-drives an API push, so no double-order risk.
+    let redelivery: { redelivered: string[]; skipped: number } | null = null;
+    try {
+      const { fulfillmentAudit } = await import('./services/fulfillmentAudit.service.js');
+      redelivery = await fulfillmentAudit.redeliverStuck();
+    } catch (err) { logger.error({ err }, 'webhook redelivery failed (non-fatal)'); }
+
+    // Retry PUSH-vendor submissions that blipped at the paid edge (Printful
+    // confirm timeout, Printify produce 500). Dup-safe. This is the retry the
+    // fulfillment guarantee always claimed but nothing actually did.
+    let pushRetry: { retried: string[] } | null = null;
+    try {
+      const { fulfillmentAudit } = await import('./services/fulfillmentAudit.service.js');
+      pushRetry = await fulfillmentAudit.retryStuckPushes();
+    } catch (err) { logger.error({ err }, 'push-vendor retry failed (non-fatal)'); }
+
+    logger.info({ jobId: job.id, results, purgedDrafts: purged.deleted, purgedNames: purged.names, sweptPending: sweep.failed, reconcile, redelivery, pushRetry }, 'scheduled catalog sync');
+    return { results, purged, sweep, reconcile, redelivery, pushRetry };
   },
   { connection, concurrency: 1 },
 );
@@ -192,12 +240,57 @@ async function ensureCatalogSyncSchedule(attempt = 0): Promise<void> {
 }
 void ensureCatalogSyncSchedule();
 
+// Marketing sends: one job per campaign drains its queued rows; the minute
+// tick catches any scheduled campaign whose moment passed while the worker
+// was down (the delayed job is only the fast path).
+const marketingWorker = new Worker(
+  MARKETING_QUEUE,
+  async (job) => {
+    if (job.name === 'send-campaign') {
+      const { campaignId } = job.data as { campaignId: string };
+      const r = await campaignSendService.run(campaignId);
+      logger.info({ jobId: job.id, campaignId, ...r }, 'campaign send job finished');
+      return r;
+    }
+    if (job.name === 'fire-automation') {
+      const { sendId } = job.data as { sendId: string };
+      const r = await automationService.deliver(sendId);
+      logger.info({ jobId: job.id, sendId, result: r }, 'automation delivered');
+      return r;
+    }
+    if (job.name === 'tick') {
+      const due = await campaignSendService.due();
+      for (const id of due) {
+        const r = await campaignSendService.run(id);
+        logger.info({ campaignId: id, ...r }, 'campaign sent from tick');
+      }
+      return { due: due.length };
+    }
+    return null;
+  },
+  { connection, concurrency: 1 },
+);
+marketingWorker.on('failed', (job, err) => logger.error({ jobId: job?.id, err }, 'marketing job failed'));
+marketingWorker.on('error', (err) => logger.error({ err }, 'marketing worker error'));
+
+async function ensureMarketingSchedule(attempt = 0): Promise<void> {
+  try {
+    await marketingQueue.upsertJobScheduler('marketing-tick', { pattern: MARKETING_TICK_CRON }, { name: 'tick' });
+    logger.info({ pattern: MARKETING_TICK_CRON }, 'marketing tick scheduled');
+  } catch (err) {
+    const delay = Math.min(60_000, 2 ** attempt * 1000);
+    logger.error({ err, retryInMs: delay }, 'marketing tick scheduling failed; retrying');
+    setTimeout(() => void ensureMarketingSchedule(attempt + 1), delay);
+  }
+}
+void ensureMarketingSchedule();
+
 logger.info('import worker started');
 
 const shutdown = async (): Promise<void> => {
   // backupWorker was missing here — a SIGTERM mid-backup killed it ungracefully
   // instead of letting the running job finish and close its connection.
-  await Promise.all([worker.close(), milieusWorker.close(), backupWorker.close(), catalogSyncWorker.close(), lifecycleWorker.close()]);
+  await Promise.all([worker.close(), milieusWorker.close(), backupWorker.close(), catalogSyncWorker.close(), lifecycleWorker.close(), marketingWorker.close()]);
   await disconnectDb();
   process.exit(0);
 };

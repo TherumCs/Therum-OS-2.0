@@ -303,6 +303,11 @@ const gateway = {
     const type = String(verified.event_type ?? '');
     const resource = (verified.resource ?? {}) as Record<string, unknown>;
     const KINDS: Record<string, string> = {
+      // The payer approved in PayPal's window. PayPal does NOT auto-capture —
+      // the money moves only when we capture — so this is surfaced (not
+      // ignored) and _apply captures on it, server-side, in case the browser
+      // never returns to trigger capture itself (the lost-order failure).
+      'CHECKOUT.ORDER.APPROVED': 'checkout.approved',
       'PAYMENT.CAPTURE.COMPLETED': 'payment.succeeded',
       'PAYMENT.CAPTURE.DENIED': 'payment.failed',
       'PAYMENT.CAPTURE.REFUNDED': 'payment.refunded',
@@ -310,21 +315,25 @@ const gateway = {
       'CUSTOMER.DISPUTE.CREATED': 'dispute.opened',
       'CUSTOMER.DISPUTE.RESOLVED': 'dispute.lost',
     };
-    // `custom_id` is the order id this store put on the purchase unit — the
-    // only field on the event that is ours rather than the payer's.
     const links = Array.isArray(resource.links) ? resource.links as { rel: string; href: string }[] : [];
     const upLink = links.find((l) => l.rel === 'up')?.href ?? '';
-    // The payment row's txnId is the PayPal ORDER id (created.id from
-    // createIntent). On a capture event that id lives in supplementary_data or
-    // the `up` link — NOT custom_id, which is OUR order id. Returning custom_id
-    // as paymentIntentId (as this did) never matched the stored PayPal order id,
-    // so PAYMENT.CAPTURE.COMPLETED could never resolve its order. Return the
-    // PayPal order id for the primary txnId match, and surface our order id via
-    // payload.orderId so the fallback resolves it even when the id is absent.
+    // The PayPal ORDER id (our payment row's txnId). On a CAPTURE event the
+    // resource IS the capture, so its order id lives in supplementary_data or
+    // the `up` link (resource.id there is the capture id, NOT the order). On
+    // CHECKOUT.ORDER.APPROVED the resource IS the order, so resource.id is it.
     const relatedOrderId = (resource as { supplementary_data?: { related_ids?: { order_id?: string } } })
       .supplementary_data?.related_ids?.order_id;
-    const paypalOrderId = (relatedOrderId ? String(relatedOrderId) : null) ?? (upLink.split('/').pop() || null);
-    const ourOrderId = resource.custom_id ? String(resource.custom_id) : null;
+    const paypalOrderId = (relatedOrderId ? String(relatedOrderId) : null)
+      ?? (upLink.split('/').pop() || null)
+      ?? (type === 'CHECKOUT.ORDER.APPROVED' && resource.id ? String(resource.id) : null);
+    // OUR order id, put on the purchase unit at createIntent. On a CAPTURE event
+    // PayPal echoes it at top-level resource.custom_id; on CHECKOUT.ORDER.APPROVED
+    // it is nested in purchase_units[0].custom_id (top-level is absent) — reading
+    // only the top-level left the approval unresolvable, so it was never captured.
+    const pu = Array.isArray(resource.purchase_units) ? resource.purchase_units as { custom_id?: unknown }[] : [];
+    const puCustom = pu[0] && typeof pu[0] === 'object' ? pu[0].custom_id : undefined;
+    const ourOrderId = (resource.custom_id ? String(resource.custom_id) : null)
+      ?? (puCustom ? String(puCustom) : null);
     return {
       providerId: 'paypal',
       providerEventId: String(verified.id ?? ''),

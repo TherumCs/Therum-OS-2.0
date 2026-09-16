@@ -31,6 +31,16 @@ export const VerifyTwoFactorInput = z.object({
 
 export const TwoFactorConfirmInput = z.object({
   code: z.string().min(1),
+  // Re-auth: enabling 2FA needs the account password, so a stolen session alone
+  // cannot bind an attacker's authenticator (audit R6).
+  password: z.string().min(1),
+});
+
+// Turning 2FA OFF needs proof beyond the session — the account password OR a
+// current TOTP/backup code (audit R6).
+export const TwoFactorDisableInput = z.object({
+  password: z.string().optional(),
+  code: z.string().optional(),
 });
 
 export const IssueApiTokenInput = z.object({

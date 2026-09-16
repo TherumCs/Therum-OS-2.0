@@ -64,6 +64,24 @@ export const ROLES: Role[] = [
   { slug: 'wholesale-stockists', title: 'Wholesale & Stockists',
     terms: 'Commission · Remote',
     blurb: 'Getting the label into the right rooms. Existing relationships matter more than a deck.' },
+  { slug: 'ops-fulfillment-manager', title: 'Ops/Fulfillment Manager',
+    terms: 'Full-time · Philadelphia',
+    blurb: 'Packing and shipping every DTC order, keeping inventory straight across active lines, and running setup and breakdown at in-person vending days like Gather.' },
+  { slug: 'production-vendor-coordinator', title: 'Production/Vendor Coordinator',
+    terms: 'Part-time · Contract · Remote / Philadelphia',
+    blurb: 'The point person for print and cut-sew vendors — sample approvals, quality control on incoming product, and purchase-order tracking across drops.' },
+  { slug: 'content-creator-editor', title: 'Content Creator/Editor',
+    terms: 'Freelance · Philadelphia preferred',
+    blurb: 'Shooting and editing the visual output for every drop so the brand does not go quiet when the founder is not behind the camera.' },
+  { slug: 'social-community-manager', title: 'Social/Community Manager',
+    terms: 'Part-time · Remote / Philadelphia',
+    blurb: 'The day-to-day voice in the comments and DMs — giveaways, service inquiries and posting — so the founder is not answering every message.' },
+  { slug: 'partnerships-collaborations-manager', title: 'Partnerships & Collaborations Manager',
+    terms: 'Part-time · Contract · Remote',
+    blurb: 'Owning every relationship that grows the label through collaboration — inbound triage, approved deals end to end, and outbound outreach.' },
+  { slug: 'bookkeeper-finance-support', title: 'Bookkeeper/Finance Support (fractional)',
+    terms: 'Fractional · Contract · Remote',
+    blurb: 'Keeping the financial picture current — COGS per drop, expense categorization, and cash-flow visibility. Can be a contracted service rather than a hire.' },
   { slug: 'open-application', title: 'Open — tell us what you do',
     terms: 'Expression of interest · Remote',
     blurb: 'We know we will need help here that is not on this list yet. Tell us what you do and how you would use it.' },
@@ -72,8 +90,15 @@ export const ROLES: Role[] = [
 export const roleBySlug = (slug: string): Role | undefined =>
   ROLES.find((r) => r.slug === slug);
 
-/** Where applications go. */
-export const CAREERS_INBOX = process.env.CAREERS_INBOX ?? '';
+/** Where applications go.
+ *
+ * The fallback is the real inbox, not a placeholder, because env here is a
+ * snapshot taken at `pm2 start` (ecosystem.config.cjs reads .env once) — a
+ * var added to .env after the last full start is absent until a full restart,
+ * and a reload-by-name keeps the stale snapshot. When that happened this read
+ * resolved to '' and every application 500'd with nodemailer "No recipients
+ * defined". `.env` still wins whenever it is actually loaded. */
+export const CAREERS_INBOX = process.env.CAREERS_INBOX || 'careers@sidemoney.co';
 
 /** Upload ceiling. Generous for a CV, small enough that it cannot be abused. */
 export const CV_MAX_BYTES = 5 * 1024 * 1024;
@@ -214,7 +239,7 @@ export const CAREERS_RUNTIME = `
   function showFile(f){
     if (!f) { body.innerHTML = '<span class="rl__dropt">Drop your CV here, or choose a file</span>'
       + '<span class="rl__drops">PDF, DOC, DOCX, TXT or RTF · up to 5MB</span>'; return; }
-    body.innerHTML = '<span class="rl__file"><span>' + f.name.replace(/[<>&]/g,'') + ' · '
+    body.innerHTML = '<span class="rl__file"><span>' + f.name.replace(/[<>&']/g,'') + ' · '
       + Math.max(1, Math.round(f.size/1024)) + 'KB</span>'
       + '<button type="button" data-clear>Remove</button></span>';
   }
@@ -250,7 +275,7 @@ export const CAREERS_RUNTIME = `
       var out = await res.json().catch(function(){ return {}; });
       if (!res.ok) throw new Error((out.error && out.error.message) || 'That did not send.');
       form.innerHTML = '<div class="rl__done"><h2>Application sent</h2>'
-        + '<p>Thanks — we have it. If it is a fit we will come back to you at ' + email.replace(/[<>&]/g,'') + '.</p></div>';
+        + '<p>Thanks — we have it. If it is a fit we will come back to you at ' + email.replace(/[<>&']/g,'') + '.</p></div>';
     } catch (err) {
       send.disabled = false; send.textContent = 'Send application';
       say(err.message || 'That did not send. Try again in a moment.', true);
