@@ -234,7 +234,7 @@ export const stripePayments = {
           settings: 'https://dashboard.stripe.com/settings/payouts',
           payments: 'https://dashboard.stripe.com/payments',
           account: 'https://dashboard.stripe.com/settings/account',
-          // Where Bam manages: the Stripe Express dashboard sign-in. Stable URL
+          // Where the merchant manages: the Stripe Express dashboard sign-in. Stable URL
           // (the per-account internal_express_login links are single-use), so
           // "Edit details" always lands somewhere that works.
           express: 'https://connect.stripe.com/express_login',

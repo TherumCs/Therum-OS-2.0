@@ -16,9 +16,9 @@
 - **Global email uniqueness across the UNION of all accounts' emails.** Enforced by a NEW partial unique index (see Task 1) because the existing `@@unique([kind,provider,subject])` does NOT bite for `provider IS NULL` kinds (Postgres NULL-distinct). All subjects stored/compared **lowercased** (index is case-sensitive) — reuse `normalizeEmail` (customerAuth.ts:63).
 - **≤3 cap is application-enforced** (no DB count constraint). Enforce on every add path.
 - **Throttle on customerId, not the entered email** after resolve (else 3 emails = 3× the password-guessing budget). Preserve the no-enumeration-oracle property (unknown email must not diverge in code path or timing).
-- **Store-sender rule preserved.** A customer's email is a DESTINATION only, never a `from`. `notification.service.ts` transport is unchanged; From stays the store address (e.g. `commoncents@sidemoney.co`).
+- **Store-sender rule preserved.** A customer's email is a DESTINATION only, never a `from`. `notification.service.ts` transport is unchanged; From stays the store address (e.g. `the store From address`).
 - **Outbound address classes:** relationship/account mail (welcome, F&F welcome, membership-expiry, marketing broadcast) → the PRIMARY. Contextual/transactional (password-reset code, add-email verify code, review request, abandoned cart, back-in-stock) → the address the user ACTED WITH.
-- **Live store.** 55 customers, 9 with passwords (incl. Tarick tbanton1@icloud.com). The production migration (Task 12) is gated on Bam's explicit go and must be reversible-checked (a known account still resolves + logs in before and after).
+- **Live store.** 55 customers, 9 with passwords (incl. Tarick tbanton1@icloud.com). The production migration (Task 12) is gated on the merchant's explicit go and must be reversible-checked (a known account still resolves + logs in before and after).
 - **Schema drift:** `Customer.firstName`/`lastName` exist in `schema.prisma` but NOT in any migration SQL (advanced via `db push`). The new migration must be authored so it diffs cleanly against the real DB — verify `npx prisma migrate diff` / `migrate status` before generating (see Task 1 Step 1).
 
 ---
@@ -284,7 +284,7 @@ const customer = await db.customer.findUnique({ where: { id: resolved.id } });
 
 ---
 
-## Task 12: Production migration + end-to-end verification (GATED on Bam's go)
+## Task 12: Production migration + end-to-end verification (GATED on the merchant's go)
 
 **Files:** none (ops)
 

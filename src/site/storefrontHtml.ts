@@ -438,7 +438,7 @@ footer.site{border-top:1px solid var(--bd);padding:28px 0;color:var(--tx3);font-
 @media(max-width:600px){.pdp-lb-arrow{width:44px;height:44px;font-size:26px}.pdp-lb-arrow.prev{left:10px}.pdp-lb-arrow.next{right:10px}.pdp-lightbox img{max-width:96vw}}
 /* ── PDP desktop only (>=1200): keep the Apple look, go a little wider than
    tablet, and give the size / colour / quantity controls more presence. Tablet
-   and below keep the tighter layout Bam signed off on. ── */
+   and below keep the tighter layout the merchant signed off on. ── */
 @media(min-width:1200px){
   .pdp--apple{max-width:1080px}
   .pdp--apple .pdp__media{max-width:840px}
@@ -690,11 +690,14 @@ export interface StoreChrome {
  * filters and the product-card behaviour, none of which the site chrome knows
  * about. Only the frame is replaced.
  */
-export function layout(title: string, body: string, extraScript = '', chrome?: StoreChrome, seo?: SeoMeta, siteMax?: string, btnRadius?: string): string {
+export interface ShellBrand { siteName?: string; headExtra?: string }
+
+export function layout(title: string, body: string, extraScript = '', chrome?: StoreChrome, seo?: SeoMeta, siteMax?: string, btnRadius?: string, brand?: ShellBrand): string {
+  const siteName = brand?.siteName || 'Store';
   const header = chrome?.header
     ? `<div id="brx-header">${chrome.header}</div>`
     : `<header class="site"><div class="wrap">
-  <a class="brand" href="/shop"><span class="dot"></span>The Sidemoney Company</a>
+  <a class="brand" href="/shop"><span class="dot"></span>${esc(siteName)}</a>
   <nav class="main">
     <a href="/shop">Shop</a>
     <a class="cartlink" href="/cart">Cart <span id="cart-count" class="empty">0</span></a>
@@ -713,16 +716,16 @@ export function layout(title: string, body: string, extraScript = '', chrome?: S
   // Only the ported header carries the cart/search/wishlist hooks; the
   // fallback chrome above has its own plain cart link and needs none of it.
   const headerIcons = chrome?.header ? chrome.headerIcons ?? HEADER_CART_DEFAULTS : null;
-  return layoutInner(title, body, extraScript, header, footer, themeCss, headerIcons, seo, siteMax, btnRadius);
+  return layoutInner(title, body, extraScript, header, footer, themeCss, headerIcons, seo, siteMax, btnRadius, brand?.headExtra ?? '');
 }
 
-function layoutInner(title: string, body: string, extraScript: string, header: string, footer: string, themeCss: string, headerIcons: HeaderCartConfig | null = null, seo?: SeoMeta, siteMax?: string, btnRadius?: string): string {
+function layoutInner(title: string, body: string, extraScript: string, header: string, footer: string, themeCss: string, headerIcons: HeaderCartConfig | null = null, seo?: SeoMeta, siteMax?: string, btnRadius?: string, headExtra = ''): string {
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="facebook-domain-verification" content="9t3nhx1yw9xijatt76fw2lzktpi878">
+${headExtra}
 <title>${esc(title)}</title>
 ${seoTags(title, seo)}
 ${themeCss}

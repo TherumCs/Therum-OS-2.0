@@ -44,7 +44,7 @@ export function sortSizes(sizes: readonly string[]): string[] {
 // a boxed card can still be action-free.
 //
 //   SHELL    does the card have a container, or is it just the image on the
-//            page? Bam's words: "actual cards or just the images on the page."
+//            page? the merchant's words: "actual cards or just the images on the page."
 //              bare      no box. Image sits on the page. The &Kin look.
 //              boxed     a surface with a hairline and a radius.
 //              elevated  a soft raised surface, inset image tile.
@@ -64,7 +64,7 @@ export function sortSizes(sizes: readonly string[]): string[] {
 //            the list rather than rendering something dead.
 //
 //   PRESET   which rows of information the card carries, modelled on the five
-//            references Bam sent:
+//            references the merchant sent:
 //              editorial  name, price, colour swatches. Nothing else.
 //              retail     name + price on one line, subtitle, swatches, and
 //                         an outlined action.
@@ -2528,7 +2528,7 @@ export const CARD_EVOLVE_RUNTIME = `
         // "or" would be offering an alternative to nothing.
         var label = payQ('.card-pay__details-label');
         // In details mode the button flips to the way BACK: tapping it restores
-        // the quick-checkout row. Bam's rule — users need a way to get back and
+        // the quick-checkout row. the merchant's rule — users need a way to get back and
         // forth, not a one-way door into the form.
         if (label) label.textContent = !walletsAvailable ? 'Enter your details'
           : which === 'details' ? 'or sign in for quick checkout'
@@ -2680,7 +2680,7 @@ export const PRODUCT_GRID_FALLBACK_CSS = `
 .c-product-grid__title-wrap{display:flex;flex-direction:column;gap:4px}
 
 /* ── SHAPE ──────────────────────────────────────────────────────────────
-   --card-r rounds the CARD only — the photo keeps its own square corners (Bam's
+   --card-r rounds the CARD only — the photo keeps its own square corners (the merchant's
    call). A card with a shell shows the rounded frame around a square image. */
 .card-radius-sharp{--card-r:0}
 .card-radius-soft{--card-r:6px}

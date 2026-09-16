@@ -174,7 +174,13 @@ async function page(title: string, body: string, extraScript = '', seo?: SeoMeta
   // so every .btn across the store (Add to cart, checkout) honours one setting.
   const counter = await settingsService.getCounter().catch(() => null);
   const btnRadius = ({ sharp: '0', soft: '8px', round: '14px', pill: '999px' } as Record<string, string>)[counter?.buttonShape ?? 'sharp'] ?? '0';
-  return layout(title, body, extraScript, await storeChrome(), seo, siteMax, btnRadius);
+  // The brand is a SETTING. Titles arrive bare ("Cart", "Snakeskin Pin") and get
+  // the configured site name here; the Meta verification tag is a setting too.
+  const siteName = site?.siteName || 'Store';
+  const fullTitle = title.endsWith(siteName) ? title : `${title} — ${siteName}`;
+  const seoDefaults = await settingsService.getSeoDefaults().catch(() => null);
+  const headExtra = seoDefaults?.facebookDomainVerification ? `<meta name="facebook-domain-verification" content="${esc(seoDefaults.facebookDomainVerification)}">` : '';
+  return layout(fullTitle, body, extraScript, await storeChrome(), seo, siteMax, btnRadius, { siteName, headExtra });
 }
 
 /**
@@ -275,7 +281,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
   // rather than dropping to the API's JSON not-found.
   const notFoundStore = async (reply: FastifyReply, heading: string): Promise<void> => {
     reply.status(404);
-    html(reply, await page(`${heading} — The Sidemoney Company`,
+    html(reply, await page(`${heading}`,
       `<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">${esc(heading)}</h1>` +
       `<p class="page-sub">It may have been renamed or removed.</p>` +
       `<p style="margin-top:12px"><a class="btn ghost sm" href="/shop">Back to the shop</a></p></div>`, '', PRIVATE_PAGE));
@@ -912,7 +918,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
     // Featured rail: this category's products in a horizontal carousel, under the
     // jersey carousel and above the full grid. Placeholder cards while empty.
     const railMarkup = catPage?.featuredRail ? renderFeaturedRail(gridProducts, cardCfg) : '';
-    html(reply, await page(`${pageTitle} — The Sidemoney Company`, `
+    html(reply, await page(`${pageTitle}`, `
       ${catHero || (preset.title ? await heading(pageTitle) : '')}
       ${sectionsMarkup}
       ${calloutsMarkup}
@@ -968,7 +974,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
       const desc = stripTags(p.description as string | null) || p.name;
       // The STORE is the brand a shopper sees on Meta — NOT the fulfilment
       // vendor's connection label (that leaked "PodPluser connection" as brand).
-      const brand = process.env.SITE_NAME || 'The Sidemoney Company';
+      const brand = process.env.SITE_NAME || (await settingsService.getSite().catch(() => null))?.siteName || 'Store';
       // One product_type PER category as a real parent>child path — not every
       // category flattened into a single fake "Men's > Women's > …" hierarchy.
       const productTypes = Array.from(new Set(
@@ -1330,7 +1336,7 @@ ${items.join('\n')}
     const memberPriceOf = (cents: number) => (pdpMemberPct > 0 ? Math.round(cents * (1 - pdpMemberPct / 100)) : cents);
     const price = money(memberPriceOf(firstAvailable?.price ?? variants[0]?.price ?? 0));
 
-    html(reply, await page(`${p.name} — The Sidemoney Company`, `
+    html(reply, await page(`${p.name}`, `
       <div class="pdp-topbar">
         <a class="pdp-back" href="/shop" onclick="if(document.referrer.indexOf(location.host)>-1&&history.length>1){history.back();return false;}">‹ Back</a>
         ${/* Save + Share sit opposite the back button, up top. The wishlist
@@ -1841,12 +1847,12 @@ if(_co)_co.addEventListener('click',async function(e){if(!sel)return;var b=e.cur
 
   app.get('/cart', async (_req, reply) => {
     if (!(await commerceOn())) return html(reply, closedPage());
-    html(reply, await flowPage('Cart — The Sidemoney Company', 'Cart', 'cart'));
+    html(reply, await flowPage('Cart', 'Cart', 'cart'));
   });
 
   app.get('/checkout', async (_req, reply) => {
     if (!(await commerceOn())) return html(reply, closedPage());
-    html(reply, await flowPage('Checkout — The Sidemoney Company', 'Checkout', 'checkout'));
+    html(reply, await flowPage('Checkout', 'Checkout', 'checkout'));
   });
 
   // ── The other two header icons ────────────────────────────────────────
@@ -1866,7 +1872,7 @@ if(_co)_co.addEventListener('click',async function(e){if(!sel)return;var b=e.cur
       reply,
       // No page-title heading on Account — the signed-in greeting / sign-in
       // card is the page's own header; a separate "Account" h1 was redundant.
-      await page('Account — The Sidemoney Company', `${await slotBody('account', accountMarkup(wishlistMarkup(), gApp?.clientId ?? ''))}`, ACCOUNT_RUNTIME, PRIVATE_PAGE),
+      await page('Account', `${await slotBody('account', accountMarkup(wishlistMarkup(), gApp?.clientId ?? ''))}`, ACCOUNT_RUNTIME, PRIVATE_PAGE),
       ACCOUNT_PAGE_CSP,
     );
   });
@@ -1877,11 +1883,11 @@ if(_co)_co.addEventListener('click',async function(e){if(!sel)return;var b=e.cur
     // rendering an empty list a shopper can never fill.
     if (!(await settingsService.getCounter()).wishlistEnabled) {
       reply.status(404);
-      return html(reply, await page('Wishlist — The Sidemoney Company', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Not found</h1></div>', '', PRIVATE_PAGE));
+      return html(reply, await page('Wishlist', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Not found</h1></div>', '', PRIVATE_PAGE));
     }
     // No runtime argument: WISHLIST_RUNTIME ships on every store page already,
     // because the heart on a product card needs it too.
-    html(reply, await page('Wishlist — The Sidemoney Company', `${await heading('Wishlist')}${wishlistMarkup()}`, '', PRIVATE_PAGE));
+    html(reply, await page('Wishlist', `${await heading('Wishlist')}${wishlistMarkup()}`, '', PRIVATE_PAGE));
   });
 
   // Order tracking. Linked from the footer and previously a 404 — the page
@@ -1912,7 +1918,7 @@ if(_co)_co.addEventListener('click',async function(e){if(!sel)return;var b=e.cur
   app.get('/order-tracking', async (req, reply) => {
     if (!(await commerceOn())) return html(reply, closedPage());
     html(reply, await page(
-      'Track your order — The Sidemoney Company',
+      'Track your order',
       `<style>${ORDER_TRACKING_CSS}</style>${orderTrackingMarkup()}`,
       ORDER_TRACKING_RUNTIME,
       {
@@ -1936,7 +1942,7 @@ if(_co)_co.addEventListener('click',async function(e){if(!sel)return;var b=e.cur
     const { order: number, token } = req.query as { order?: string; token?: string };
     const notFound = async (): Promise<void> => {
       reply.status(404);
-      html(reply, await page('Order — The Sidemoney Company', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Order not found</h1><p class="page-sub">Check the link from your receipt email.</p></div>', '', PRIVATE_PAGE));
+      html(reply, await page('Order', '<div class="empty-state"><div class="big">🔍</div><h1 class="page-title">Order not found</h1><p class="page-sub">Check the link from your receipt email.</p></div>', '', PRIVATE_PAGE));
     };
     if (!number || !token) return await notFound();
     const order = await db.order.findUnique({
@@ -1955,7 +1961,7 @@ if(_co)_co.addEventListener('click',async function(e){if(!sel)return;var b=e.cur
     const rows = order.items.map((i) => `
       <div class="row muted"><span>${i.quantity} × ${esc(i.variant?.product?.name ?? 'Item')}${i.variant?.sku ? ` (${esc(i.variant.sku)})` : ''}</span><span class="num">${money(i.priceAtTime * i.quantity, order.currency)}</span></div>`).join('');
 
-    html(reply, await page(`Order ${esc(order.number)} — The Sidemoney Company`, `
+    html(reply, await page(`Order ${esc(order.number)}`, `
       <div style="max-width:560px;margin:0 auto">
         <div class="panel" style="text-align:center;margin-bottom:20px">
           <div style="font-size:40px;margin-bottom:8px">${paid ? '✅' : '🕒'}</div>

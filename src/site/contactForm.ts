@@ -9,7 +9,7 @@
 // Settings > Counter by topic id. The browser never names the destination:
 // a form that carries its own recipient is an open relay.
 //
-// STYLE, per the reference Bam gave: no input boxes. Each field is a row on a
+// STYLE, per the reference the merchant gave: no input boxes. Each field is a row on a
 // hairline rule, its label large and uppercase where a placeholder would sit,
 // shrinking to a caption once there is something in the field. The label IS
 // the placeholder, so nothing is ever unlabelled — the usual failure of

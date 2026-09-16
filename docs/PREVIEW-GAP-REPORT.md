@@ -2,7 +2,7 @@
 
 Source review of previews/connections-and-dashboard.html (3,086 ln),
 previews/therum-os-experience.html (12,863 ln), dist/admin-preview.html
-(byte-identical to #1), previews/captures/. Bam's own annotation prose
+(byte-identical to #1), previews/captures/. the merchant's own annotation prose
 transcribed at bottom — treat as written specs.
 
 ## FEATURE GAPS (by impact)
@@ -65,7 +65,7 @@ V7. Sidebar chrome: version/engine badge, Updates `new` badge, purge-cache +
 V8. Theme-card mini-preview idiom (rides gap 3). S.
 V9. Masked-credential mono typography (sk-ant-•••a9F2, red when expired). S.
 
-## VERBATIM SPECS (Bam's own prose, from the previews)
+## VERBATIM SPECS (the merchant's own prose, from the previews)
 - (01 sub, ln546) "One canonical surface for everything external — AI tools,
   APIs, payment gateways, and external apps. Each card connects via the
   provider's own OAuth flow or API-key pattern; once linked, Therum embeds the

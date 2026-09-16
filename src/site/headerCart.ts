@@ -113,7 +113,7 @@ body.th-cart-open #th-shell{border-radius:14px;
 /* PUSH MODE ONLY — the cart on the ground, not on a panel.
    With the page shifted the drawer is standing in the gutter the page left
    behind, so a white drawer just reads as a second page: the dark ground is
-   never seen and the effect Bam described ("under the page ... all black
+   never seen and the effect the merchant described ("under the page ... all black
    background") does not land. Here the drawer gives up its own background and
    inverts, so what you are looking at IS the ground.
    Scoped to body.th-cart-open, so overlay mode keeps the light panel it was
@@ -347,7 +347,7 @@ export interface HeaderCartConfig {
    * category, or a swipeable row.
    *
    * 'categories' groups the matches by product category, one column per
-   * group with a count in the header — the layout Bam specified from a
+   * group with a count in the header — the layout the merchant specified from a
    * reference shot: thumbnail, name, and a lighter sub-line per row.
    */
   searchLayout: 'list' | 'grid' | 'categories' | 'slider';

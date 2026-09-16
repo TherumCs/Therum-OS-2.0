@@ -1,6 +1,6 @@
 # Therum OS 2.0 — Future Buildout List
 
-Standing list per Bam (2026-07-24, voice). These are POST-launch workstreams —
+Standing list per the merchant (2026-07-24, voice). These are POST-launch workstreams —
 the current task is rounding out 2.0 + finishing Counter so the first site can
 ship on the Base Theme.
 

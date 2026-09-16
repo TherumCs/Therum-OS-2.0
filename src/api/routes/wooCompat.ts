@@ -479,7 +479,8 @@ export async function wooCompatRoutes(app: FastifyInstance): Promise<void> {
   // actually probe are implemented; shapes match Woo's legacy v3.
   app.get('/wc-api/v3', authed, async (_req, reply) => {
     const c = await settingsService.getCommerce();
-    reply.send({ store: { name: 'Sidemoney', URL: 'https://sidemoney.co', wc_version: '10.4.3', routes: {}, meta: { currency: c.currency ?? 'USD', timezone: 'UTC' } } });
+    const site = await settingsService.getSite().catch(() => null);
+    reply.send({ store: { name: site?.siteName ?? 'Store', URL: (process.env.PUBLIC_ORIGIN ?? '').replace(/\/+$/, ''), wc_version: '10.4.3', routes: {}, meta: { currency: c.currency ?? 'USD', timezone: 'UTC' } } });
   });
   app.get('/wc-api/v3/products/count', authed, async (_req, reply) => {
     // Same gate as the catalogue read (GET /wc/v3/products), or this count

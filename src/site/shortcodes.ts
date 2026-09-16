@@ -97,7 +97,7 @@ export const SUBSCRIBE_SCRIPT = `
  *
  * That is exactly what happened: the API was down for ~10 minutes while those
  * files were being rewritten, and every browser that loaded the page in that
- * window pinned the failure. Bam's whole homepage rendered as alt text while
+ * window pinned the failure. the merchant's whole homepage rendered as alt text while
  * the same URLs served perfect bytes to a fresh browser — verified 20 of 20
  * intact and decoding.
  *

@@ -4,7 +4,7 @@
 // card | wallets | bnpl | bank | crypto | p2p. Each method lists the ordered
 // providers that can fulfil it — the router picks the first CONNECTED one.
 // Methods with no connected provider still render, disabled, as
-// "setup required" (Bam's ruling: show what's possible, light up on connect).
+// "setup required" (the merchant's ruling: show what's possible, light up on connect).
 
 export interface PaymentMethod {
   id: string;

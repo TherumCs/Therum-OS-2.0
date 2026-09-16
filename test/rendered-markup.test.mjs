@@ -3,7 +3,7 @@
 // These exist because a content edit swallowed three footer columns into a
 // <script> element and the page still returned 200. Nothing in the suite could
 // see it: every check we had asked whether a request succeeded, not whether the
-// markup it returned was intact. Bam's rule is that continued fixes must not
+// markup it returned was intact. the merchant's rule is that continued fixes must not
 // break layouts, and a rule with no check is a wish.
 //
 // Deliberately offline — these parse stored content and rendered strings rather

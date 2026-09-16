@@ -214,10 +214,10 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
 
     const n = await settingsService.getNotifications();
     const transport = await mailTransport();
-    const deliverable = Boolean(n.emailEnabled && transport.ready);
+    const deliverable = Boolean(n.emailEnabled && transport.ready && CAREERS_INBOX);
     if (!deliverable) {
       // Better to say so than to show a thank-you for something nobody got.
-      throw new ValidationError('Applications are not reaching us right now — email ' + CAREERS_INBOX + ' directly.', 'email');
+      throw new ValidationError(CAREERS_INBOX ? 'Applications are not reaching us right now — email ' + CAREERS_INBOX + ' directly.' : 'Applications are not open right now.', 'email');
     }
     await sendEmailTo(CAREERS_INBOX, `[Careers] ${title} — ${name}`, body, cv ? [cv] : undefined);
     reply.send({ sent: true, role: title });

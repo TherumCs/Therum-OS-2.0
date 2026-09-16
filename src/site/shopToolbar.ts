@@ -2,7 +2,7 @@ import { esc } from './html.js';
 import { swatchPaint } from './productGrid.js';
 // The shop toolbar — one flat bar that sits ON the page.
 //
-// Revised to Bam's notes:
+// Revised to the merchant's notes:
 //   * No card or shadow. A hairline outline only, so it reads as part of the
 //     page rather than a panel floating on top of it.
 //   * Focusing the search takes the bar over: the control row gets out of the

@@ -1,6 +1,6 @@
 // /order-tracking — the shopper's own view of where their parcel is.
 //
-// Immersive, in the sense Bam asked for on header search: the page IS the
+// Immersive, in the sense the merchant asked for on header search: the page IS the
 // lookup. One big field, and on a match the form gets out of the way and the
 // order takes over the whole page rather than appearing in a box beneath it.
 //

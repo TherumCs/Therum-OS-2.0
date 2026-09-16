@@ -387,7 +387,7 @@ export const wooImporter = {
           report.customers.updated++;
         } else {
           // Mark imported customers so marketing (dropBroadcast) can exclude
-          // them — Bam's rule: migrated WP customers get no marketing until he
+          // them — the merchant's rule: migrated WP customers get no marketing until he
           // says who. meta.noMarketing is the durable opt-out flag.
           await db.customer.create({ data: { email: c.email, name, meta: { source: 'wp-import', noMarketing: true } } });
           report.customers.created++;

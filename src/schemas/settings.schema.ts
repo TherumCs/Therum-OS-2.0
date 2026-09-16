@@ -157,6 +157,8 @@ export const SeoDefaultsInput = z.object({
   siteName: z.string().max(120).optional(),
   siteDescription: z.string().max(300).optional(),
   siteLogo: z.string().optional(),
+  // Meta (Facebook) domain verification token — rendered as a <meta> on every page when set.
+  facebookDomainVerification: z.string().max(120).optional(),
 });
 export type SeoDefaultsInput = z.infer<typeof SeoDefaultsInput>;
 

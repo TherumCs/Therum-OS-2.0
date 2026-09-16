@@ -7,7 +7,7 @@ import { countrySelect } from './countries.js';
 // no page in front of it, so the header's account icon linked at /my-account/
 // and 404'd. This is that page, and then the rest of what an account is for.
 //
-// SHAPE: a dashboard, not a settings screen. Bam's reference is the Xfinity
+// SHAPE: a dashboard, not a settings screen. the merchant's reference is the Xfinity
 // account — the thing it gets right is that the landing view is a grid of
 // cards, each showing real state and offering exactly one action, with the
 // depth behind it rather than in front of it. So:

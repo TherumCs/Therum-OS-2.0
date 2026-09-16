@@ -182,7 +182,7 @@ signups.
 - Charts are hand-authored inline SVG (no external chart lib) with a shared
   hover-tooltip helper.
 
-## 9. Open questions for Bam
+## 9. Open questions for the merchant
 
 1. **Live activity feed** — real-time (poll every ~15s / SSE) or just
    "last 24h" on load? (Poll is cheap and looks live.)

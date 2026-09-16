@@ -1,13 +1,14 @@
 import { db } from '../lib/db.js';
 import { NotFoundError, ValidationError } from '../lib/errors.js';
 import { POPUP_RUNTIME, POPUP_STYLES } from '../site/popupRuntime.js';
+import { settingsService } from './settings.service.js';
 
 // Signup forms (Marketing › Forms) + the module's own settings.
 //
 // A form is a capture surface on the storefront. Today: the popup (rendered by
 // popupRuntime.ts from this row's `settings`) and the footer form (always on,
 // listed here only so its numbers show). At most ONE popup is live at a time —
-// two popups fighting over the same visitor is the intrusive thing Bam said no
+// two popups fighting over the same visitor is the intrusive thing the merchant said no
 // to — so enabling one switches the others off.
 
 export interface PopupSettings {
@@ -34,8 +35,8 @@ export interface PopupSettings {
 }
 
 export const POPUP_DEFAULTS: PopupSettings = {
-  logo: '/wp-content/uploads/2026/03/full-sig-black.png',
-  eyebrow: 'The Sidemoney Company',
+  logo: '',
+  eyebrow: '',
   headline: '10% off your first order.',
   body: 'Drops, restocks, and the occasional thing we only tell email about. Your code lands in your inbox.',
   placeholder: 'name@email.com',
@@ -164,6 +165,8 @@ export const signupFormService = {
     const f = await db.signupForm.findFirst({ where: { kind: 'popup', enabled: true }, orderBy: { updatedAt: 'desc' } });
     if (!f) return { popup: null };
     const s = settingsOf(f.settings);
+    // No logo and no eyebrow configured → the store name stands in.
+    if (!s.logo && !s.eyebrow) s.eyebrow = (await settingsService.getSite().catch(() => null))?.siteName ?? '';
     // Only what the browser needs — no list ids, no counts.
     return { popup: { id: f.id, settings: s } };
   },
@@ -187,7 +190,7 @@ export const signupFormService = {
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@200..800&display=swap">
 <style>html,body{margin:0;height:100%;background:#f4f4f4;font-family:Manrope,-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif}
 .fake{padding:28px;color:#bbb;font-size:13px}.fake i{display:block;height:14px;background:#e6e6e6;margin:10px 0;border-radius:4px}${POPUP_STYLES}</style></head>
-<body><div class="fake">sidemoney.co<i style="width:60%"></i><i></i><i style="width:80%"></i><i style="width:40%"></i><i></i><i style="width:70%"></i></div>
+<body><div class="fake">${(process.env.PUBLIC_ORIGIN ?? '').replace(/^https?:\/\//, '') || 'your store'}<i style="width:60%"></i><i></i><i style="width:80%"></i><i style="width:40%"></i><i></i><i style="width:70%"></i></div>
 <script>(function(){var cfg=${cfg};var of=window.fetch;window.fetch=function(u,o){if(String(u).indexOf('/api/shop/forms')===0&&!/\\/view$/.test(String(u)))return Promise.resolve({ok:true,json:function(){return Promise.resolve({popup:cfg})}});if(/\\/api\\/subscribe$/.test(String(u)))return Promise.resolve({ok:true,json:function(){return Promise.resolve({ok:true})}});return of.apply(this,arguments)};window.__thPopForce=true;})();</script>
 <script>${POPUP_RUNTIME}</script></body></html>`;
   },

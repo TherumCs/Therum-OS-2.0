@@ -26,9 +26,10 @@ export interface SeoDefaults {
   siteName: string;
   siteDescription: string;
   siteLogo: string;
+  facebookDomainVerification: string;
 }
 const SEO_DEFAULTS_KEY = 'seo-defaults';
-const SEO_DEFAULTS_DEFAULTS: SeoDefaults = { siteName: '', siteDescription: '', siteLogo: '' };
+const SEO_DEFAULTS_DEFAULTS: SeoDefaults = { siteName: '', siteDescription: '', siteLogo: '', facebookDomainVerification: '' };
 
 // Quick Controls (feature-inventory section 05, "Chrome & Customization
 // Studio" minus the theme-store/presets half — that's explicitly not this
@@ -433,12 +434,12 @@ const COUNTER_DEFAULTS: CounterSettings = {
   taxRatePct: 0,
   // Sidebar + push: the ported header already ships `c-header__cart--sidebar`
   // and a `js-cart-sidebar-open` hook, so that is the presentation this site's
-  // markup was built for, and push is what Bam asked the drawer to do.
+  // markup was built for, and push is what the merchant asked the drawer to do.
   cartStyle: 'sidebar',
   cartSidebarReveal: 'push',
   cartMobile: 'drawer',
   cartSidebarGround: '#0a0a0a',
-  // Bare + editorial: the reference Bam led with, and the one that cannot look
+  // Bare + editorial: the reference the merchant led with, and the one that cannot look
   // wrong on a store whose products have no ratings, sizes or was-prices yet.
   cardShell: 'bare',
   cardPreset: 'editorial',
@@ -455,7 +456,7 @@ const COUNTER_DEFAULTS: CounterSettings = {
   // fallback that can itself fall back is not a fallback.
   cardMediaSecondary: 'still',
   // Not 'overlay'. A button floating on the product covers the thing the
-  // shopper is looking at, and it was the first thing Bam called out.
+  // shopper is looking at, and it was the first thing the merchant called out.
   cardAction: 'none',
   // On by default the moment a card HAS an add-to-cart: sending someone to a
   // product page to pick a size they could have picked here is the friction
@@ -473,7 +474,7 @@ const COUNTER_DEFAULTS: CounterSettings = {
   cardBadges: true,
   memberPricing: 'net',
   memberPriceLabel: 'Your price',
-  // Real routing, from the mailbox list Bam supplied.
+  // Real routing, from the mailbox list the merchant supplied.
   //
   // The TOPICS ship as product defaults; the ADDRESSES do not.
   //

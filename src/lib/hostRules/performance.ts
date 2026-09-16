@@ -2,7 +2,7 @@ import type { Rule } from './types.js';
 import { gb, mb, num, pgBytes, str } from './types.js';
 
 // Performance thresholds are RELATIVE — a fraction of the host's own RAM, load
-// per core, percentage of disk — never a value tuned to one machine. Bam has
+// per core, percentage of disk — never a value tuned to one machine. the merchant has
 // no VPS yet, so a rule pinned to "16 GB" would be wrong on the laptop today
 // and wrong again on whatever gets bought.
 

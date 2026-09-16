@@ -25,7 +25,7 @@ const ANTHROPIC_VERSION = '2023-06-01';
 // meaningful to the operator, and it is not — it is ours to keep current.
 const MODEL = 'claude-sonnet-5';
 
-// Run bounds, not a budget. Bam pushed back on a spend dashboard for a
+// Run bounds, not a budget. the merchant pushed back on a spend dashboard for a
 // one-person install and he was right; what stays is a terminating condition,
 // because an agent loop IS a while loop. Without a bound a confused run
 // re-reads the same file forever. That is a hang, not an invoice.

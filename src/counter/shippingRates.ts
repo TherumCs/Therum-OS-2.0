@@ -198,7 +198,7 @@ export const shippingRateService = {
     const out: ShippingRate[] = [];
 
     // (a) SINGLE-VENDOR provider rates come FIRST and, when they answer, REPLACE
-    //     our zone methods rather than sit beside them. The hybrid rule Bam set:
+    //     our zone methods rather than sit beside them. The hybrid rule the merchant set:
     //     a cart that ships entirely from ONE connected vendor is quoted at that
     //     vendor's real rates; a mixed or in-house cart falls to our internal
     //     zone rates. Offering both would let the shopper pick our free Standard

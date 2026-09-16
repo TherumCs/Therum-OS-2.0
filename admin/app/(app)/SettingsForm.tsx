@@ -105,7 +105,7 @@ export function SettingsForm<T extends Record<string, unknown>>({
     setBusy(false);
   }
 
-  // AUTOSAVE. Bam asked for both: it should save itself, and there should still
+  // AUTOSAVE. the merchant asked for both: it should save itself, and there should still
   // be a button. The debounce is what keeps the batching worth having — picking
   // through five card layouts settles on one before anything is written, rather
   // than publishing four of them to the live storefront on the way past.

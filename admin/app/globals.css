@@ -1676,7 +1676,7 @@ input[type='color'].settings-text-input { width: 60px; max-width: 60px; height: 
    the page while its callback is pending, and this admin's navigations are
    server round-trips (~450ms measured), so every click froze the old screen
    for the length of the fetch. Animating the arrival instead means the click
-   is never blocked — the thing Bam kept describing as "freezing".
+   is never blocked — the thing the merchant kept describing as "freezing".
 
    Duration is --th-dur, so Appearance > Transition speed drives these the same
    way it drives everything else. */

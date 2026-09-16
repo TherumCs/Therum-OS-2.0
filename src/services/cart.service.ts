@@ -232,7 +232,7 @@ async function computeTotals(state: CartState, sessionCustomerId: string | null 
   // that has gone invalid mid-session (limit hit elsewhere, expired) is
   // dropped silently (1.x recalc rule) via quoteOrNull.
   //
-  // MEMBER PRICE IS A FLOOR, NOT A CANDIDATE. Bam's rule: "if you're getting
+  // MEMBER PRICE IS A FLOOR, NOT A CANDIDATE. the merchant's rule: "if you're getting
   // my special member price, there is no stacking of coupons — that's the
   // cheapest I can get it for." So a member's coupon is not quoted at all,
   // rather than quoted and then beaten. The pipeline's own rule is
@@ -261,7 +261,7 @@ async function computeTotals(state: CartState, sessionCustomerId: string | null 
   //
   // A percentage off RETAIL says nothing about whether the sale still makes
   // money. 40% off is comfortable on a 4x markup and under water on a 1.6x
-  // one, and which is which is per product — Bam's point exactly: "that
+  // one, and which is which is per product — the merchant's point exactly: "that
   // percentage is based on the price I get the product for."
   //
   // So the discount is clamped against each line's own COST. Lines with no

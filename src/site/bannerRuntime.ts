@@ -99,7 +99,7 @@ export const BANNER_RUNTIME = `
   // The "changing" banner grid — the four category tiles.
   //
   // It used to rotate: measure how many fit, hide the rest with an inline
-  // display:none, and cycle them on a timer. Bam wants the row exactly as
+  // display:none, and cycle them on a timer. the merchant wants the row exactly as
   // authored — "keep this the order and remove the rotation. they dont need to
   // switch" — so this no longer animates anything.
   //

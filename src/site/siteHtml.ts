@@ -6,7 +6,7 @@ import { POPUP_RUNTIME, POPUP_STYLES } from './popupRuntime.js';
 import { MOBILE_MENU_CSS, MOBILE_MENU_RUNTIME } from './mobileMenu.js';
 import { HEADER_CART_CSS, headerCartRuntime, HEADER_CART_DEFAULTS, type HeaderCartConfig } from './headerCart.js';
 // Base Theme — the default public frontend shell. Deliberately minimal
-// (Bam: "default theme so stuff is just popping up"; the full theme system
+// (the merchant: "default theme so stuff is just popping up"; the full theme system
 // is on the future-buildout list). Same real-1.9.44 token values as the
 // storefront so the whole public surface reads as one site. Server-rendered,
 // zero client JS except the cart badge when commerce is on.
@@ -23,7 +23,7 @@ import { esc } from './html.js';
 // 83ace67). th-el-8700216 is the "money shots" two-panel block. These ids are
 // stable unless the home page is re-edited in the studio — refresh them if so.
 // .tsc-season-2col is our own stable class.
-// Mobile home spec (Bam): every hero / promo section is a uniform 9:16 portrait
+// Mobile home spec (the merchant): every hero / promo section is a uniform 9:16 portrait
 // panel, full-bleed and un-stacked. The three heroes (a7707ab Snapback, 28391e5
 // Womens, 7810284 Soul Tee) carry their photo as the section's OWN cover
 // background, so pinning the aspect ratio reflows the photo with no white band.
@@ -39,7 +39,7 @@ const HOME_MOBILE_CSS = `@media(max-width:767px){`
   + `.th-el-5b95f66 .c-ip-banners__item,.th-el-85180a7 .c-ip-banners__item{aspect-ratio:9/16!important;height:auto!important;min-height:0!important}`
   + `.th-el-5b95f66 .c-ip-banners__image,.th-el-85180a7 .c-ip-banners__image{height:100%!important;object-fit:cover!important}`
   // City Series (th-el-5cc1cfe) is a NEWS card — image + headline + Read more.
-  // Bam: leave it natural, do NOT force it to 9:16 like the image sections.
+  // the merchant: leave it natural, do NOT force it to 9:16 like the image sections.
   // Season two-panel: the bg-image panels fill the shared 9:16 box.
   + `.tsc-season-2col .tsc-season-panel{aspect-ratio:auto;height:100%!important}`
   // Money-shots: two stacked halves inside the one 9:16 panel; video covers.
@@ -55,14 +55,14 @@ const HOME_MOBILE_CSS = `@media(max-width:767px){`
 
 // Money-shots (home, DESKTOP): the LEFT half is the man's PORTRAIT video
 // (home-video-ca.mp4, 1292×1604, /about link), the RIGHT the woman's landscape
-// clip (/shop). Bam's call: the panel must be SEAMLESS — video fills it edge to
+// clip (/shop). the merchant's call: the panel must be SEAMLESS — video fills it edge to
 // edge, no letterbox borders, keep the panel dimensions. A portrait clip in the
 // wider ~square panel can only fill it by cropping top/bottom (cover) OR show
 // whole with side bars (contain); seamless wins, so cover it is, centered — the
 // source gets recut with head/foot room if the crop bites. Forced cover here so
 // the framing is explicit and can't drift.
 const HOME_DESKTOP_CSS = `@media(min-width:768px){`
-  + `.th-el-8700216 > .tsc-vid[href="/about-the-sidemoney-company"] video{object-fit:cover!important;object-position:center!important}`
+  + `.th-el-8700216 > .tsc-vid[href="/about-the-first-store-company"] video{object-fit:cover!important;object-position:center!important}`
   + `}`;
 
 const CSS = `
@@ -225,7 +225,7 @@ export const PORTED_DOC_CSS = `
 @media(max-width:560px){
   #brx-footer .th-el-97b044b{grid-template-columns:1fr;gap:30px}
 }
-/* Mobile footer (Bam): centre the sign-up heading, subscribe box, help text,
+/* Mobile footer (the merchant): centre the sign-up heading, subscribe box, help text,
    social row and copyright. A full-width rule then separates that centred block
    from the four link menus (LEARN / STORE / POLICIES / COMMUNICATIONS),
    which stay LEFT-aligned — centred lists read badly. #brx-footer id-specificity
@@ -263,7 +263,9 @@ export interface NavItem {
 
 export interface SitePage {
   title: string; // <title> content, already includes site name where wanted
-  headExtra?: string; // metaTags + jsonLd script, pre-escaped upstream
+  headExtra?: string;
+  /** Site-wide head tags (from settings), rendered before the page's own headExtra. */
+  headBase?: string; // metaTags + jsonLd script, pre-escaped upstream
   siteName: string;
   nav: NavItem[];
   body: string;
@@ -343,9 +345,8 @@ ${p.body}
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="facebook-domain-verification" content="9t3nhx1yw9xijatt76fw2lzktpi878">
 <title>${esc(p.title)}</title>
-${p.headExtra ?? ''}
+${p.headBase ?? ''}${p.headExtra ?? ''}
 <style>:root{--th-site-max:${siteMax}}${CSS}${BANNER_STYLES}${CONTACT_CSS}${POPUP_STYLES}${hasChrome ? HEADER_CART_CSS + PORTED_DOC_CSS + MOBILE_MENU_CSS : ''}</style>
 ${p.dock ? `<style>${p.dock.styles}</style>` : ''}
 ${p.chromeCssUrl ? `<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@100..900&family=Manrope:wght@200..800&family=Roboto+Condensed:wght@100..900&family=Roboto:wght@100..900&family=Montserrat:wght@100..900&display=swap"><link rel="stylesheet" href="${esc(p.chromeCssUrl)}">` : ''}

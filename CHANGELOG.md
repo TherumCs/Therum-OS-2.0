@@ -469,7 +469,7 @@ driven end to end and verified working. Highlights of this release:
 
 the reference store-beta shakedown pass. Everything below came out of driving the real admin
 at `localhost:10009/tos-admin` rather than reading code, so each item is a defect
-that was actually reproduced, or a behaviour Bam asked for by name.
+that was actually reproduced, or a behaviour the merchant asked for by name.
 
 ### Fixed — list pages
 
@@ -530,7 +530,7 @@ that was actually reproduced, or a behaviour Bam asked for by name.
   natural ratio and the tile takes that height. Verified 12/12 tiles match exactly.
 - **The Cols slider drives masonry too** (3–7 columns), not just grid. Only the table
   view greys it out now.
-- **Metro tile view removed** at Bam's request. Gone from the view switcher, the
+- **Metro tile view removed** at the merchant's request. Gone from the view switcher, the
   panes, the CSS, and the `viewMode` enum; a stored `metro` preference falls back to
   grid.
 - **GIFs and videos move on hover.** Tiles paint a still poster and swap to the
@@ -576,7 +576,7 @@ that was actually reproduced, or a behaviour Bam asked for by name.
 
 ## [Unreleased] — Bricks Bridge Studio App (2026-07-25, post-beta.1)
 
-Bam's call: Bricks-only bridge (T1 theme shim + T3 plugin compat deferred). "Use
+the merchant's call: Bricks-only bridge (T1 theme shim + T3 plugin compat deferred). "Use
 Bricks without full-blown WordPress" — and the load-bearing core ALREADY EXISTED:
 the builder's tested fromBricks/toBricks adapter. This pass packaged it into a real
 Studio App with server-side surfaces, verified against the REAL Bricks theme source
@@ -598,7 +598,7 @@ as bodyFormat 'canvas' and RENDERING PUBLICLY through Base Theme (heading/text/b
 export round-trip preserving element names + settings. **Full regression 138/138.**
 
 Also: `.claude/commands/therum-setup.md` — /therum-setup scaffolds the project
-.claude folder in Bam's _core/addons kit shape, loaded with the build context.
+.claude folder in the merchant's _core/addons kit shape, loaded with the build context.
 
 
 ## ═══ 2.0.0-beta.1 — OFFICIAL BETA (2026-07-25) ═══
@@ -642,12 +642,12 @@ The alpha→beta gap-closers so the reference store build session starts clean.
 ### Verified
 Variant CRUD + cross-product 404 + custom-menu-overrides-nav tests added.
 **Full regression 134/134, exit 0.** Both apps typecheck clean. (Admin pages
-server-render behind login — visual pass rides Bam's next session.)
+server-render behind login — visual pass rides the merchant's next session.)
 
 
 ## [2.0.0-beta.1] — MCP site-ops + connections-powered dashboard (2026-07-25)
 
-Bam's call on the AI-chat gap: don't reinvent the wheel — "having a connection to the
+the merchant's call on the AI-chat gap: don't reinvent the wheel — "having a connection to the
 site for you to chat and do stuff, maybe with MCP, is the way." The MCP endpoint
 (/api/mcp, JSON-RPC, tro_ token auth) grew from 2 tools to 7:
 
@@ -660,7 +660,7 @@ site for you to chat and do stuff, maybe with MCP, is the way." The MCP endpoint
   token or a real admin session; read tokens can look, not touch (the route's old
   "re-check when a write tool lands" comment is now discharged).
 - Dashboard (preview gap #1, first slice): **Connections status card** — sticky per
-  Bam's spec ("always shown when any connector is active"), real Nexus state, health
+  the merchant's spec ("always shown when any connector is active"), real Nexus state, health
   dots, needs-attention first, Manage →. **Claude · MCP card** — endpoint + token
   pointer, 7-tool count, "connect Claude to run this site" framing. Both in the bento
   grid.
@@ -677,7 +677,7 @@ Full review of ALL 1.x preview HTMLs completed (agent pass over
 connections-and-dashboard.html, therum-os-experience.html 12.8k lines,
 dist/admin-preview.html [byte-identical dupe], previews/captures/). Findings
 persisted as docs/PREVIEW-GAP-REPORT.md — 16 feature gaps + 9 visual gaps, sized,
-with Bam's own annotation prose transcribed verbatim (the dashboard-composition,
+with the merchant's own annotation prose transcribed verbatim (the dashboard-composition,
 chat-surface, customization, and connector-framework specs).
 
 ### Built this pass (quick closes from the report)
@@ -697,7 +697,7 @@ full regression 128/128.
 
 ## [2.0.0-beta.1] — Nexus: structured key+secret credentials (2026-07-24)
 
-Bam: "some have keys, keys + secrets, or secrets only." Providers now declare their
+the merchant: "some have keys, keys + secrets, or secrets only." Providers now declare their
 real auth shape: `fields` on the catalog entry (label + secret + optional per part)
 render as separate inputs in the slide-over — masked where secret — and join into the
 single vault string with EXACTLY the delimiter that provider's tester/gateway already
@@ -712,7 +712,7 @@ backend change (vault format identical).
 
 ## [2.0.0-beta.1] — Nexus grid redesign: provider cards + slide-over (2026-07-24)
 
-Bam: the section needed to be "much more robust — select stuff out of a grid, enter your
+the merchant: the section needed to be "much more robust — select stuff out of a grid, enter your
 credentials right there, test stuff right there." The original design was already on
 Drive: previews/connections-and-dashboard.html, whose spec line reads "click any card →
 opens a slide-over panel with the connection form … once connected, the same panel
@@ -746,7 +746,7 @@ with the API-key form + Connect + test note, overlay dimming behind. Backend unt
 
 ### Built
 - New `fulfillment` catalog category: Printful, Printify, Gelato, Gooten, SPOD, plus
-  Bam's named partners Podplus, PodPartner, Tapstitch, Contrado (catalog 67 → 76;
+  the merchant's named partners Podplus, PodPartner, Tapstitch, Contrado (catalog 67 → 76;
   the named four are store-and-hold — no live testers until each API is verified). Printful + Printify have LIVE credential testers (bearer GET
   /stores and /v1/shops.json); the rest store-and-hold until their Counter fleet
   modules land. Doctrine reminder encoded in the catalog comment: these providers
@@ -767,7 +767,7 @@ malformed/unknown ids rejected). **Full regression 128/128, exit 0.**
 
 ## [2.0.0-beta.1] — Product media: hover-video cards (2026-07-24)
 
-Bam's feature: cards show stills; hover plays the product's video; no video → arrows
+the merchant's feature: cards show stills; hover plays the product's video; no video → arrows
 flip through the gallery. "A really cool feature I haven't seen in many things."
 
 ### Built
@@ -849,7 +849,7 @@ Apparel/#Basics pills. **Full regression 121/121, exit 0; post-suite leak check:
 
 ## [2.0.0-beta.1] — Base Theme: the public site frontend (2026-07-24)
 
-2.0 finally has a face. Bam: "default theme so stuff is just popping up" — the reference store
+2.0 finally has a face. the merchant: "default theme so stuff is just popping up" — the reference store
 needs to ship; the full theme system is recorded in docs/FUTURE-BUILDOUT.md.
 
 ### Built
@@ -875,7 +875,7 @@ needs to ship; the full theme system is recorded in docs/FUTURE-BUILDOUT.md.
 
 ## [2.0.0-beta.1] — C5a: Square gateway (2026-07-24)
 
-Direction (Bam): Square as the real second rail; Braintree and WooPayments are NOT
+Direction (the merchant): Square as the real second rail; Braintree and WooPayments are NOT
 separate integrations — their logic is absorbed (WooPayments = Stripe rails + instant
 payout, his goes to Square; Braintree = aggregation the method registry's provider
 routing already does). CORRECTION recorded: his setup is WooPayments→Square, not Whop.
@@ -900,7 +900,7 @@ routing already does). CORRECTION recorded: his setup is WooPayments→Square, n
 
 ## [2.0.0-beta.1] — C4.1: tabbed payment method strip (2026-07-24)
 
-Bam: WooCommerce's payment picker sucks — 1.x Counter had tabbed selection. Ported the
+the merchant: WooCommerce's payment picker sucks — 1.x Counter had tabbed selection. Ported the
 real thing: previews/checkout-experience.html's method strip + MethodRegistry.php, 1:1.
 
 ### Built
@@ -911,7 +911,7 @@ real thing: previews/checkout-experience.html's method strip + MethodRegistry.ph
   the registry can never contain a check/cheque method).
 - `paymentGatewayService.methods()` + public `GET /api/checkout/methods` — grouped
   registry, each method resolved to its first CONNECTED provider; unresolved methods
-  still ship (Bam's ruling: show what's possible, "setup required" until Nexus connect).
+  still ship (the merchant's ruling: show what's possible, "setup required" until Nexus connect).
 - Checkout page rebuilt around the strip (1.x CSS ported: pills with colored icon chips
   + hover preview tooltips, active-pill surface+shadow, panelIn animation; BNPL brand
   tiles Klarna/Affirm/Afterpay/Sezzle/Zip/PP-Credit; crypto coin chip grid BTC/ETH/USDC/
@@ -1179,7 +1179,7 @@ structurally: no check/eCheck gateway exists in the registry, ever.
   existing verifyStripeSignature; canonical kind mapping).
 - **Nexus is the only credential store**: gateways resolve their secret via a new
   internal connectionService.credentialFor(); a gateway is "available — setup
-  required" until its provider is connected (the exact UX Bam described: sign back in
+  required" until its provider is connected (the exact UX the merchant described: sign back in
   → checkout lights up). Webhook signing secrets come from the existing Nexus
   WebhookSecret store with credential fallback.
 - **Routes**: GET /api/checkout/gateways (public, capability-gated), POST
@@ -1334,7 +1334,7 @@ long list; rename the nav entry to "Nexus."
 Direction (voice): checks are NEVER a payment method — standing rule for the Counter
 checkout milestone. Bank/ACH, cards, P2P (Cash App Pay via Square, Venmo via
 Braintree/PayPal), BNPL (Zip/Sezzle — 1.x provider modules port with checkout), crypto
-all wanted. Bam's REAL current rails: **Whop Payments connected to his Square** for
+all wanted. the merchant's REAL current rails: **Whop Payments connected to his Square** for
 instant payouts (dictation renders it "who/loop payments" — when he says Braintree he
 sometimes means Whop; both are wanted). Stripe stays a first-class gateway but not the
 only rails — multi-gateway Counter architecture is deliberate so payout routing is
@@ -1397,7 +1397,7 @@ the new Nexus punch-list. Catalog grows 63 → 66.
 - Live browser: Connections page renders 66 with Gmail/Calendar/Sheets carrying the
   OAuth affordances ("Set up OAuth app" / "Use token instead").
 
-### To use it (one-time, needs Bam)
+### To use it (one-time, needs the merchant)
 Create one OAuth client in Google Cloud Console (Web application; redirect URI =
 `<admin origin>/tos-admin/api/connections/<provider>/oauth/callback` for each service
 you connect), paste client id/secret under any one Google provider in Connections —
@@ -1684,7 +1684,7 @@ Members = Customers (user-confirmed), all 1.x features milestoned M1→M4.
 ## [2.0.0-beta.1] — Forge-audit pass: dependency currency + real gaps across all 3 apps
 
 Direction: paused the Nexus/section-list work to run a full audit using the Forge framework
-(`/Users/bam/Local Sites/Prompts/Forge/`) as operating discipline — confirm every dependency is
+(`~/Local Sites/Prompts/Forge/`) as operating discipline — confirm every dependency is
 genuinely on latest (verified live against npm registry + official docs, never assumed from memory),
 fix whatever the audit turns up. No dedicated security-scanner MCP (Semgrep/Snyk/Codacy/SonarQube) was
 available in this environment — substituted direct tools (tsc, npm outdated, real builds, real browser
@@ -1734,7 +1734,7 @@ verification) and said so rather than pretending those ran.
   started rejecting (`TS2882`). Fixed, not a regression from this pass.
 - **`.claude/launch.json` had no `builder` entry, AND the file being edited to add one was the wrong
   file** — a stray duplicate exists at `therum-cms-2/.claude/launch.json`; the real one `preview_start`
-  reads is at the actual project root, `/Users/bam/Local Sites/therum-os/.claude/launch.json`. Added
+  reads is at the actual project root, `~/Local Sites/therum-os/.claude/launch.json`. Added
   the entry to the correct file. Separately found port 5174 already held by an 8-day-old builder `vite`
   process that predated every dependency bump in this pass — killed and restarted clean so the browser
   verification below actually reflects Vite 8/React 19, not stale Vite-5-era state still resident in an
@@ -2769,7 +2769,7 @@ and don't duplicate it into two competing pieces along the way.
 ## [2.0.0-beta.1] — 1.9.44 admin-parity build, workstream 3: Content & editing (Pages/Posts)
 
 Following the full 11-agent inventory pass over the fresh 1.9.44 zip (every mu-plugin,
-`_therum/src/*`, install-wizard, third-party plugins — reported back and scoped with Bam
+`_therum/src/*`, install-wizard, third-party plugins — reported back and scoped with the merchant
 before touching anything), this is the first section ported: Content & editing, Pages/Posts
 only. Case Study is deliberately excluded — it's the future "From the Studio" addon content
 type (already gated off in `nav.ts`), not a rebuild target this pass.
@@ -3184,7 +3184,7 @@ the trigger was something I haven't pinned down):
 - Fresh clean restart (`.next` wiped) done; 39/39 tests still pass.
 
 **If this recurs after a hard-refresh on a freshly-loaded page**, it's not
-dev-mode staleness and needs a real look — see the note to Bam.
+dev-mode staleness and needs a real look — see the note to the merchant.
 
 ## [2.0.0-beta.1] — Fixed "Invalid Server Actions request" on login: moved auth off Server Actions entirely
 

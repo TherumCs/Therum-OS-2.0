@@ -1,7 +1,7 @@
 import { db } from '../lib/db.js';
 import { renderCanvas, type CanvasNode } from '../lib/render.js';
 
-// Counter's default templates — the Woo-shaped thing Bam has asked for
+// Counter's default templates — the Woo-shaped thing the merchant has asked for
 // repeatedly and that did not exist.
 //
 // Until now shop, PDP, cart, checkout and account were rendered by hardcoded

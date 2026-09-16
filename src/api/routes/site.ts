@@ -41,6 +41,8 @@ export interface ChromeCtx {
   chromeHeader?: string;
   chromeFooter?: string;
   chromeCssUrl?: string;
+  /** Site-wide <head> tags from settings (Meta domain verification today). */
+  headBase?: string;
   /** Settings > Counter — how the header's icons behave. */
   headerIcons?: HeaderCartConfig;
 }
@@ -50,6 +52,8 @@ export interface ChromeCtx {
 async function loadChrome(site: { chromeHeaderSlug: string | null; chromeFooterSlug: string | null; chromeCssUrl: string | null }): Promise<ChromeCtx> {
   const out: ChromeCtx = {};
   if (site.chromeCssUrl) out.chromeCssUrl = site.chromeCssUrl;
+  const seo = await settingsService.getSeoDefaults().catch(() => null);
+  if (seo?.facebookDomainVerification) out.headBase = `<meta name="facebook-domain-verification" content="${esc(seo.facebookDomainVerification)}">`;
   for (const [slug, key] of [[site.chromeHeaderSlug, 'chromeHeader'], [site.chromeFooterSlug, 'chromeFooter']] as const) {
     if (!slug) continue;
     try {

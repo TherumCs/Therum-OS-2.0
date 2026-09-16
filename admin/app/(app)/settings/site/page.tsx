@@ -22,7 +22,7 @@ interface Paged<T> {
   items: T[];
 }
 interface CommerceSettings { currency: string; locale: string; minMarginPct: number }
-interface SeoDefaults { siteName: string; siteDescription: string; siteLogo: string }
+interface SeoDefaults { siteName: string; siteDescription: string; siteLogo: string; facebookDomainVerification: string }
 
 // Currencies the storefront can actually price in. A free-text box invites
 // "USD " or "dollars"; the API takes a 3-letter code and rejects everything
@@ -41,7 +41,7 @@ export default async function SiteSettingsPage() {
     apiGet<SiteSettings>('/api/settings/site'),
     apiGet<Paged<ContentItem>>('/api/content?limit=100'),
     apiGet<CommerceSettings>('/api/settings/commerce').catch(() => ({ currency: 'USD', locale: 'en-US', minMarginPct: 0 })),
-    apiGet<SeoDefaults>('/api/settings/seo-defaults').catch(() => ({ siteName: '', siteDescription: '', siteLogo: '' })),
+    apiGet<SeoDefaults>('/api/settings/seo-defaults').catch(() => ({ siteName: '', siteDescription: '', siteLogo: '', facebookDomainVerification: '' })),
   ]);
   const pages = content.items.filter((c) => c.type === 'page' && c.status === 'published');
 
@@ -120,6 +120,7 @@ export default async function SiteSettingsPage() {
         </Field>
         <Field label="Share image" help="Shown when a link to this site is posted. 1200x630 works everywhere.">
           <TextInput domain="seo-defaults" field="siteLogo" initial={seo.siteLogo} placeholder="https://…/share.png" />
+          <TextInput domain="seo-defaults" field="facebookDomainVerification" initial={seo.facebookDomainVerification} placeholder="9t3nhx…" />
         </Field>
       </div>
     </section>

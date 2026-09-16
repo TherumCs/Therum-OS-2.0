@@ -6,7 +6,7 @@
 // read the inbox had to guess.
 //
 // So each role gets its own page: the title, the terms and the description it
-// already had on the index, then a form that asks for exactly what Bam asked
+// already had on the index, then a form that asks for exactly what the merchant asked
 // for — name, email, phone, an optional link to their work, and a track record
 // as either an uploaded document or a written blurb.
 //
@@ -98,7 +98,7 @@ export const roleBySlug = (slug: string): Role | undefined =>
  * and a reload-by-name keeps the stale snapshot. When that happened this read
  * resolved to '' and every application 500'd with nodemailer "No recipients
  * defined". `.env` still wins whenever it is actually loaded. */
-export const CAREERS_INBOX = process.env.CAREERS_INBOX || 'careers@sidemoney.co';
+export const CAREERS_INBOX = process.env.CAREERS_INBOX || '';
 
 /** Upload ceiling. Generous for a CV, small enough that it cannot be abused. */
 export const CV_MAX_BYTES = 5 * 1024 * 1024;

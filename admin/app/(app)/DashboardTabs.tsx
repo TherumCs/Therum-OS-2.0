@@ -161,7 +161,7 @@ function WActivity({ data, ctx }: { data: DashData; ctx: Ctx }) {
   );
 }
 
-// The widget Bam asked for by name: at a glance, who bought (came through), who
+// The widget the merchant asked for by name: at a glance, who bought (came through), who
 // tried and did not finish (attempted), and who is sitting on a live cart right
 // now (abandoned). The three headline tiles are the answer; the sub-tabs let you
 // walk each list. All numbers are real — see dashboard.service.activity().

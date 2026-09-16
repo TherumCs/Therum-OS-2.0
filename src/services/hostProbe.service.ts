@@ -19,7 +19,7 @@ const execFileAsync = promisify(execFile);
 // Prisma/Redis connection, and an HTTP request to our own server answer the
 // large majority. That is deliberate beyond just safety — `free`, `ss` and
 // `systemctl` do not exist on macOS, so an exec-first design would have meant
-// a probe set that only worked on the VPS Bam does not have yet. In-process
+// a probe set that only worked on the VPS the merchant does not have yet. In-process
 // inspection runs identically on the laptop and the server.
 
 export type Axis = 'security' | 'compression' | 'performance' | 'inventory';

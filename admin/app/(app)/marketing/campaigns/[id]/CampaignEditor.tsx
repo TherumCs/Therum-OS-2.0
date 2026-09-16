@@ -292,7 +292,7 @@ export function CampaignEditor({ initial, kind = 'campaign' }: { initial: Campai
               <div style={{ background: '#fff', borderRadius: 18, minHeight: 300, padding: 14 }}>
                 <div style={{ fontSize: 11, color: '#8a8a8a', textAlign: 'center', marginBottom: 12 }}>Text message · today</div>
                 <div style={{ background: '#e9e9eb', color: '#0a0a0a', borderRadius: 16, padding: '10px 12px', fontSize: 14, lineHeight: 1.45, maxWidth: 230, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-                  {(smsText || 'Your message…').replace(/\{\{\s*first_name\s*\}\}/g, 'Bam')}
+                  {(smsText || 'Your message…').replace(/\{\{\s*first_name\s*\}\}/g, 'the merchant')}
                   {smsText && !/\bSTOP\b/i.test(smsText) ? '\nReply STOP to opt out' : ''}
                 </div>
               </div>

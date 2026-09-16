@@ -154,7 +154,7 @@ export const lifecycleService = {
         // NEVER the imported WP history. Those 53 migrated orders carry a
         // sourceId and were stamped with a RECENT updatedAt at migration time,
         // so the updatedAt-window branch below would sweep them in and email
-        // long-migrated customers about years-old orders — which Bam explicitly
+        // long-migrated customers about years-old orders — which the merchant explicitly
         // forbade. sourceId:null keeps this to real orders placed on THIS store.
         sourceId: null,
         OR: [
@@ -414,7 +414,7 @@ export const lifecycleService = {
   // small gap between batches so a burst of sends does not hammer the transport.
   // Returns the number of recipients queued.
   async dropBroadcast(input: { title: string; blurb: string; productSlug: string; heroImg?: string }): Promise<number> {
-    // NEVER blast the imported WP customers (Bam's rule: they don't get marketing
+    // NEVER blast the imported WP customers (the merchant's rule: they don't get marketing
     // until he says who + what). They were imported with no consent and no
     // engagement here. Gate on ACTUAL engagement with THIS store: a verified
     // account identity, OR an order placed here (native = sourceId null). An

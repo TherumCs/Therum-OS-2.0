@@ -435,7 +435,7 @@ export const campaignService = {
     const perBlock: Record<string, string> = {};
     for (const b of useBlocks) perBlock[b.id] = await renderBlock(b, origin);
     const html = await renderEmail({ blocks: useBlocks, preheader: preheader ?? c.preheader, siteName: site.siteName, origin });
-    const sample = personalise(html, { firstName: 'Bam', email: 'you@example.com', unsubscribeUrl: `${origin}/api/shop/unsubscribe` });
+    const sample = personalise(html, { firstName: 'the merchant', email: 'you@example.com', unsubscribeUrl: `${origin}/api/shop/unsubscribe` });
     return { html: sample, raw: html, blocks: perBlock, text: renderText(useBlocks, origin) };
   },
 
@@ -446,14 +446,14 @@ export const campaignService = {
       const { smsService } = await import('./sms.service.js');
       const st = await smsService.status();
       if (!st.ready) throw new ConflictError(st.reason ?? 'SMS is not set up.');
-      const body = personalise(c.text, { firstName: 'Bam', email: 'test', unsubscribeUrl: '' });
+      const body = personalise(c.text, { firstName: 'the merchant', email: 'test', unsubscribeUrl: '' });
       const r = await smsService.send(to, `[TEST] ${body}`, { marketing: true });
       return { ok: true, to, subject: body.slice(0, 60), via: st.via, sid: r.sid };
     }
     const email = to.trim().toLowerCase();
     if (!isRealEmail(email)) throw new ValidationError('Enter a real email address.', 'to');
     // Say so when nothing can actually leave the box — a 200 that sent
-    // nothing is the exact lie Bam's rule #1 is about.
+    // nothing is the exact lie the merchant's rule #1 is about.
     const n = await settingsService.getNotifications();
     const transport = await mailTransport();
     if (!n.emailEnabled) throw new ConflictError('Email sending is switched off in Settings › Notifications.');

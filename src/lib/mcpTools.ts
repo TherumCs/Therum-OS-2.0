@@ -78,7 +78,7 @@ export const mcpTools: McpTool[] = [
 ];
 
 
-// ── Site-operations tools (2026-07-25, Bam: "connection to the site for you
+// ── Site-operations tools (2026-07-25, the merchant: "connection to the site for you
 // to chat and do stuff with MCP is the way"). Read tools cover the surfaces
 // an assistant needs to see; create_draft is the one write — deliberately
 // draft-only (a human publishes), and gated on write scope by the route.

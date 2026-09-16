@@ -6,7 +6,7 @@ import { db } from '../lib/db.js';
 
 // The editable surface, and nothing else.
 //
-// Bam's scope, verbatim: "i would just just bricks / css and thats it." That
+// the merchant's scope, verbatim: "i would just just bricks / css and thats it." That
 // is three surfaces, and they are not all files — the per-admin custom CSS is
 // a database column. Treating them uniformly here is what lets the propose /
 // apply flow above not care which is which.

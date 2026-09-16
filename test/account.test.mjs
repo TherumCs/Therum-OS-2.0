@@ -270,7 +270,7 @@ describe('member pricing', () => {
     }
   });
 
-  // Bam's rule: the member price is a FLOOR, not a competing discount. The
+  // the merchant's rule: the member price is a FLOOR, not a competing discount. The
   // totals pipeline's own rule is best-single-wins, which would have let a
   // LARGER coupon replace the member price — the opposite of a floor.
   test('a member cannot stack a coupon, even one worth more', async () => {
@@ -337,7 +337,7 @@ describe('member pricing', () => {
   });
 });
 
-// Bam: "that percentage is based on the price I get the product for... a
+// the merchant: "that percentage is based on the price I get the product for... a
 // straight fifty percent can't always work." A percent off RETAIL says nothing
 // about whether the sale still makes money, so discounts are clamped against
 // the variant's own cost.

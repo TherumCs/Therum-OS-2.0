@@ -11,7 +11,7 @@ import { requireBundle } from '../../middleware/bundle.js';
 // can only run one of a fixed list compiled into this server.
 //
 // An earlier version of this file said read-only was permanent. That changed by
-// decision: this panel replaces cPanel/Plesk on Bam's box, and a panel that can
+// decision: this panel replaces cPanel/Plesk on the merchant's box, and a panel that can
 // only describe a broken firewall is worse than the terminal it replaces. What
 // carried over is the part that actually mattered — there is still no endpoint
 // anywhere that accepts a command. See hostAction.service.ts.

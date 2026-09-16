@@ -5,7 +5,7 @@ import { useSettingsForm } from './SettingsForm';
 // Wireframes for the storefront card options.
 //
 // A dropdown reading "Editorial — name, price, colours" tells a merchant the
-// words but not the shape, and Bam's complaint was exactly that: "I appreciate
+// words but not the shape, and the merchant's complaint was exactly that: "I appreciate
 // having a drop down, but I don't know what the fuck this shit is gonna look
 // like." So every option draws a rough version of itself, and every option
 // that describes a BEHAVIOUR performs it — a "Fade" tile that never fades is a

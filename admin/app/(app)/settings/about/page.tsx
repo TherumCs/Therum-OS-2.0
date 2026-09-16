@@ -111,7 +111,7 @@ export default async function AboutSettingsPage() {
       <div className="card" style={{ marginTop: 14 }}>
         <div className="l">Credits</div>
         <p className="th-about-credits">
-          Built and maintained by <strong>Bam</strong> at <strong>Therum Creative Studios</strong>. A ground-up rebuild
+          Built and maintained by <strong>the merchant</strong> at <strong>Therum Creative Studios</strong>. A ground-up rebuild
           of Therum OS 1.9.44 — the WordPress-era version — as its own platform: same ideas, none of the inherited
           weight. Anti-agency. Anti-bloat.
         </p>

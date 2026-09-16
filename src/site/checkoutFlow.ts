@@ -226,7 +226,7 @@ body.th-co-done .co-flow{grid-template-columns:1fr;justify-items:center}
   .co-summary__bottom{flex:1 1 auto;flex-direction:row;align-items:center;justify-content:flex-end;
     gap:12px;padding-top:0;border-top:0}
   .co-summary .co-meta{display:none}
-  /* Bam: "show subtotal, then place order — that's it." The bar was speaking
+  /* the merchant: "show subtotal, then place order — that's it." The bar was speaking
      three prices (Subtotal, the big total, and the total again on the button).
      The button already carries the figure being paid, so the standalone total
      goes; it stays in the DOM because showDone reads it for the receipt. */
@@ -244,7 +244,7 @@ body.th-co-done .co-flow{grid-template-columns:1fr;justify-items:center}
   .co-flow{padding-bottom:84px}
   .co-act{display:none}
 }
-/* No marketing footer on the focused cart/checkout flow, at ANY width — Bam:
+/* No marketing footer on the focused cart/checkout flow, at ANY width — the merchant:
    "it doesn't make sense to have the footer in a checkout anyway." On mobile it
    also sat under the fixed cart bar, which scrolled right over it. */
 html.th-co-active #brx-footer, html.th-co-active footer.site{display:none}
@@ -732,7 +732,7 @@ export const CHECKOUT_FLOW_RUNTIME = `
     // tile already said what it is.
     var inChosen = (byGroup[G] || []).filter(function(m){ return m.available; });
     if (!F.id && inChosen.length) F = { id: inChosen[0].id, provider: inChosen[0].provider, label: inChosen[0].label };
-    // Tap-select, not radios. Bam's call: the group tile is already a big tap
+    // Tap-select, not radios. the merchant's call: the group tile is already a big tap
     // target, so a second column of radio dials beneath it is the exact
     // "buttony" clutter the quick checkout does not have. A single-method group
     // needs no chooser at all — F.id was set from inChosen[0] just above.

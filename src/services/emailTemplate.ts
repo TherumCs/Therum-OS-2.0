@@ -22,8 +22,7 @@ export const T = {
 // Absolute logo URL for the email header — mail clients render no relative src.
 // Configured per-install via EMAIL_LOGO_URL; otherwise falls back to a
 // conventional uploads path on the store's public origin (PUBLIC_ORIGIN).
-const LOGO = process.env.EMAIL_LOGO_URL
-  || `${(process.env.PUBLIC_ORIGIN ?? '').replace(/\/+$/, '')}/wp-content/uploads/2026/03/full-sig-black.png`;
+const LOGO = process.env.EMAIL_LOGO_URL || '';
 
 export const esc = (s: string): string =>
   String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -83,7 +82,7 @@ export function shell(inner: string, opts: { preheader?: string; siteName?: stri
     + `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${T.bg};"><tr><td align="center" style="padding:28px 12px 40px;">`
     + `<table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:${T.card};border:1px solid ${T.border};border-radius:14px;overflow:hidden;font-family:${T.font};">`
     + `<tr><td style="height:3px;background:${T.red};font-size:0;line-height:0;">&nbsp;</td></tr>`
-    + `<tr><td align="center" style="padding:34px 24px 30px;"><img src="${LOGO}" alt="${esc(siteName).toUpperCase()}" width="${logoW}" style="display:block;width:${logoW}px;max-width:${logoW > 150 ? 70 : 56}%;height:auto;border:0;"></td></tr>`
+    + `<tr><td align="center" style="padding:34px 24px 30px;">${LOGO ? `<img src="${LOGO}" alt="${esc(siteName).toUpperCase()}" width="${logoW}" style="display:block;width:${logoW}px;max-width:${logoW > 150 ? 70 : 56}%;height:auto;border:0;">` : `<div style="font-size:22px;font-weight:800;letter-spacing:-.02em;color:${T.ink};">${esc(siteName)}</div>`}</td></tr>`
     + inner
     + `<tr><td style="padding:26px 36px 30px;">${hair()}<div style="padding-top:18px;text-align:center;font-size:11px;line-height:1.7;color:${T.faint};letter-spacing:.02em;">${footer}</div></td></tr>`
     + `</table></td></tr></table></body></html>`;

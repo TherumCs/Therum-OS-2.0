@@ -147,7 +147,7 @@ export async function viaGmail(msg: { to: string; from: string; subject: string;
   // as is a fast route into spam folders.
   //
   // IDENTITY GUARD (audit + standing store rule): customer mail must go out as
-  // the configured store From (commoncents@sidemoney.co), NEVER the personal
+  // the configured store From (the store From address), NEVER the personal
   // account a Gmail grant might have been authorised against (hello@bamleon.com).
   // If the connected mailbox does not match the configured From, this transport
   // would silently REBRAND every receipt/refund/shipping email to the wrong
@@ -158,7 +158,7 @@ export async function viaGmail(msg: { to: string; from: string; subject: string;
   // FAIL CLOSED. Send via Gmail ONLY when the connected mailbox identity is known
   // AND matches the configured store From. If cred.email is empty (a legacy
   // send-only grant that never captured identity) or it mismatches, we cannot
-  // prove the mail would go out as commoncents@sidemoney.co — so skip Gmail and
+  // prove the mail would go out as the store From address — so skip Gmail and
   // let a transport that honours the configured From (SMTP / direct-MX as the
   // store domain) take the send, instead of silently sending from the wrong
   // (possibly personal) mailbox (audit C10 + standing store-identity rule).

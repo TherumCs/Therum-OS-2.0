@@ -56,7 +56,7 @@ export interface CounterSettings extends Record<string, unknown> {
   freeShippingOver?: number;
 }
 
-// Dark, light, and a way out to anything. Bam's list, plus one mid grey so
+// Dark, light, and a way out to anything. the merchant's list, plus one mid grey so
 // there is a step between ink and eggshell.
 const GROUND_PRESETS: [string, string][] = [
   ['#0a0a0a', 'Ink'],

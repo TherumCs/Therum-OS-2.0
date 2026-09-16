@@ -1,8 +1,8 @@
 ---
-description: Scaffold this project's .claude folder (Bam's _core/addons kit shape) loaded with the Therum OS 2.0 build context
+description: Scaffold this project's .claude folder (the merchant's _core/addons kit shape) loaded with the Therum OS 2.0 build context
 ---
 
-Set up the `.claude/` folder for this project in Bam's kit structure (`_core/` +
+Set up the `.claude/` folder for this project in the merchant's kit structure (`_core/` +
 `addons/`), filled with the Therum OS 2.0 build context. Idempotent: never
 overwrite a file that already exists — skip it and say so.
 
@@ -13,7 +13,7 @@ Create this tree (relative to the project root's `.claude/`):
   _core/
     claude.md          ← core project rules
     autonomy.md        ← act-don't-ask rules
-    operator.md        ← who Bam is / how he works
+    operator.md        ← who the merchant is / how he works
     memory.md          ← memory + state protocol
     loop.md            ← the verify loop
     skill-template.md  ← template for new addon skills
@@ -31,19 +31,19 @@ Then write (or update, if missing) a root `CLAUDE.md` in the project that
 - `docs/FUTURE-BUILDOUT.md` + `CHANGELOG.md` (state of 2.0, build order, where
   everything lives)
 - The standing rules: NO CHECKS EVER in any checkout; WooPayments→Square is
-  Bam's payout setup (never "Whop"); never build Update schemas via
+  the merchant's payout setup (never "Whop"); never build Update schemas via
   `.partial()`; every counter/limit is an atomic conditional UPDATE, never
   check-then-write; hostile-audit any new money path; literal port over
   reinterpretation — check the 1.x source and `Therum OS/previews/` before
   designing any surface; sync repo+memory to Drive after every milestone.
 
-**_core/autonomy.md**: Bam gives direction by voice, often mid-task — act on
+**_core/autonomy.md**: the merchant gives direction by voice, often mid-task — act on
 explicit action verbs immediately, one ask = one change, no scope creep, flag
 extras separately. Confirm only destructive/irreversible ops. Never claim done
 without proof (test output, screenshot, re-read). "Untested" is an acceptable
 answer; false success is not.
 
-**_core/operator.md**: Bam (we@therum.studio). Voice-to-text user — expect
+**_core/operator.md**: the merchant (we@therum.studio). Voice-to-text user — expect
 garbled product names (confirm spellings that matter: "Woopayments not whop"
 happened). Wants 1:1 ports of his 1.x designs, then better. Reviews visually —
 show screenshots. Rates work honestly — he asks "alpha or beta?" and wants the

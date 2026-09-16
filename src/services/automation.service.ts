@@ -114,9 +114,9 @@ const SAMPLE_VARS: Record<string, string> = {
   coupon_code: 'WELCOME-7K3P2Q',
   coupon_expires: new Date(Date.now() + 14 * DAY).toLocaleDateString('en-US', { month: 'long', day: 'numeric' }),
   cart_url: '/cart',
-  product_name: 'Snakeskin Pin',
+  product_name: 'Sample product',
   product_url: '/shop',
-  site_name: 'The Sidemoney Company',
+  site_name: 'Your store',
 };
 
 export interface FireInput {
@@ -188,7 +188,7 @@ export const automationService = {
     for (const b of useBlocks) perBlock[b.id] = await renderBlock(b, origin);
     const raw = await renderEmail({ blocks: useBlocks, preheader: preheader ?? a.preheader, siteName: site.siteName, origin });
     const vars = { ...SAMPLE_VARS, site_name: site.siteName, cart_url: `${origin}/cart`, product_url: `${origin}/shop` };
-    const html = fill(personalise(raw, { firstName: 'Bam', email: 'you@example.com', unsubscribeUrl: `${origin}/api/shop/unsubscribe` }), vars);
+    const html = fill(personalise(raw, { firstName: 'the merchant', email: 'you@example.com', unsubscribeUrl: `${origin}/api/shop/unsubscribe` }), vars);
     return { html, raw, blocks: perBlock, text: fill(renderText(useBlocks, origin), vars) };
   },
 
@@ -204,7 +204,7 @@ export const automationService = {
     const origin = ORIGIN();
     const { html, text } = await this.render(a);
     const unsub = buildUnsubscribeUrl(email);
-    const r = { firstName: 'Bam', email, unsubscribeUrl: unsub };
+    const r = { firstName: 'the merchant', email, unsubscribeUrl: unsub };
     const vars = { ...SAMPLE_VARS, site_name: site.siteName, cart_url: `${origin}/cart`, product_url: `${origin}/shop` };
     await sendEmailTo(email, `[TEST] ${fill(personalise(a.subject || a.name, r), vars)}`, fill(personalise(text, r), vars), undefined, fill(personalise(html, r), vars), { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' });
     return { ok: true, to: email, via: transport.via };
@@ -261,7 +261,7 @@ export const automationService = {
     const meta = (s.meta && typeof s.meta === 'object' && !Array.isArray(s.meta) ? s.meta : {}) as { vars?: Record<string, string>; firstName?: string | null };
     const vars: Record<string, string> = { site_name: site.siteName, cart_url: `${origin}/cart`, product_url: `${origin}/shop`, product_name: '', ...(meta.vars ?? {}) };
 
-    // Welcome offer. Shared code (Bam's call: one memorable WELCOME10, once
+    // Welcome offer. Shared code (the merchant's call: one memorable WELCOME10, once
     // per person) or, when no code is set, a random single-use code each.
     if (a.key === 'welcome' && t.coupon?.enabled && t.coupon.code) {
       const code = t.coupon.code.toUpperCase().replace(/[^A-Z0-9_-]/g, '').slice(0, 40);

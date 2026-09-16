@@ -13,7 +13,7 @@ import { db } from '../lib/db.js';
 //
 // Provider-agnostic in the same way catalogSync is: a provider turns its own
 // API into the shape below and nothing else. Hostinger is the first because it
-// is the box Bam bought; the interesting logic is not Hostinger's.
+// is the box the merchant bought; the interesting logic is not Hostinger's.
 //
 // Endpoints and auth verified against Hostinger's own published tool list
 // (npm `hostinger-api-mcp` 1.26.0, src/core/tools/vps.js) rather than a blog

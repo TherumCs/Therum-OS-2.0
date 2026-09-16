@@ -1,7 +1,7 @@
 # Therum CMS 2.0 — Build Progress / Resume Checkpoint
 
 > Live checkpoint to resume after the session-limit reset (~9:20pm ET, 2026-06-22).
-> Repo: `/Users/bam/Local Sites/therum-os/therum-cms-2`
+> Repo: `~/Local Sites/therum-os/therum-cms-2`
 
 ## The section-by-section port list (01–12)
 Rendered as an Artifact (2026-07-07), not saved as a file at the time — recovered once from the raw
@@ -83,7 +83,7 @@ Phase 1 (Foundation) + Phase 2 (Commerce) backend are **DONE and VERIFIED LIVE a
 
 ## RESUME — one paste once Docker Desktop is running
 ```bash
-cd "/Users/bam/Local Sites/therum-os/therum-cms-2"
+cd "~/Local Sites/therum-os/therum-cms-2"
 # 1) Make sure Docker Desktop app is open and fully started, then:
 docker info >/dev/null 2>&1 && echo "docker ok" || echo "open Docker Desktop first"
 docker compose up -d                       # postgres :5433 + redis :6380
@@ -153,7 +153,7 @@ Direction: no git yet (track via CHANGELOG.md + this file), ignore the WP-plugin
 **Still parked (per direction — not touched this pass):** Nexus/Cluster/Milieus native engines (all `planned`); the WordPress-plugin ecosystem ports (Counter-wp/Nexus/Cluster/Milieus) — provisions in `INTEGRATION-PROVISIONS.md` at the Therum OS root.
 
 ## CONTENT & EDITING — Cards Admin for Pages/Posts ✅ (verified live, see CHANGELOG.md for full detail)
-First section ported from the fresh 1.9.44 zip inventory (11-agent read, scoped with Bam
+First section ported from the fresh 1.9.44 zip inventory (11-agent read, scoped with the merchant
 before touching code — full report + section-by-section port-now/deferred/dead-end split).
 Pages/Posts only; Case Study stays off (future "From the Studio" addon, same Content model
 already supports `type: case_study`, just not user-facing yet). Real kebab menu (Preview/
@@ -184,7 +184,7 @@ Only declared-not-faked item left: a true VM/worker sandbox for third-party exte
 
 ## QUICK START (everything)
 ```bash
-cd "/Users/bam/Local Sites/therum-os/therum-cms-2"
+cd "~/Local Sites/therum-os/therum-cms-2"
 docker compose up -d && npm run build && npm start &     # API :4100
 cd admin && npm run build && npm start &                 # Admin :3100
 cd ../builder && npm run dev &                           # Builder :5174
@@ -238,7 +238,7 @@ async `cookies()`/`headers()`/`params` — breaking, real 18+ file blast radius,
 silent-typecheck-gap callout), React 19.2.7 (`useRef`/ambient `JSX` — breaking), Vite 8.1.4 + TS 7.0.2.
 Backend typecheck 46→0 errors, real boot + smoke tests. Admin + builder both live-browser-verified
 under the new versions (real interactions, zero console errors). Bonus fix: `.claude/launch.json`'s
-real location is the **project root** (`/Users/bam/Local Sites/therum-os/.claude/launch.json`), not
+real location is the **project root** (`~/Local Sites/therum-os/.claude/launch.json`), not
 `therum-cms-2/.claude/launch.json` — a stray duplicate of the latter caused an edit-the-wrong-file loop
 before this was caught; `builder` entry now correctly added to the real one.
 **Open gap: `next build` (admin) intermittently throws `The "id" argument must be of type string.

@@ -6,7 +6,7 @@
 // the markup. Nothing renders for a visitor the rules exclude, so the cost of
 // having the feature on is one request and no layout shift.
 //
-// Who never sees it (Bam's brief: "not super intrusive"):
+// Who never sees it (the merchant's brief: "not super intrusive"):
 //   - anyone who already subscribed here (th_sub cookie, set by the API on any
 //     signup — footer, popup, checkout), ever
 //   - anyone who closed it, for `dismissDays` (th_pop cookie)

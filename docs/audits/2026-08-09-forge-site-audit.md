@@ -9,15 +9,15 @@ finding logged with category, why, and status — no invented findings.
 
 | # | Category | Finding | Why it matters | Status |
 |---|----------|---------|----------------|--------|
-| 1 | git / data-loss | `main` was ~27 commits ahead of `origin/main`; nothing pushed since Aug 6 | One disk failure erases the launch codebase | **Resolved** — pushed on Bam's call (4491542..832a3b4), secrets re-checked clean first |
+| 1 | git / data-loss | `main` was ~27 commits ahead of `origin/main`; nothing pushed since Aug 6 | One disk failure erases the launch codebase | **Resolved** — pushed on the merchant's call (4491542..832a3b4), secrets re-checked clean first |
 | 2 | security / deps | `brace-expansion` DoS (GHSA-rgw5-rvv9-x895) + `fast-uri` host confusion (GHSA-7p8r-x3mc-p8w7), both high, in prod deps | Known-vuln surface on a public API | **Resolved** — `npm audit fix`, 0 vulns local + box, deployed (`10e28ef`) |
 | 3 | security / transport | `notification.service.ts:156` sends direct-MX mail with `rejectUnauthorized:false` (Semgrep blocking) | MITM could read outbound order emails | **Accepted by design** — opportunistic STARTTLS; MX certs routinely mismatch, verifying = mail simply stops. Documented in-code |
 | 4 | security / secrets | `git ls-files` env check | A pushed key = rotate immediately | **Resolved** — only `.env.example` tracked |
 | 5 | git / hygiene | Tags stop at `v2.0.0-beta.6` (package.json at beta.8); stray tag literally named `Main`; stale branch `backup-before-purge` | Release archaeology breaks; tag pollution | Open (post-launch tidy) |
-| 6 | tooling | `gh` CLI unauthenticated — repo-health audit (rulesets/PRs) could not run | Blind spot on branch protection | Open (needs `gh auth login` by Bam) |
-| 7 | payments / device | Apple Pay sheet died after its one async leg on a real iPhone; infra verified healthy (domains active both registries, association byte-identical, PMC on, pk=sk account) | The money button on the money device | **RESOLVED — confirmed working on Bam's iPhone.** Fix = fully-synchronous sheet, no network inside it (shipping pre-quoted), + flight recorder (`8c669de`). This unblocks the held money-path refactors |
+| 6 | tooling | `gh` CLI unauthenticated — repo-health audit (rulesets/PRs) could not run | Blind spot on branch protection | Open (needs `gh auth login` by the merchant) |
+| 7 | payments / device | Apple Pay sheet died after its one async leg on a real iPhone; infra verified healthy (domains active both registries, association byte-identical, PMC on, pk=sk account) | The money button on the money device | **RESOLVED — confirmed working on the merchant's iPhone.** Fix = fully-synchronous sheet, no network inside it (shipping pre-quoted), + flight recorder (`8c669de`). This unblocks the held money-path refactors |
 | 8 | prior passes | Four device-bug classes in main checkout, 5 dead admin wires, dead nightly backups, memory-cycling API, Redis eviction policy, zombie order, stuck bar on rotate, SDK hangs, oval discs, below-fold errors | — | **Resolved** — commits `37e2a7c`…`24b9382`, all deployed + re-verified (static re-audit PASS, 29/29 runtime gate) |
-| 9 | content | 7 home/about links point at never-migrated content (blog posts, Soul Sold Out Tee, manifesto) | 404s from the homepage | **Accepted** — Bam's call: catalog/content import fills them |
+| 9 | content | 7 home/about links point at never-migrated content (blog posts, Soul Sold Out Tee, manifesto) | 404s from the homepage | **Accepted** — the merchant's call: catalog/content import fills them |
 | 10 | ops | Nightly backups proven working again (2× 120MB Aug 9); pm2 caps raised; env perms tightened | Safety net restored | **Resolved** |
 | 11 | docs | README frozen at Phase-1 (RCI 3.2/10): quickstart dies on fresh clone (`npm run dev` targets gitignored dist/), admin+builder+storefront invisible, 48-model schema described as 5, shipped work announced as "Next" | Misleads any collaborator; zero customer impact | Open — post-launch rewrite (cli-forge-readme envelope saved at .claude/cli-forge-readme.json) |
 | 12 | structure | Tree audit SHS 8.0/10 "clean" — 3 hygiene items (stray credential backup on disk, 0-byte dev.db, .DS_Store) | Disk hygiene; nothing tracked | **Resolved** — all deleted same session; never in git |
@@ -51,7 +51,7 @@ split the money-path god-files (productGrid 3213 LOC, checkoutFlow, wooCompat);
 declare a counter↔services direction; reduce max import-chain depth. Each
 re-touches the checkout runtime currently under device test.
 
-## Connectors (2026-08-09, reported live by Bam: "sync/push down, site not reading")
+## Connectors (2026-08-09, reported live by the merchant: "sync/push down, site not reading")
 
 Investigated by reproduction, not theory. Finding: the backend was never down.
 

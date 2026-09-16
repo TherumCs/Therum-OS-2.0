@@ -15,7 +15,7 @@ import { db } from '../lib/db.js';
 // ended up with a single shared definition too.
 
 /**
- * Confirmed with Bam, 2026-08-01 — not inferred:
+ * Confirmed with the merchant, 2026-08-01 — not inferred:
  *
  *   public     — everyone.
  *   private    — UNLISTED. Absent from listings, but the direct link works for
