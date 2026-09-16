@@ -1,5 +1,66 @@
 # Changelog
 
+## [2.0.0-beta.10] — Flow, and the month of fixes since go-live (2026-09-16)
+
+Everything between go-live and today, in one cut. The headline is **Flow**, the
+store's own email + SMS engine — named like Counter and Nexus, with its own
+sidebar section. Around it: the August security audit landed, the vendor
+bridges stopped lying, and a run of storefront gaps found by using the store
+for real were closed.
+
+### Flow — email + SMS (new)
+- **Subscribers + lists**: footer signup finally saves (it used to only email the
+  merchant); CSV import honouring status, signup date, tags; nightly mirror of
+  engaged customers (verified account or a native order, never the WP import).
+- **Composer**: blocks with drag reorder; every block shows the HTML it renders
+  and can be edited; whole-email Source and plain-text views; test sends.
+- **Campaigns**: audience by list / segment / exclusion with a live count, send
+  now or schedule, worker-driven send with pacing and one retry, open pixel,
+  click redirects, per-campaign opt-out attribution, live report.
+- **Segments**: rules over order history (bought product / category, orders,
+  spend, recency), tags, source, phone, email engagement — evaluated at send.
+- **Automations**: welcome (shared once-per-person code or minted codes),
+  abandoned cart, post-purchase review ask, win-back; the older hard-coded
+  sweeps remain as fallbacks while an automation is off.
+- **Signup popup**: once per visitor, quiet 30 days after close, never after a
+  signup, never on cart/checkout, crawler-gated; live preview in the Forms tab.
+- **Cadence**: weekly send slot (default Monday 10:00 ET), per-person frequency
+  cap, month calendar. **SMS** via Twilio with STOP/START handling (built;
+  unverified until a Twilio account is connected).
+- Prisma: `subscribers`, `marketing_lists`, `list_memberships`, `segments`,
+  `campaigns`, `automations`, `campaign_sends`, `campaign_events`,
+  `signup_forms` (`20260915100000_marketing_module`).
+
+### Fixed along the way
+- Every marketing email's **Unsubscribe link 404'd** (`/shop/unsubscribe` was
+  swallowed by the `/shop/<slug>` redirect) and Gmail's **one-click unsubscribe
+  got a 415** — both since they shipped. Now `/api/shop/unsubscribe`, with a
+  scoped form-body parser.
+- **Product images blocked in mail clients**: `/api/uploads` carried
+  `Cross-Origin-Resource-Policy: same-origin`; now `cross-origin`.
+- **Foot Locker exclusives were buyable**: the PDP still rendered a cart on
+  external products. PDP now redirects to the retailer; the cart refuses them.
+- **Fonts**: Roboto Condensed / Roboto / Montserrat were referenced by the ported
+  theme but never loaded (banner captions fell back to Arial); headings moved to
+  Manrope to match the reference site.
+- **PodPluser orders never created**: the partner resolves line items against
+  the ids of *its own* pushed product copy; the webhook now sends the partner's
+  twin ids per line. State codes uppercased and phone included at checkout.
+- **Printify "publishing error"**: legacy rows with no `vendor_id` 404'd the
+  vendor-scoped bridge; plus variation-shaped SKU lookup, tolerant attribute
+  matching, image accumulation, name dedupe, and `id 0 → 404`.
+- Per-line production status with auto-to-production on paid; stuck-delivery
+  re-offer for async partners; customer multi-email; SSRF guard; Meta/Google
+  product feeds; blog link audit (City Series post now links to Foot Locker).
+- **Security audit (2026-08-23)**: buy-for-pennies closed, partner keys fenced
+  to their vendor, webhook redirects never followed, inert admin fallback token,
+  rate limits on public writes.
+
+### Known gaps (honest)
+- Frequency cap and SMS sends not yet exercised on a real audience.
+- Four Printify pins still unlinked (re-publish overwrites curation).
+- Per-campaign From name not supported (SMTP From comes from Settings).
+
 ## [2.0.0-beta.9] — Storefront go-live (2026-08-14)
 
 The going-live pass: the launch capsule shipped on the production storefront,
