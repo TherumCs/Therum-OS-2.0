@@ -120,6 +120,8 @@ export default async function SiteSettingsPage() {
         </Field>
         <Field label="Share image" help="Shown when a link to this site is posted. 1200x630 works everywhere.">
           <TextInput domain="seo-defaults" field="siteLogo" initial={seo.siteLogo} placeholder="https://…/share.png" />
+        </Field>
+        <Field label="Meta domain verification" help="The token from Meta Business › Brand Safety › Domains. Rendered as a meta tag on every page so Meta can verify this site.">
           <TextInput domain="seo-defaults" field="facebookDomainVerification" initial={seo.facebookDomainVerification} placeholder="9t3nhx…" />
         </Field>
       </div>
