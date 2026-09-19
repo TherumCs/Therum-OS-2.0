@@ -42,6 +42,9 @@ interface MailMessage {
 // a 401 bad key, a 422 bad payload — thrown away, so "email just isn't arriving"
 // was undiagnosable. Now the status and a snippet of the body are logged; the
 // boolean return is unchanged so callers still fall through to the next sender.
+/** Set by mailPost when Postmark refused only because the account is not yet approved for off-domain recipients (ErrorCode 412). */
+let postmarkPendingApproval = false;
+
 async function mailPost(provider: string, url: string, init: RequestInit): Promise<boolean> {
   let res: Response;
   try {
@@ -53,6 +56,13 @@ async function mailPost(provider: string, url: string, init: RequestInit): Promi
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     logger.warn({ provider, status: res.status, body: body.slice(0, 200) }, 'mail transport rejected');
+    // A verdict about the RECIPIENT is final. Postmark 422 ErrorCode 300 = the
+    // address itself is invalid, 406 = it previously hard-bounced and is
+    // inactive. Falling through to SMTP here just re-sends to a dead address
+    // and lands the bounce in the merchant's inbox instead of the provider's
+    // suppression list — which is what happened with the audit probes.
+    if (provider === 'postmark' && res.status === 422 && /"ErrorCode":\s*(300|406)\b/.test(body)) return true;
+    postmarkPendingApproval = provider === 'postmark' && res.status === 422 && /"ErrorCode":\s*412\b/.test(body);
     return false;
   }
   return true;
@@ -190,6 +200,29 @@ export async function sendEmailTo(
 
   // Nexus providers first — see the note at the top of this file.
   const from = n.smtpFrom || n.smtpUser || n.adminEmail || '';
+
+  // Postmark connected = Postmark ONLY (the merchant's call, 2026-09-19:
+  // "everything should be through postmark"). No fall-through to SMTP or
+  // direct-MX: a message Postmark refuses is a failed send the caller records,
+  // not a message that leaves by another door — that second door is how dead
+  // addresses got re-sent through Gmail and bounced into the owner's inbox
+  // while the settings screen said Postmark.
+  if (from && (await connectionService.credentialFor('postmark'))) {
+    postmarkPendingApproval = false;
+    const ok = await viaPostmark({ to, from, subject, body, html, headers, attachments, stream }).catch(() => false);
+    if (ok) return;
+    // ONE exception to "Postmark only": a new Postmark account cannot send
+    // off-domain until Postmark approves it (ErrorCode 412). That is a state of
+    // the account, not a verdict on the message, and an order receipt must not
+    // be lost to it — so, loudly, the message goes out the old way. The day
+    // approval lands this branch stops firing on its own.
+    if (postmarkPendingApproval) {
+      logger.error({ to: to.replace(/^(.).*@/, '$1***@'), subject }, 'POSTMARK PENDING APPROVAL — sent via fallback transport; request approval in the Postmark dashboard');
+    } else {
+      throw new Error('Postmark did not accept the message');
+    }
+  }
+
   if (from) {
     // Most Nexus senders post JSON and carry no files, so mail WITH an
     // attachment skips them and falls through to SMTP / direct-MX below, which

@@ -145,13 +145,11 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
     // The popup reads this to never show itself to someone already on the list.
     reply.header('Set-Cookie', 'th_sub=1; Path=/; Max-Age=315360000; SameSite=Lax');
 
-    // The heads-up to the merchant stays, but it is now a courtesy, not the
-    // record: a dead transport no longer loses the signup.
-    const n = await settingsService.getNotifications();
-    const transport = await mailTransport();
-    if (r.created && n.adminEmail && n.emailEnabled && transport.ready) {
-      void sendEmailTo(n.adminEmail, 'New newsletter signup', `${input.email}\n\nSource: ${source}.`).catch(() => {});
-    }
+    // No email to the merchant per signup. The subscriber row IS the record and
+    // Flow › Subscribers shows it; a message per signup turned the merchant's
+    // inbox into a log file (and into a target — every unauthenticated post
+    // here became a mail to the owner).
+    void r;
     reply.send({ ok: true });
   });
 
