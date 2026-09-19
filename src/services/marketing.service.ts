@@ -122,6 +122,12 @@ export const marketingService = {
     return { total, subscribed, unsubscribed, pending, sms, lists, last30, bySource: bySource.map((b) => ({ source: b.source, count: b._count._all })) };
   },
 
+  /** Consent state for an address, or null when unknown. Never exposed to the public directly. */
+  async statusOf(email: string): Promise<string | null> {
+    const row = await db.subscriber.findUnique({ where: { email: norm(email) }, select: { status: true } });
+    return row?.status ?? null;
+  },
+
   /**
    * Add or refresh a subscriber. Idempotent: a repeat signup is a no-op that
    * still lands them on the requested lists. An address that UNSUBSCRIBED is
@@ -140,8 +146,15 @@ export const marketingService = {
         data: {
           ...(input.firstName && !existing.firstName ? { firstName: input.firstName } : {}),
           ...(input.lastName && !existing.lastName ? { lastName: input.lastName } : {}),
+          // A signup may ADD a phone, never replace one already on file — the
+          // public form is unauthenticated, and swapping a stranger's number in
+          // is how someone else's phone ends up on the text list. And a STOP
+          // (smsStatus 'unsubscribed') is final until the person themselves
+          // texts START; a web form cannot undo it.
           ...(input.phone && !existing.phone ? { phone: input.phone } : {}),
-          ...(input.phone && input.smsConsent ? { phone: input.phone, smsStatus: 'subscribed' } : {}),
+          ...(input.phone && input.smsConsent && (!existing.phone || existing.phone === input.phone) && existing.smsStatus !== 'unsubscribed'
+            ? { smsStatus: 'subscribed' }
+            : {}),
           ...(input.customerId && !existing.customerId ? { customerId: input.customerId } : {}),
           ...(input.tags?.length ? { tags: Array.from(new Set([...existing.tags, ...input.tags])) } : {}),
           ...(revive ? { status: 'subscribed', subscribedAt: new Date(), unsubscribedAt: null } : {}),
@@ -353,12 +366,24 @@ export interface CampaignPatch {
 }
 
 /** Swap merge tags for one recipient. Safe on plain text and HTML alike. */
-export function personalise(body: string, r: { firstName?: string | null; email: string; unsubscribeUrl: string }): string {
-  const first = (r.firstName ?? '').trim() || 'there';
+const escHtml = (v: string): string => v.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+
+/**
+ * Swap merge tags for one recipient. `firstName` is whatever the person (or
+ * anyone posting to /api/subscribe) typed, so in an HTML body it is escaped —
+ * otherwise a signup named `<a href=…>` puts a live link into a DKIM-signed
+ * store email. Replacer functions, not strings: a `$&` in a name must not
+ * expand. Pass `html: false` for subjects and text parts.
+ */
+export function personalise(body: string, r: { firstName?: string | null; email: string; unsubscribeUrl: string }, opts: { html?: boolean } = {}): string {
+  const isHtml = opts.html ?? /<[a-z!/]/i.test(body);
+  const put = (v: string) => (isHtml ? escHtml(v) : v);
+  const first = put((r.firstName ?? '').trim() || 'there');
+  const email = put(r.email);
   return body
-    .replace(/\{\{\s*first_name\s*\}\}/g, first)
-    .replace(/\{\{\s*email\s*\}\}/g, r.email)
-    .replace(/\{\{\s*unsubscribe_url\s*\}\}/g, r.unsubscribeUrl);
+    .replace(/\{\{\s*first_name\s*\}\}/g, () => first)
+    .replace(/\{\{\s*email\s*\}\}/g, () => email)
+    .replace(/\{\{\s*unsubscribe_url\s*\}\}/g, () => r.unsubscribeUrl);
 }
 
 export const campaignService = {
@@ -451,22 +476,41 @@ export const campaignService = {
       return { ok: true, to, subject: body.slice(0, 60), via: st.via, sid: r.sid };
     }
     const email = to.trim().toLowerCase();
-    if (!isRealEmail(email)) throw new ValidationError('Enter a real email address.', 'to');
+    // One address. Both transports accept comma lists in To, which would turn
+    // "send me a test" into a 50-recipient send on the broadcast stream.
+    if (!isRealEmail(email) || /[,;\s<>]/.test(email)) throw new ValidationError('Enter one real email address.', 'to');
     // Say so when nothing can actually leave the box — a 200 that sent
     // nothing is the exact lie the merchant's rule #1 is about.
     const n = await settingsService.getNotifications();
     const transport = await mailTransport();
     if (!n.emailEnabled) throw new ConflictError('Email sending is switched off in Settings › Notifications.');
     if (!transport.ready) throw new ConflictError('No mail transport is connected (Settings › Notifications / Nexus).');
-    const { html, text } = await this.render(c);
+    const rendered = await this.render(c);
+    const { inlineImages } = await import('./emailInline.js');
+    // The test has to be the same message the list gets, embedded art and all —
+    // a test that proves a different email proves nothing.
+    const { html: inlinedHtml, attachments } = await inlineImages(rendered.html, ORIGIN());
+    const { text } = rendered;
+    const html = inlinedHtml;
     const sub = await db.subscriber.findUnique({ where: { email }, select: { firstName: true } });
     const unsub = buildUnsubscribeUrl(email);
     const r = { firstName: sub?.firstName, email, unsubscribeUrl: unsub };
     const subject = `[TEST] ${personalise(c.subject || c.name, r)}`;
-    await notificationService.sendToAddress(email, subject, personalise(text, r), personalise(html, r), {
-      'List-Unsubscribe': `<${unsub}>`,
-      'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-    });
+    await notificationService.sendToAddress(
+      email,
+      subject,
+      personalise(text, r),
+      personalise(html, r),
+      {
+        'List-Unsubscribe': `<${unsub}>`,
+        'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+        ...(c.replyTo ? { 'Reply-To': c.replyTo } : {}),
+      },
+      attachments.length ? attachments : undefined,
+      // A test must travel the same pipe as the real send, or it proves the
+      // wrong thing: campaigns go out on the broadcast stream.
+      c.channel === 'sms' ? undefined : 'broadcast',
+    );
     return { ok: true, to: email, subject, via: transport.via };
   },
 

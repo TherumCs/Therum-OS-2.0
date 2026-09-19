@@ -3,7 +3,7 @@ import { BACKUP_CRON, BACKUP_QUEUE, backupQueue, CATALOG_SYNC_CRON, CATALOG_SYNC
 import { marketingService } from './services/marketing.service.js';
 import { campaignSendService } from './services/campaignSend.service.js';
 import { automationService } from './services/automation.service.js';
-import { MARKETING_QUEUE, MARKETING_TICK_CRON, marketingQueue } from './lib/queue.js';
+import { AUTOMATION_QUEUE, MARKETING_QUEUE, MARKETING_TICK_CRON, marketingQueue } from './lib/queue.js';
 import { lifecycleService } from './services/lifecycle.service.js';
 import { hookBus } from './lib/hooks.js';
 import { importService } from './services/import.service.js';
@@ -252,12 +252,6 @@ const marketingWorker = new Worker(
       logger.info({ jobId: job.id, campaignId, ...r }, 'campaign send job finished');
       return r;
     }
-    if (job.name === 'fire-automation') {
-      const { sendId } = job.data as { sendId: string };
-      const r = await automationService.deliver(sendId);
-      logger.info({ jobId: job.id, sendId, result: r }, 'automation delivered');
-      return r;
-    }
     if (job.name === 'tick') {
       const due = await campaignSendService.due();
       for (const id of due) {
@@ -272,6 +266,26 @@ const marketingWorker = new Worker(
 );
 marketingWorker.on('failed', (job, err) => logger.error({ jobId: job?.id, err }, 'marketing job failed'));
 marketingWorker.on('error', (err) => logger.error({ err }, 'marketing worker error'));
+
+// Automations run on their own queue and their own worker. A campaign job
+// occupies the marketing worker for as long as its list takes to drain, and a
+// welcome email that waits out a broadcast is a person staring at an empty
+// inbox holding the code they just signed up for.
+const automationWorker = new Worker(
+  AUTOMATION_QUEUE,
+  async (job) => {
+    if (job.name === 'fire-automation') {
+      const { sendId } = job.data as { sendId: string };
+      const r = await automationService.deliver(sendId);
+      logger.info({ jobId: job.id, sendId, result: r }, 'automation delivered');
+      return r;
+    }
+    return null;
+  },
+  { connection, concurrency: 2 },
+);
+automationWorker.on('failed', (job, err) => logger.error({ jobId: job?.id, err }, 'automation job failed'));
+automationWorker.on('error', (err) => logger.error({ err }, 'automation worker error'));
 
 async function ensureMarketingSchedule(attempt = 0): Promise<void> {
   try {
@@ -290,7 +304,7 @@ logger.info('import worker started');
 const shutdown = async (): Promise<void> => {
   // backupWorker was missing here — a SIGTERM mid-backup killed it ungracefully
   // instead of letting the running job finish and close its connection.
-  await Promise.all([worker.close(), milieusWorker.close(), backupWorker.close(), catalogSyncWorker.close(), lifecycleWorker.close(), marketingWorker.close()]);
+  await Promise.all([worker.close(), milieusWorker.close(), backupWorker.close(), catalogSyncWorker.close(), lifecycleWorker.close(), marketingWorker.close(), automationWorker.close()]);
   await disconnectDb();
   process.exit(0);
 };

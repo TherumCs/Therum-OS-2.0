@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireBundle } from '../../middleware/bundle.js';
 import { marketingService, campaignService, parseCsv } from '../../services/marketing.service.js';
 import { ValidationError } from '../../lib/errors.js';
+import { verifyClick } from '../../lib/clickSign.js';
 import { campaignSendService, PIXEL_GIF } from '../../services/campaignSend.service.js';
 import { segmentService, type RuleSet } from '../../services/segment.service.js';
 import { automationService } from '../../services/automation.service.js';
@@ -228,18 +229,38 @@ export async function marketingPublicRoutes(app: FastifyInstance): Promise<void>
 
   app.get('/m/c/:token', async (req, reply) => {
     const { token } = req.params as { token: string };
-    const u = String((req.query as { u?: string }).u ?? '');
-    // Only ever redirect to http(s) — never to javascript:, data:, or a
-    // protocol-relative address a stranger could craft.
-    let target = (process.env.PUBLIC_ORIGIN ?? '/').replace(/\/+$/, '') || '/';
+    const q = req.query as { u?: string; h?: string };
+    const u = String(q.u ?? '');
+    const home = (process.env.PUBLIC_ORIGIN ?? '/').replace(/\/+$/, '') || '/';
+    reply.header('Cache-Control', 'no-store');
+
+    // This used to 302 to any http(s) `u` for any token, real or not — an open
+    // redirect on the store's own domain, dressed in the exact URL shape every
+    // campaign email teaches people to trust. Now: the token must belong to a
+    // real send, AND `u` must either carry the signature `instrument()` minted
+    // for it or point back at the store itself. Anything else goes home.
+    if (!(await campaignSendService.sendExists(token))) return reply.redirect(home, 302);
+
+    let parsed: URL | null = null;
     try {
-      const parsed = new URL(u);
-      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') target = parsed.toString();
+      parsed = new URL(u);
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') parsed = null;
     } catch {
-      /* fall through to the store home */
+      parsed = null;
     }
+    if (!parsed) return reply.redirect(home, 302);
+
+    const target = parsed.toString();
+    const signed = !!q.h && verifyClick(token, u, String(q.h));
+    // Unsigned links exist only in mail sent before signing shipped
+    // (2026-09-19); for those, same-origin targets are still honoured.
+    const sameSite = (() => {
+      try { return new URL(home).host === parsed!.host; } catch { return false; }
+    })();
+    if (!signed && !sameSite) return reply.redirect(home, 302);
+
     void campaignSendService.click(token, target, req.headers['user-agent'], req.ip).catch(() => {});
-    reply.header('Cache-Control', 'no-store').redirect(target, 302);
+    return reply.redirect(target, 302);
   });
 }
 

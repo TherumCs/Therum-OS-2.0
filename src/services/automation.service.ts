@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { db } from '../lib/db.js';
 import { logger } from '../lib/logger.js';
-import { marketingQueue } from '../lib/queue.js';
+import { automationQueue } from '../lib/queue.js';
 import { ConflictError, NotFoundError, ValidationError } from '../lib/errors.js';
 import { settingsService } from './settings.service.js';
 import { sendEmailTo, mailTransport } from './notification.service.js';
@@ -49,14 +49,29 @@ const SEED: { key: AutomationKey; name: string; subject: string; preheader: stri
   {
     key: 'welcome',
     name: 'Welcome + first-order offer',
-    subject: 'Welcome in, {{first_name}} — here is 10% off',
-    preheader: 'Your code is inside.',
-    trigger: { event: 'signup', delayMinutes: 0, coupon: { enabled: true, percent: 10, expiresDays: 14, prefix: 'WELCOME', code: 'WELCOME10' }, repeatAfterDays: 0 },
+    // No merge tag in the subject: most signups come from a popup that never
+    // asks for a name, so {{first_name}} fell back to "there" and the subject
+    // read "Welcome in, there". And the code is the reason this email exists,
+    // so it gets its own panel rather than a mention mid-sentence.
+    subject: 'Welcome to {{site_name}}. Here is your 10% code.',
+    preheader: 'Thanks for signing up. Your code is inside.',
+    trigger: { event: 'signup', delayMinutes: 0, coupon: { enabled: true, percent: 10, expiresDays: 14, prefix: 'WELCOME', code: '' }, repeatAfterDays: 0 },
     blocks: [
-      { id: id(), type: 'eyebrow', text: 'Welcome' },
-      { id: id(), type: 'heading', text: 'You are on the list, {{first_name}}.' },
-      { id: id(), type: 'text', html: 'Drops, restocks, and the occasional thing we only tell email about. To start: <b>{{coupon_code}}</b> takes 10% off your first order.' },
-      { id: id(), type: 'button', label: 'Shop now', url: '/shop' },
+      { id: id(), type: 'eyebrow', text: '{{site_name}}' },
+      { id: id(), type: 'heading', text: 'Welcome to {{site_name}}.' },
+      { id: id(), type: 'text', html: 'Thanks for signing up. You are on the list. Here is your code.' },
+      {
+        id: id(),
+        type: 'html',
+        html:
+          '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="padding:6px 0 0;">' +
+          '<table role="presentation" cellpadding="0" cellspacing="0" border="0"><tr><td align="center" style="border:2px solid #070707;padding:16px 34px;">' +
+          '<div style="font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#8a8a8a;font-weight:700;">Your code</div>' +
+          '<div style="font-size:30px;line-height:1.1;letter-spacing:.06em;font-weight:800;color:#0a0a0a;padding-top:6px;">{{coupon_code}}</div>' +
+          '<div style="font-size:13px;color:#4a4a4a;padding-top:6px;">10% off your first order</div>' +
+          '</td></tr></table></td></tr></table>',
+      },
+      { id: id(), type: 'button', label: 'Shop the store', url: '/shop' },
     ],
   },
   {
@@ -237,7 +252,7 @@ export const automationService = {
       data: { automationId: a.id, subscriberId: input.subscriberId ?? sub?.id ?? null, email, token: token(), channel: a.channel, meta: { vars: input.vars ?? {}, firstName } },
     });
     const delay = Math.max(0, (t.delayMinutes ?? 0) * 60_000);
-    await marketingQueue.add('fire-automation', { sendId: send.id }, { delay, jobId: `auto-${send.id}`, removeOnComplete: true, removeOnFail: 50 }).catch((err) => {
+    await automationQueue.add('fire-automation', { sendId: send.id }, { delay, jobId: `auto-${send.id}`, removeOnComplete: true, removeOnFail: 50 }).catch((err) => {
       logger.warn({ err, sendId: send.id }, 'could not enqueue automation delivery');
     });
     return true;
@@ -310,10 +325,15 @@ export const automationService = {
     const unsub = `${buildUnsubscribeUrl(s.email)}&s=${s.token}`;
     const r = { firstName: meta.firstName, email: s.email, unsubscribeUrl: unsub };
     const subject = fill(personalise(a.subject || a.name, r), vars);
-    const html = instrument(fill(personalise(a.html, r), vars), s.token, origin);
+    // Automations carry their pictures the same way campaigns do — a welcome
+    // email whose logo is a blocked remote image is the first thing a new
+    // subscriber ever sees from the store.
+    const { inlineImages } = await import('./emailInline.js');
+    const art = await inlineImages(fill(personalise(a.html, r), vars), origin);
+    const html = instrument(art.html, s.token, origin);
     const text = fill(personalise(a.text, r), vars);
     try {
-      await sendEmailTo(s.email, subject, text, undefined, html, { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' });
+      await sendEmailTo(s.email, subject, text, art.attachments.length ? art.attachments : undefined, html, { 'List-Unsubscribe': `<${unsub}>`, 'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click' });
       await db.campaignSend.update({ where: { id: sendId }, data: { status: 'sent', sentAt: new Date() } });
       await db.automation.update({ where: { id: a.id }, data: { sentCount: { increment: 1 } } });
       return 'sent';

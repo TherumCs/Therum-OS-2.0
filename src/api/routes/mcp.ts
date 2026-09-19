@@ -16,6 +16,8 @@ interface JsonRpcRequest {
 // whether the called tool is read-only. The registry now contains WRITE
 // tools (create_draft) — per-tool enforcement happens at tools/call: a
 // write-flagged tool requires a 'write'-scoped token or a real session.
+const MCP_WRITE_BUNDLES = new Set(['storefront-manager', 'manage-settings', 'catalog-manager', 'fulfillment-manager', 'write']);
+
 async function requireMcpAuth(req: FastifyRequest & { mcpScope?: string }, reply: FastifyReply): Promise<void> {
   const authHeader = req.headers.authorization;
   const bearer = authHeader?.startsWith('Bearer ') ? authHeader.slice(7) : null;
@@ -25,7 +27,18 @@ async function requireMcpAuth(req: FastifyRequest & { mcpScope?: string }, reply
       reply.status(401).send({ error: { code: 'unauthorized', message: 'Invalid or revoked API token.' } });
       return;
     }
-    req.mcpScope = result.scope;
+    // The token's own scope is a CEILING, not a grant. A custom-role user with
+    // read-only bundles could otherwise mint a 'write' token (token issuance has
+    // no role gate) and get through MCP what the REST API and a session both
+    // refuse them. Resolve the owner's live access exactly as the session
+    // branch below does; when unsure, read.
+    if (result.scope !== 'write') {
+      req.mcpScope = 'read';
+      return;
+    }
+    const { roleService } = await import('../../services/role.service.js');
+    const access = await roleService.resolveAccess(result.userId).catch(() => null);
+    req.mcpScope = access && (access.role === 'admin' || (access.bundles ?? []).some((b) => MCP_WRITE_BUNDLES.has(b))) ? 'write' : 'read';
     return;
   }
   try {
@@ -50,10 +63,9 @@ async function requireMcpAuth(req: FastifyRequest & { mcpScope?: string }, reply
     if (role === 'admin') {
       req.mcpScope = 'write';
     } else {
-      const WRITE_BUNDLES = new Set(['storefront-manager', 'manage-settings', 'catalog-manager', 'fulfillment-manager', 'write']);
       const { roleService } = await import('../../services/role.service.js');
       const access = await roleService.resolveAccess(u!.sub!);
-      req.mcpScope = (access.bundles ?? []).some((b) => WRITE_BUNDLES.has(b)) ? 'write' : 'read';
+      req.mcpScope = (access.bundles ?? []).some((b) => MCP_WRITE_BUNDLES.has(b)) ? 'write' : 'read';
     }
   } catch {
     reply.status(401).send({ error: { code: 'unauthorized', message: 'Authentication required.' } });

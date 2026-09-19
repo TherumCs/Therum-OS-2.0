@@ -51,6 +51,15 @@ export const MARKETING_QUEUE = 'marketing';
 export const MARKETING_TICK_CRON = '* * * * *';
 export const marketingQueue = new Queue(MARKETING_QUEUE, { connection });
 
+// Automations get their OWN queue, and it is not a nicety. A campaign job runs
+// for as long as the list takes to drain — 300 people is a quarter of an hour —
+// and on one queue with one worker, somebody who signs up through the popup in
+// that window waits the whole send for the discount code they were promised
+// "in your inbox". Different lane, so a person's own action is never stuck
+// behind a broadcast.
+export const AUTOMATION_QUEUE = 'marketing-automation';
+export const automationQueue = new Queue(AUTOMATION_QUEUE, { connection });
+
 /** Settings > Backup frequency -> cron. Times are deliberately off-peak. */
 export const BACKUP_CRON: Record<string, string> = {
   hourly: '0 * * * *',
@@ -68,5 +77,5 @@ export const BACKUP_CRON: Record<string, string> = {
 // every test file still closed only importQueue, and again because nothing
 // ever closed the rate limiter's lazy client.
 export async function closeQueues(): Promise<void> {
-  await Promise.all([importQueue.close(), milieusQueue.close(), backupQueue.close(), catalogSyncQueue.close(), lifecycleQueue.close(), marketingQueue.close(), disconnectRedis()]);
+  await Promise.all([importQueue.close(), milieusQueue.close(), backupQueue.close(), catalogSyncQueue.close(), lifecycleQueue.close(), marketingQueue.close(), automationQueue.close(), disconnectRedis()]);
 }

@@ -240,6 +240,10 @@ export async function buildServer() {
     root: UPLOADS_DIR,
     prefix: '/api/uploads/',
     decorateReply: false,
+    // Files only: the plugin serves dotfiles by default and resolves a
+    // directory URL to its index.html; neither belongs on an uploads mount.
+    dotfiles: 'ignore',
+    index: false,
     setHeaders: (reply) => {
       reply.header('Cross-Origin-Resource-Policy', 'cross-origin');
     },

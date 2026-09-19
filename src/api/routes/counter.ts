@@ -28,7 +28,7 @@ import { TooManyRequestsError } from '../../lib/errors.js';
 import * as catalogImport from '../../counter/catalogImport.js';
 import * as catalogFiles from '../../counter/catalogFiles.js';
 import { requireBundle } from '../../middleware/bundle.js';
-import { verifyUnsubscribeToken } from '../../lib/unsubscribe.js';
+import { verifyResubscribeToken, verifyUnsubscribeToken } from '../../lib/unsubscribe.js';
 import { resolveCustomerByEmail } from '../../counter/customerEmail.js';
 import { marketingService } from '../../services/marketing.service.js';
 import { campaignSendService } from '../../services/campaignSend.service.js';
@@ -160,6 +160,20 @@ export async function counterPublicRoutes(app: FastifyInstance): Promise<void> {
     const q = req.query as Record<string, string | undefined>;
     const ok = await applyUnsubscribe(q.e, q.t, q.s);
     reply.type('text/html').send(unsubPage(ok));
+  });
+
+  // The other direction: an opted-out address that filled the signup form again
+  // gets an email with this link, and only the click restores consent (see
+  // contact.ts /subscribe). Signed the same way as unsubscribe, different purpose.
+  app.get('/shop/resubscribe', async (req, reply) => {
+    const q = req.query as Record<string, string | undefined>;
+    const email = String(q.e ?? '').trim().toLowerCase();
+    const ok = !!email && verifyResubscribeToken(email, String(q.t ?? ''));
+    if (ok) await marketingService.subscribe({ email, source: 'reconfirm', resubscribe: true });
+    const msg = ok
+      ? '<h1>You&rsquo;re back on the list</h1><p>Thanks for confirming. You will hear from us again.</p>'
+      : '<h1>Link expired</h1><p>This confirmation link is invalid or has expired. Sign up again on the site to get a fresh one.</p>';
+    reply.type('text/html').send(unsubPage(ok).replace(/<div class="c">[\s\S]*<\/div>/, `<div class="c">${msg}</div>`));
   });
 
   // Shipping options for a cart + destination. Live vendor rates (Printful et al.)

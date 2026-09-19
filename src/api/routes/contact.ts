@@ -4,6 +4,7 @@ import { settingsService } from '../../services/settings.service.js';
 import { mailTransport } from '../../services/notification.service.js';
 import { sendEmailTo, type MailAttachment } from '../../services/notification.service.js';
 import { roleBySlug, CAREERS_INBOX, CV_MAX_BYTES, CV_TYPES } from '../../site/careers.js';
+import { resubscribeUrl } from '../../lib/unsubscribe.js';
 import { checkRateLimit } from '../../lib/rateLimit.js';
 import { TooManyRequestsError, ValidationError } from '../../lib/errors.js';
 import { marketingService } from '../../services/marketing.service.js';
@@ -36,7 +37,8 @@ const ContactInput = z.object({
 
 const SubscribeInput = z.object({
   email: z.string().email().max(320),
-  firstName: z.string().max(80).optional(),
+  // Letters, marks, spaces, hyphens, apostrophes, periods — a name, not markup.
+  firstName: z.string().max(80).regex(/^[\p{L}\p{M} .'’-]*$/u, 'Enter a name.').optional(),
   phone: z.string().max(40).optional(),
   smsConsent: z.boolean().optional(),
   // Which capture surface — only the storefront's own. Anything else is 'footer'.
@@ -118,7 +120,27 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
     // which is what a signup form is for. This used to only email the
     // merchant and keep nothing, so every footer signup was lost.
     const phone = input.phone ? normalisePhone(input.phone) : null;
-    const r = await marketingService.subscribe({ email: input.email, firstName: input.firstName || null, phone, smsConsent: !!phone && !!input.smsConsent, source: input.source ?? 'footer', resubscribe: true });
+    const source = input.source ?? 'footer';
+
+    // Someone who unsubscribed is not revived by a form post — anyone can post
+    // this form with anyone's address. They get ONE email with a signed link,
+    // and the click is what restores consent. Same response either way, so
+    // the form cannot be used to learn who is on the list.
+    const prior = await marketingService.statusOf(input.email);
+    if (prior === 'unsubscribed') {
+      const site = await settingsService.getSite().catch(() => null);
+      const name = site?.siteName || 'us';
+      const link = resubscribeUrl(input.email);
+      void sendEmailTo(
+        input.email,
+        `Confirm you want emails from ${name} again`,
+        `You asked to be removed from ${name}'s emails earlier, and someone just entered this address on the site again.\n\nIf that was you, confirm here:\n${link}\n\nIf it was not, ignore this and nothing changes.`,
+      ).catch(() => {});
+      reply.header('Set-Cookie', 'th_sub=1; Path=/; Max-Age=315360000; SameSite=Lax');
+      return reply.send({ ok: true });
+    }
+
+    const r = await marketingService.subscribe({ email: input.email, firstName: input.firstName || null, phone, smsConsent: !!phone && !!input.smsConsent, source, resubscribe: false });
     if (input.formId) void signupFormService.countSubmit(input.formId);
     // The popup reads this to never show itself to someone already on the list.
     reply.header('Set-Cookie', 'th_sub=1; Path=/; Max-Age=315360000; SameSite=Lax');
@@ -128,7 +150,7 @@ export async function contactRoutes(app: FastifyInstance): Promise<void> {
     const n = await settingsService.getNotifications();
     const transport = await mailTransport();
     if (r.created && n.adminEmail && n.emailEnabled && transport.ready) {
-      void sendEmailTo(n.adminEmail, 'New newsletter signup', `${input.email}\n\nFrom the site footer signup form.`).catch(() => {});
+      void sendEmailTo(n.adminEmail, 'New newsletter signup', `${input.email}\n\nSource: ${source}.`).catch(() => {});
     }
     reply.send({ ok: true });
   });

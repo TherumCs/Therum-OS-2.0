@@ -16,7 +16,10 @@
 export const T = {
   bg: '#fafafa', card: '#ffffff', border: '#e7e7e7', hair: '#efefef',
   ink: '#0a0a0a', body: '#4a4a4a', mute: '#8a8a8a', faint: '#b3b3b3',
-  black: '#070707', red: '#e83b3b', thumb: '#f2f2f2',
+  // `thumb` is the ground BEHIND an image. It is the card's own white on
+  // purpose: product shots are cut out on white, so a grey placeholder showed
+  // as a grey box around the garment.
+  black: '#070707', red: '#e83b3b', thumb: '#ffffff',
   font: "-apple-system,BlinkMacSystemFont,'Segoe UI','Helvetica Neue',Arial,sans-serif",
 };
 // Absolute logo URL for the email header — mail clients render no relative src.

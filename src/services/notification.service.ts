@@ -26,6 +26,15 @@ interface MailMessage {
    *  one-click marketing opt-out, RFC 8058). Each transport maps them into its
    *  own shape; a transport that can't carry them just omits them. */
   headers?: Record<string, string>;
+  /** Files to carry with the message. An attachment with a `cid` is an image
+   *  the HTML points at with src="cid:…" rather than a download. */
+  attachments?: MailAttachment[];
+  /** 'broadcast' for campaign mail, 'transactional' for everything a person
+   *  caused (receipts, password resets, welcome). Providers that separate the
+   *  two — Postmark does — will throttle or suspend an account that sends a
+   *  newsletter down the transactional pipe, because the whole point of the
+   *  split is that a receipt must never be delayed behind a marketing blast. */
+  stream?: 'broadcast' | 'transactional';
 }
 
 // One POST for every HTTP mail transport. A failed send used to collapse to a
@@ -78,17 +87,56 @@ async function viaSendgrid(msg: MailMessage): Promise<boolean> {
   });
 }
 
+// Postmark carries everything this system sends: attachments (including the
+// inline `cid:` images a campaign embeds) and the stream split. The stream
+// names are the ones created with a Postmark server: `outbound` for
+// transactional, `broadcast` for marketing. A store that has only one of the
+// two credentials still works — the same token serves both streams.
 async function viaPostmark(msg: MailMessage): Promise<boolean> {
-  const key = await connectionService.credentialFor('postmark');
+  // A separate broadcast token is optional: use it when one is connected AND
+  // this is marketing mail, otherwise the single Postmark credential.
+  const broadcastKey = msg.stream === 'broadcast' ? await connectionService.credentialFor('postmark-broadcast').catch(() => null) : null;
+  const key = broadcastKey ?? (await connectionService.credentialFor('postmark'));
   if (!key) return false;
+  // Postmark rejects the whole message (422, ErrorCode 300) if a header it owns
+  // appears in `Headers` — Reply-To is a named field there, not a header. The
+  // rejection is easy to miss because the send then falls through to the next
+  // transport and still reports success.
+  const RESERVED = new Set(['reply-to', 'from', 'to', 'cc', 'bcc', 'subject', 'date', 'message-id', 'content-type', 'mime-version']);
+  const entries = Object.entries(msg.headers ?? {});
+  const replyTo = entries.find(([k]) => k.toLowerCase() === 'reply-to')?.[1];
+  const passHeaders = entries.filter(([k]) => !RESERVED.has(k.toLowerCase()));
   return mailPost('postmark', 'https://api.postmarkapp.com/email', {
     method: 'POST',
     headers: { 'X-Postmark-Server-Token': key, 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ From: msg.from, To: msg.to, Subject: msg.subject, TextBody: msg.body, ...(msg.html ? { HtmlBody: msg.html } : {}), ...(msg.headers ? { Headers: Object.entries(msg.headers).map(([Name, Value]) => ({ Name, Value })) } : {}) }),
+    body: JSON.stringify({
+      From: msg.from,
+      To: msg.to,
+      Subject: msg.subject,
+      TextBody: msg.body,
+      MessageStream: msg.stream === 'broadcast' ? 'broadcast' : 'outbound',
+      ...(msg.html ? { HtmlBody: msg.html } : {}),
+      ...(replyTo ? { ReplyTo: replyTo } : {}),
+      ...(passHeaders.length ? { Headers: passHeaders.map(([Name, Value]) => ({ Name, Value })) } : {}),
+      ...(msg.attachments?.length
+        ? {
+            Attachments: msg.attachments.map((a) => ({
+              Name: a.filename,
+              Content: a.content.toString('base64'),
+              ContentType: a.contentType ?? 'application/octet-stream',
+              // Postmark treats a ContentID as "render this inline"; without it
+              // the picture arrives as a paperclip instead of in the layout.
+              ...(a.cid ? { ContentID: `cid:${a.cid}` } : {}),
+            })),
+          }
+        : {}),
+    }),
   });
 }
 
 const NEXUS_SENDERS = [viaGmail, viaResend, viaSendgrid, viaPostmark];
+/** The subset that can carry files — see the note in sendEmailTo. */
+const ATTACHMENT_CAPABLE_SENDERS = [viaPostmark];
 
 /** Which transport would actually be used, for the settings screen to show. */
 export async function mailTransport(): Promise<{ ready: boolean; via: string }> {
@@ -124,7 +172,9 @@ async function sendEmail(subject: string, body: string): Promise<void> {
 // Customer-facing sends (Counter C6: receipts, refund notices) reuse the
 // same per-call transport + timeouts, addressed to the given recipient
 // instead of the admin. Silently a no-op until SMTP is configured.
-export interface MailAttachment { filename: string; content: Buffer; contentType?: string }
+// `cid` + `contentDisposition: 'inline'` make the part an embedded image the
+// HTML can point at with src="cid:…" rather than a file the reader downloads.
+export interface MailAttachment { filename: string; content: Buffer; contentType?: string; cid?: string; contentDisposition?: 'inline' | 'attachment' }
 
 export async function sendEmailTo(
   to: string,
@@ -133,6 +183,7 @@ export async function sendEmailTo(
   attachments?: MailAttachment[],
   html?: string,
   headers?: Record<string, string>,
+  stream?: 'broadcast' | 'transactional',
 ): Promise<void> {
   const n = await settingsService.getNotifications();
   if (!n.emailEnabled) return;
@@ -140,14 +191,15 @@ export async function sendEmailTo(
   // Nexus providers first — see the note at the top of this file.
   const from = n.smtpFrom || n.smtpUser || n.adminEmail || '';
   if (from) {
-    // The Nexus API senders post JSON and carry no files. Mail WITH an
-    // attachment skips them and falls through to SMTP / direct-MX below,
-    // which do — otherwise a CV would vanish and the send would still report
-    // success.
-    if (!attachments?.length) {
-      for (const send of NEXUS_SENDERS) {
-        if (await send({ to, from, subject, body, html, headers }).catch(() => false)) return;
-      }
+    // Most Nexus senders post JSON and carry no files, so mail WITH an
+    // attachment skips them and falls through to SMTP / direct-MX below, which
+    // do — otherwise a CV would vanish and the send would still report success.
+    // Postmark is the exception: it takes attachments, so it is tried for those
+    // too. Without this, a campaign's embedded images would silently demote
+    // every newsletter to SMTP while the settings screen still said Postmark.
+    const senders = attachments?.length ? ATTACHMENT_CAPABLE_SENDERS : NEXUS_SENDERS;
+    for (const send of senders) {
+      if (await send({ to, from, subject, body, html, headers, attachments, stream }).catch(() => false)) return;
     }
   }
 
@@ -239,8 +291,8 @@ async function sendSlack(text: string): Promise<void> {
 export const notificationService = {
   // Direct customer send (Counter C6). Best-effort like everything here —
   // callers fire without awaiting; failures are logged by the caller.
-  async sendToAddress(to: string, subject: string, body: string, html?: string, headers?: Record<string, string>): Promise<void> {
-    await sendEmailTo(to, subject, body, undefined, html, headers);
+  async sendToAddress(to: string, subject: string, body: string, html?: string, headers?: Record<string, string>, attachments?: MailAttachment[], stream?: 'broadcast' | 'transactional'): Promise<void> {
+    await sendEmailTo(to, subject, body, attachments, html, headers, stream);
   },
 
   async notifyLogin(username: string, ip: string | null): Promise<void> {

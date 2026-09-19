@@ -9,6 +9,8 @@ import { unsubscribeUrl as buildUnsubscribeUrl } from '../lib/unsubscribe.js';
 import { marketingService, campaignService, personalise } from './marketing.service.js';
 import { signupFormService } from './signupForm.service.js';
 import { smsService } from './sms.service.js';
+import { inlineImages } from './emailInline.js';
+import { signClick } from '../lib/clickSign.js';
 
 // Campaign delivery + tracking.
 //
@@ -52,7 +54,8 @@ export function instrument(html: string, t: string, origin: string): string {
     // redirect is exactly what mail clients flag, and it must work even if
     // tracking is down.
     if (url.includes('/api/shop/unsubscribe')) return `href="${url}"`;
-    return `href="${origin}/api/m/c/${t}?u=${encodeURIComponent(url)}"`;
+    // Signed, so the redirect route can refuse any `u` this message never held.
+    return `href="${origin}/api/m/c/${t}?u=${encodeURIComponent(url)}&h=${signClick(t, url)}"`;
   });
   const pixel = `<img src="${origin}/api/m/o/${t}.gif" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;">`;
   return withClicks.includes('</body>') ? withClicks.replace('</body>', `${pixel}</body>`) : withClicks + pixel;
@@ -159,6 +162,9 @@ export const campaignSendService = {
     // things the person caused and never count. Checked per row at send time.
     const cap = (await signupFormService.settings()).capPerWeek;
     const weekAgo = new Date(Date.now() - 7 * 24 * 3600 * 1000);
+    // Fetch and re-encode the pictures ONCE, then send the same parts to
+    // everyone — otherwise this is the same download 300 times.
+    const art = c.channel === 'sms' ? { html: c.html, attachments: [] } : await inlineImages(c.html, origin);
     let sent = 0;
     let failed = 0;
     let stopped = false;
@@ -176,8 +182,11 @@ export const campaignSendService = {
 
       for (const s of batch) {
         // Consent is re-checked at the moment of sending, not just when queued.
-        if (s.subscriber && s.subscriber.status !== 'subscribed') {
-          await db.campaignSend.update({ where: { id: s.id }, data: { status: 'skipped', error: 'opted out before send' } });
+        // A subscriber row that was DELETED after the audience froze leaves
+        // `subscriber` null (onDelete: SetNull) with the address still on the
+        // send row. Null is not consent; it is the opposite.
+        if (!s.subscriber || s.subscriber.status !== 'subscribed') {
+          await db.campaignSend.update({ where: { id: s.id }, data: { status: 'skipped', error: s.subscriber ? 'opted out before send' : 'subscriber removed before send' } });
           continue;
         }
         if (c.channel === 'sms' && (!s.subscriber?.phone || s.subscriber.smsStatus !== 'subscribed')) {
@@ -208,22 +217,34 @@ export const campaignSendService = {
           continue;
         }
         const subject = personalise(c.subject, r);
-        const html = instrument(personalise(c.html, r), s.token, origin);
+        const html = instrument(personalise(art.html, r), s.token, origin);
         const text = personalise(c.text, r);
         const headers: Record<string, string> = {
           'List-Unsubscribe': `<${unsub}>`,
           'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
           ...(c.replyTo ? { 'Reply-To': c.replyTo } : {}),
         };
+        // Claim the row BEFORE handing the message to the transport. If this
+        // process dies mid-send the row is left claimed, so a restart can never
+        // post a second copy of the same email to the same person — the cost of
+        // getting that wrong is a duplicate in a stranger's inbox, and the cost
+        // of getting it "wrong" this way is one row to look at in the report.
+        const claimed = await db.campaignSend.updateMany({ where: { id: s.id, status: 'queued' }, data: { status: 'sending' } });
+        if (claimed.count === 0) continue; // somebody else already has it
         try {
           try {
-            await sendEmailTo(s.email, subject, text, undefined, html, headers);
+            await sendEmailTo(s.email, subject, text, art.attachments.length ? art.attachments : undefined, html, headers, 'broadcast');
           } catch (first) {
             // One retry after a pause: the store's transport is Gmail SMTP with a
             // fresh login per message, and a 4xx "try again later" mid-run is a
             // throttle, not a dead address.
+            //
+            // EXCEPT when the failure came at DATA. By then the server has the
+            // whole message and may well have queued it before the connection
+            // broke, so a retry is how one person gets the email twice.
+            if ((first as { command?: string })?.command === 'DATA') throw first;
             await sleep(8_000);
-            await sendEmailTo(s.email, subject, text, undefined, html, headers);
+            await sendEmailTo(s.email, subject, text, art.attachments.length ? art.attachments : undefined, html, headers, 'broadcast');
             logger.info({ campaignId, email: s.email, first: String((first as Error)?.message ?? first).slice(0, 120) }, 'campaign send succeeded on retry');
           }
           await db.campaignSend.update({ where: { id: s.id }, data: { status: 'sent', sentAt: new Date() } });
@@ -260,6 +281,12 @@ export const campaignSendService = {
       if (s.campaignId) await db.campaign.update({ where: { id: s.campaignId }, data: { openCount: { increment: 1 } } });
       if (s.automationId) await db.automation.update({ where: { id: s.automationId }, data: { openCount: { increment: 1 } } });
     }
+  },
+
+  /** Does this tracking token belong to a real send? The redirect route refuses to forward for one that does not. */
+  async sendExists(t: string): Promise<boolean> {
+    if (!t || t.length > 64) return false;
+    return (await db.campaignSend.count({ where: { token: t } })) > 0;
   },
 
   async click(t: string, url: string, ua?: string, ip?: string): Promise<void> {

@@ -66,6 +66,10 @@ export const PAGE_CSP =
   // YouTube (privacy-nocookie) backs the category-page band video sections.
   `frame-src 'self' ${PAY_FRAME} https://www.youtube.com https://www.youtube-nocookie.com; ` +
   "frame-ancestors 'self'; " +
+  // form-action does not inherit from default-src. Without it an injected
+  // <form> could post the page's fields anywhere; with it, only here and to
+  // PayPal's fallback redirect flow, which is a real form post.
+  `form-action 'self' ${PAYPAL[0]}; ` +
   "base-uri 'self'";
 
 /**

@@ -7,6 +7,9 @@ type Ctx = { params: Promise<{ path: string[] }> };
 async function target(req: Request, ctx: Ctx): Promise<string> {
   const { path } = await ctx.params;
   const qs = new URL(req.url).search;
+  // `encodeURIComponent` leaves `.` and `..` alone, and a `..` segment would let
+  // this proxy reach `/api/<anything>` with the admin token. Stay inside.
+  if (path.some((seg) => seg === '' || seg === '.' || seg === '..')) throw new Error('bad path');
   return `/api/marketing/${path.map(encodeURIComponent).join('/')}${qs}`;
 }
 

@@ -64,7 +64,7 @@ module.exports = {
       script: 'dist/worker.js',
       instances: 1,
       exec_mode: 'fork',
-      max_memory_restart: '300M',
+      max_memory_restart: '900M',
       env: apiEnv,
     },
     // The admin (Next.js) runs as its own process; Postgres + Redis are managed

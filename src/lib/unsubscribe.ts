@@ -46,3 +46,27 @@ export function unsubscribeUrl(email: string): string {
   const q = new URLSearchParams({ e: norm(email), t: unsubscribeToken(email) });
   return `${origin}/api/shop/unsubscribe?${q.toString()}`;
 }
+
+// ── Re-subscribe confirmation ─────────────────────────────────────────────
+// An address that OPTED OUT is not put back on the list by a form post — the
+// form is unauthenticated, so that would let anyone re-enrol a stranger who
+// had asked to be left alone. Instead the address receives one email with a
+// signed link, and only that click restores consent. Same key, different
+// purpose string, so an unsubscribe token can never double as a confirm.
+
+export function resubscribeToken(email: string): string {
+  return createHmac('sha256', secret()).update(`resub:${norm(email)}`).digest('base64url').slice(0, 32);
+}
+
+export function verifyResubscribeToken(email: string, token: string): boolean {
+  const expected = Buffer.from(resubscribeToken(email));
+  const given = Buffer.from(String(token ?? ''));
+  return expected.length === given.length && timingSafeEqual(expected, given);
+}
+
+export function resubscribeUrl(email: string): string {
+  const origin = (process.env.PUBLIC_ORIGIN ?? '').replace(/\/+$/, '');
+  const q = new URLSearchParams({ e: norm(email), t: resubscribeToken(email) });
+  return `${origin}/api/shop/resubscribe?${q.toString()}`;
+}
+

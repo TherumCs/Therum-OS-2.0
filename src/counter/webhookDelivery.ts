@@ -162,7 +162,12 @@ async function scopeOrderDelivery<T extends { id: string; credentialId: string |
     const candidates = new Set<string>();
     const byCred = hook.credentialId ? vendorIdByCred.get(hook.credentialId) : undefined;
     if (byCred) candidates.add(byCred);
-    const b = brandToken(hook.name) || hookUrlBrand(hook.deliveryUrl);
+    // The brand-token fallback is for LEGACY hooks only — rows that predate the
+    // credentialId column. A hook that carries a credential is scoped by that
+    // credential and nothing else: its name and delivery URL are partner-typed,
+    // so letting them widen ownership meant any partner key could register a
+    // hook called "PodPluser" and receive PodPluser's customers' addresses.
+    const b = hook.credentialId ? '' : brandToken(hook.name) || hookUrlBrand(hook.deliveryUrl);
     if (b) for (const id of vendorIdsByBrand.get(b) ?? []) candidates.add(id);
     // The vendorIds this hook actually owns on THIS order.
     const owned = new Set<string>([...candidates].filter((id) => ownerVendorIds.has(id)));
