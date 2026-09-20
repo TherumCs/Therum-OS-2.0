@@ -230,7 +230,8 @@ export async function sendEmailTo(
     // Postmark is the exception: it takes attachments, so it is tried for those
     // too. Without this, a campaign's embedded images would silently demote
     // every newsletter to SMTP while the settings screen still said Postmark.
-    const senders = attachments?.length ? ATTACHMENT_CAPABLE_SENDERS : NEXUS_SENDERS;
+    // Postmark already answered above when it is connected; do not ask it twice.
+    const senders = (attachments?.length ? ATTACHMENT_CAPABLE_SENDERS : NEXUS_SENDERS).filter((fn) => !(postmarkPendingApproval && fn === viaPostmark));
     for (const send of senders) {
       if (await send({ to, from, subject, body, html, headers, attachments, stream }).catch(() => false)) return;
     }
