@@ -958,7 +958,7 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
       // — the old feed pulled every active product regardless of visibility.
       where: { deletedAt: null, status: 'active', visibility: 'public' },
       select: {
-        id: true, slug: true, name: true, description: true, image: true, images: true,
+        id: true, slug: true, name: true, description: true, image: true, images: true, meta: true,
         vendor: { select: { name: true } },
         categories: { select: { slug: true, name: true, parent: { select: { name: true } } } },
         // stock fields + per-variant images so availability is REAL (not always
@@ -966,11 +966,18 @@ export async function storefrontRoutes(app: FastifyInstance): Promise<void> {
         variants: { select: { id: true, sku: true, color: true, size: true, price: true, image: true, images: true, stockStatus: true, inventory: true, reserved: true } },
       },
     });
+    // A product sold on another site (meta.externalUrl — its page here 302s
+    // off-domain) cannot be in this catalog: Meta follows each link and rejects
+    // any item whose final URL is not on the verified domain, and a rejected
+    // item is one the merchant cannot tag in a post. Found 2026-09-20 when
+    // Instagram tagging started erroring after the Foot Locker exclusives were
+    // made to redirect.
+    const sellableHere = products.filter((p) => !(p.meta && typeof p.meta === 'object' && !Array.isArray(p.meta) && (p.meta as { externalUrl?: unknown }).externalUrl));
     const esc = (s: string): string => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&apos;');
     const stripTags = (s: string | null): string => (s ?? '').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 4900);
     const dollars = (cents: number): string => (cents / 100).toFixed(2) + ' USD';
     const items: string[] = [];
-    for (const p of products) {
+    for (const p of sellableHere) {
       const desc = stripTags(p.description as string | null) || p.name;
       // The STORE is the brand a shopper sees on Meta — NOT the fulfilment
       // vendor's connection label (that leaked "PodPluser connection" as brand).
