@@ -48,7 +48,9 @@ import { milieuRoutes, publicMilieuRoutes } from './api/routes/milieus.js';
 import { clusterRoutes } from './api/routes/clusters.js';
 import { checkoutRoutes } from './api/routes/checkout.js';
 import { cartRoutes } from './api/routes/cart.js';
+import { hookBus } from './lib/hooks.js';
 import { contactRoutes } from './api/routes/contact.js';
+import { signalRoutes, signalPublicRoutes } from './api/routes/signal.js';
 import { marketingRoutes, campaignRoutes, campaignSendRoutes, marketingPublicRoutes, segmentRoutes, automationRoutes, formRoutes } from './api/routes/marketing.js';
 import { orderTrackingRoutes } from './api/routes/orderTracking.js';
 import { couponRoutes } from './api/routes/coupons.js';
@@ -67,6 +69,14 @@ import { oauthRoutes } from './api/routes/oauth.js';
 import { extensionService } from './services/extension.service.js';
 import { redirectsService } from './services/redirects.service.js';
 import { notFoundMonitorService } from './services/notFoundMonitor.service.js';
+
+// Signal: server-side Purchase to Meta at the paid edge. Returns at once and
+// sends in the background — a slow or failing Meta API must never hold up, or
+// fail, the payment that triggered it.
+hookBus.register('core', 'onOrderPaid', (order) => {
+  const id = (order as { id?: string } | null)?.id;
+  if (id) void import('./services/signal.service.js').then(({ signalService }) => signalService.purchase(id)).catch(() => {});
+});
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -428,6 +438,8 @@ await app.register(shopifyOAuthRoutes);
   await app.register(campaignRoutes, { prefix: '/api' });
   await app.register(campaignSendRoutes, { prefix: '/api' });
   await app.register(marketingPublicRoutes, { prefix: '/api' });
+  await app.register(signalRoutes, { prefix: '/api' });
+  await app.register(signalPublicRoutes, { prefix: '/api' });
   await app.register(segmentRoutes, { prefix: '/api' });
   await app.register(automationRoutes, { prefix: '/api' });
   await app.register(formRoutes, { prefix: '/api' });

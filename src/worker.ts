@@ -75,6 +75,14 @@ void ensureSweepSchedule();
 // member here — without it the event fires into the void.
 hookBus.register('core', 'onMembershipExpiringSoon', (payload) => lifecycleService.onMembershipExpiringSoon(payload as Parameters<typeof lifecycleService.onMembershipExpiringSoon>[0]));
 
+// Signal: server-side Purchase to Meta at the paid edge. Returns at once and
+// sends in the background — a slow or failing Meta API must never hold up, or
+// fail, the payment that triggered it.
+hookBus.register('core', 'onOrderPaid', (order) => {
+  const id = (order as { id?: string } | null)?.id;
+  if (id) void import('./services/signal.service.js').then(({ signalService }) => signalService.purchase(id)).catch(() => {});
+});
+
 // Daily lifecycle sweeps: post-delivery review requests + abandoned-cart nudges.
 const lifecycleWorker = new Worker(
   LIFECYCLE_QUEUE,

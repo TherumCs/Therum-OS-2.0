@@ -49,9 +49,15 @@ const ZIP_LOOKUP = 'https://api.zippopotam.us';
 const PAY_CONNECT = [STRIPE[1], SQUARE[2], SQUARE[3], PAYPAL[0], ZIP_LOOKUP].join(' ');
 const PAY_FRAME = [STRIPE[0], STRIPE[2], SQUARE[0], SQUARE[1], PAYPAL[0]].join(' ');
 
+// Meta Pixel (Signal): the script loads from connect.facebook.net and reports
+// to www.facebook.com. Two named hosts, and the runtime does not load either
+// until the store has saved a pixel ID.
+const META_SCRIPT = 'https://connect.facebook.net';
+const META_CONNECT = 'https://www.facebook.com https://connect.facebook.net';
+
 export const PAGE_CSP =
   "default-src 'self'; " +
-  `script-src 'self' 'unsafe-inline' ${PAY_SCRIPT}; ` +
+  `script-src 'self' 'unsafe-inline' ${PAY_SCRIPT} ${META_SCRIPT}; ` +
   // Google Fonts serves the stylesheet from googleapis and the font files
   // from gstatic. The reference site's theme asks for Manrope; without these
   // the family resolves to a fallback and every page renders in the wrong
@@ -61,7 +67,7 @@ export const PAGE_CSP =
   'img-src \'self\' data: https:; ' +
   // Hosted product video and posters.
   "media-src 'self' https:; " +
-  `connect-src 'self' ${PAY_CONNECT}; ` +
+  `connect-src 'self' ${PAY_CONNECT} ${META_CONNECT}; ` +
   // Apple Pay and Google Pay present their sheets from the gateway's frame;
   // YouTube (privacy-nocookie) backs the category-page band video sections.
   `frame-src 'self' ${PAY_FRAME} https://www.youtube.com https://www.youtube-nocookie.com; ` +

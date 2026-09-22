@@ -3,6 +3,7 @@ import { CONTACT_CSS, CONTACT_RUNTIME } from './contactForm.js';
 import { COUNTDOWN_RUNTIME } from './countdownRuntime.js';
 import { SUBSCRIBE_SCRIPT } from './shortcodes.js';
 import { POPUP_RUNTIME, POPUP_STYLES } from './popupRuntime.js';
+import { SIGNAL_RUNTIME } from './signalRuntime.js';
 import { MOBILE_MENU_CSS, MOBILE_MENU_RUNTIME } from './mobileMenu.js';
 import { HEADER_CART_CSS, headerCartRuntime, HEADER_CART_DEFAULTS, type HeaderCartConfig } from './headerCart.js';
 // Base Theme — the default public frontend shell. Deliberately minimal
@@ -360,7 +361,7 @@ ${main}
 ${footer}
 </div>
 ${p.dock ? `${p.dock.markup}\n<script>${p.dock.script}</script>` : ''}
-<script>${BANNER_RUNTIME}${SUBSCRIBE_SCRIPT}${CONTACT_RUNTIME}${COUNTDOWN_RUNTIME}${POPUP_RUNTIME}</script>
+<script>${BANNER_RUNTIME}${SUBSCRIBE_SCRIPT}${CONTACT_RUNTIME}${COUNTDOWN_RUNTIME}${POPUP_RUNTIME}${SIGNAL_RUNTIME}</script>
 ${hasChrome ? `<script>${headerCartRuntime(p.headerIcons ?? HEADER_CART_DEFAULTS)}</script><script>${MOBILE_MENU_RUNTIME}</script>` : ''}
 </body>
 </html>`;

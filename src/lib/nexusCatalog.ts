@@ -125,6 +125,7 @@ export const nexusCatalog: CatalogProvider[] = [
   { id: 'onesignal', name: 'OneSignal', category: 'messaging', authType: 'apikey', issuedBy: 'provider', join: '|', fields: [{ label: 'App ID' }, { label: 'REST API Key', secret: true }] },
   { id: 'telegram', name: 'Telegram', category: 'messaging', authType: 'apikey', issuedBy: 'provider', credentialHint: 'Bot token from BotFather, e.g. 123456:AAH...', fields: [{ label: 'Bot Token', secret: true, pattern: '^[0-9]+:', example: '123456789:AAH…' }] },
   { id: 'mapbox', name: 'Mapbox', category: 'messaging', authType: 'apikey', issuedBy: 'provider', credentialHint: 'Access token, starts with pk. or sk.', fields: [{ label: 'Access Token', secret: true, pattern: '^(pk\\.|sk\\.)', example: 'pk.eyJ1…' }] },
+  { id: 'meta-capi', name: 'Meta Conversions API', category: 'apps', authType: 'apikey', issuedBy: 'provider', credentialHint: 'Events Manager › your pixel › Settings › Conversions API › Generate access token', fields: [{ label: 'Access Token', secret: true }] },
   { id: 'postmark', name: 'Postmark', category: 'messaging', authType: 'apikey', issuedBy: 'provider', credentialHint: 'Server API token (not the account token)', fields: [{ label: 'Server API Token', secret: true }] },
   // Flodesk authenticates with HTTP BASIC, the key as the username and an
   // EMPTY password — not a bearer token, which is the assumption that makes a

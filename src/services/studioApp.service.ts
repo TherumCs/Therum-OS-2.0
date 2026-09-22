@@ -50,6 +50,13 @@ const CATALOG: StudioApp[] = [
     navHref: '/bricks',
   },
   {
+    id: 'signal',
+    name: 'Signal',
+    description: 'Meta Pixel + Conversions API — tells Meta who buys, from the browser and from every paid order, so ads find more of them.',
+    navLabel: 'Signal',
+    navHref: '/signal',
+  },
+  {
     id: 'case-studies',
     name: 'Case Studies',
     description: 'Portfolio functionality — publish case studies of your work with the same canvas, SEO, and publishing flow as pages.',

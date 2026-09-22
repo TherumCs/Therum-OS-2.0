@@ -1976,6 +1976,14 @@ if(_co)_co.addEventListener('click',async function(e){if(!sel)return;var b=e.cur
           <p class="page-sub" style="margin-bottom:0">Order <strong>${esc(order.number)}</strong>${order.guestEmail ? ` · receipt to ${esc(order.guestEmail)}` : ''}</p>
           ${paid ? '' : '<p class="pill" style="margin-top:10px">Awaiting payment confirmation</p>'}
         </div>
+        ${
+          // Signal: the browser copy of Purchase reads this. Only for a PAID
+          // order — an unconfirmed one must not be reported as a sale. The
+          // server sends the same event (same id) from the paid edge.
+          paid
+            ? `<div hidden data-signal-order="${esc(order.number)}" data-signal-value="${(order.total / 100).toFixed(2)}" data-signal-currency="${esc((order.currency || 'USD').toUpperCase())}" data-signal-items="${esc(JSON.stringify(order.items.map((i) => ({ id: i.variantId, quantity: i.quantity, item_price: i.priceAtTime / 100 }))))}"></div>`
+            : ''
+        }
         <div class="panel">
           <div class="totals">
             ${rows}

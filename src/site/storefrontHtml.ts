@@ -2,6 +2,7 @@ import { esc, money } from './html.js';
 import { BANNER_RUNTIME, BANNER_STYLES } from './bannerRuntime.js';
 import { SUBSCRIBE_SCRIPT } from './shortcodes.js';
 import { POPUP_RUNTIME, POPUP_STYLES } from './popupRuntime.js';
+import { SIGNAL_RUNTIME } from './signalRuntime.js';
 import { PRODUCT_GRID_FALLBACK_CSS } from './productGrid.js';
 import { CHECKOUT_FLOW_CSS } from './checkoutFlow.js';
 import { SHOP_TOOLBAR_CSS } from './shopToolbar.js';
@@ -739,7 +740,7 @@ ${body}
 </div></main>
 ${footer}
 </div>
-<script>(function(){try{if(document.cookie.indexOf('th_src=')<0){var q=new URLSearchParams(location.search),src=q.get('utm_source')||q.get('ref')||'';if(!src&&document.referrer){try{var h=new URL(document.referrer).hostname;if(h&&h!==location.hostname)src=h;}catch(e){}}if(src){var camp=q.get('utm_campaign');if(camp)src+=' / '+camp;document.cookie='th_src='+encodeURIComponent(src.slice(0,120))+'; path=/; max-age=2592000; samesite=lax';}}}catch(e){}})();${RUNTIME}${BANNER_RUNTIME}${WISHLIST_RUNTIME}${SUBSCRIBE_SCRIPT}${POPUP_RUNTIME}${extraScript}</script>
+<script>(function(){try{if(document.cookie.indexOf('th_src=')<0){var q=new URLSearchParams(location.search),src=q.get('utm_source')||q.get('ref')||'';if(!src&&document.referrer){try{var h=new URL(document.referrer).hostname;if(h&&h!==location.hostname)src=h;}catch(e){}}if(src){var camp=q.get('utm_campaign');if(camp)src+=' / '+camp;document.cookie='th_src='+encodeURIComponent(src.slice(0,120))+'; path=/; max-age=2592000; samesite=lax';}}}catch(e){}})();${RUNTIME}${BANNER_RUNTIME}${WISHLIST_RUNTIME}${SUBSCRIBE_SCRIPT}${POPUP_RUNTIME}${SIGNAL_RUNTIME}${extraScript}</script>
 ${headerIcons ? `<script>${headerCartRuntime(headerIcons)}</script><script>${MOBILE_MENU_RUNTIME}</script>` : ''}
 </body>
 </html>`;

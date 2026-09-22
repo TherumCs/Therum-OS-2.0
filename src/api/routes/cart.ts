@@ -1,3 +1,4 @@
+import { db } from '../../lib/db.js';
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import { ShipAddressInput } from '../../schemas/order.schema.js';
@@ -146,6 +147,20 @@ export async function cartRoutes(app: FastifyInstance): Promise<void> {
     // SESSION, never from input.email — see cartService.checkout. Optional:
     // guest checkout stays exactly as it was.
     const customer = await resolveCustomer(req);
-    reply.status(201).send(await cartService.checkout(input.cartToken, input.email, customer?.id, input.shipAddress));
+    const order = await cartService.checkout(input.cartToken, input.email, customer?.id, input.shipAddress);
+    // Signal: the browser identifiers Meta matches a server Purchase on (_fbp,
+    // _fbc, IP, user agent) only exist on THIS request; the payment settles
+    // later, somewhere else. Keep them on the order for the paid edge.
+    try {
+      const { signalService } = await import('../../services/signal.service.js');
+      const ctx = signalService.contextFrom(req);
+      const id = (order as { id?: string }).id;
+      if (id && (ctx.fbp || ctx.fbc || ctx.ip)) {
+        const cur = await db.order.findUnique({ where: { id }, select: { meta: true } });
+        const meta = (cur?.meta && typeof cur.meta === 'object' && !Array.isArray(cur.meta) ? cur.meta : {}) as Record<string, unknown>;
+        await db.order.update({ where: { id }, data: { meta: { ...meta, signal: ctx } as object } });
+      }
+    } catch { /* attribution is best-effort; the order stands regardless */ }
+    reply.status(201).send(order);
   });
 }
