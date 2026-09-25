@@ -1,5 +1,38 @@
 # Changelog
 
+## [Unreleased] — since beta.10 (2026-09-18 → 2026-09-22)
+
+### Mail delivery
+- Postmark is the transport when its credential is connected; a refused message is a failed send the caller records, not one that leaves via SMTP. One exception: Postmark's pending-approval refusal (ErrorCode 412) falls back with an error-level log until the account is approved.
+- Postmark sender carries attachments (inline `cid:` images) and the transactional/broadcast stream split; `Reply-To` is mapped to Postmark's named field instead of a header it rejects with 422.
+- Invalid/inactive-recipient verdicts (Postmark 300/406) are final and never fall back.
+- Campaign images travel inside the message as `cid:` parts (`emailInline.ts`), fetched once per campaign, resized through sharp with cache off and concurrency 1. Automations use the same path.
+- Automations run on their own queue and worker so a welcome email never waits behind a broadcast.
+- Campaign rows are claimed before the transport call and never retried after a DATA-stage failure, so one person cannot receive a campaign twice.
+- Worker memory ceiling raised to 900M (image work pushed it past 300M and PM2 killed a live send).
+- `/api/subscribe` no longer emails the merchant per signup; the subscriber row is the record.
+- Email image ground is white (a grey placeholder showed as a box behind product cut-outs); welcome automation seed simplified, subject no longer carries a merge tag.
+
+### Security (re-audit 2026-09-19)
+- Click redirect `/api/m/c/:token` requires a real send token and a signed target (`clickSign.ts`); same-origin targets still honoured for links sent before signing existed.
+- Partner webhook ownership: the brand-label fallback applies only to hooks with no credential; credentialed hooks are scoped by credential alone.
+- `emailInline` refuses redirects, checks the origin after the fetch, allows upload paths only, and streams with a hard byte cap.
+- Campaign run skips send rows whose subscriber was deleted after scheduling.
+- Public signup: an opted-out address gets a signed confirmation link (`/api/shop/resubscribe`) instead of being revived by the form; a signup may add a phone but never replace one; an SMS STOP is final; `firstName` is restricted to name characters and HTML-escaped in `personalise()`.
+- MCP: an API token's scope is a ceiling — live role/bundles decide write.
+- Test-send accepts exactly one address; admin marketing proxy rejects dot segments; uploads static ignores dotfiles and directory indexes; page CSP gains `form-action`.
+
+### Catalog / Meta
+- Meta product feed excludes products sold on another site (`meta.externalUrl`); Meta rejected those items and rejected items cannot be tagged.
+
+### Signal (new Studio app)
+- Meta Pixel in both page shells: PageView, ViewContent (product id = feed `item_group_id`), AddToCart from every successful cart POST, InitiateCheckout, Purchase on the order-received page for paid orders only. Loads nothing until a pixel ID is saved.
+- Conversions API Purchase from the `onOrderPaid` hook, fire-and-forget, identifiers SHA-256 hashed, browser identifiers captured at checkout onto `order.meta.signal`, shared event id with the browser event so Meta deduplicates. Success = `events_received >= 1`.
+- Admin `/signal` with status, pixel ID, test event code, send-test, recent server events. Token is the Nexus credential `meta-capi`. CSP gains `connect.facebook.net` and `www.facebook.com`.
+
+### Deploy notes
+- Nginx real-ip unwrap for Cloudflare and a Cloudflare-only firewall are instance concerns; reference configs live in the instance's site pack, not here.
+
 ## [2.0.0-beta.10] — Flow, and the month of fixes since go-live (2026-09-16)
 
 Everything between go-live and today, in one cut. The headline is **Flow**, the
